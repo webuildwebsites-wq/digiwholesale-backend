@@ -22,6 +22,7 @@ import productRouter from './src/routes/Product/product.routes.js';
 import repairRouter from './src/routes/repair.routes.js';
 import vendorRouter from './src/routes/vendor.routes.js';
 import vendorOrderRouter from './src/routes/vendorOrder.routes.js';
+import jobCardRoutes from './src/routes/jobCard.routes.js';
 
 dotenv.config();
 
@@ -126,6 +127,10 @@ try {
 
   // vendor order & return route
   app.use("/api/vendor-order", vendorOrderRouter);
+
+
+  // JC route
+  app.use("/api/jc", jobCardRoutes);
 
 } catch (error) {
   console.error("Error occurred:", error);
