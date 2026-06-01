@@ -28,6 +28,7 @@ import analyticsRouter from './src/routes/analytics.routes.js';
 dotenv.config();
 
 const app = express();
+
 const allowedOrigins = [
   "https://visualeye.digibysr.in",
   "https://www.visualeye.digibysr.in",
@@ -41,7 +42,8 @@ const allowedOrigins = [
   "http://139.59.65.108",
   "http://139.59.65.108:3005",
   "https://digioptics-wholesale.netlify.app",
-  "https://digiopticswholesaledibysr.netlify.app"
+  "https://digiopticswholesaledibysr.netlify.app",
+  "https://digiwholesale-frontend.digibysr.in"
 ];
 
 
@@ -81,7 +83,7 @@ app.set('trust proxy', 1);
 try {
   app.get("/", (req, res) => {
     res.json({
-      message: "DigiOptics Manufacture Server is running on port " + (process.env.PORT || 8080),
+      message: "DigiOptics Wholesale Server is running on port " + (process.env.PORT || 8080),
       error: false,
       success: true,
     })
