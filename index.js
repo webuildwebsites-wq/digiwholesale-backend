@@ -23,6 +23,7 @@ import repairRouter from './src/routes/repair.routes.js';
 import vendorRouter from './src/routes/vendor.routes.js';
 import vendorOrderRouter from './src/routes/vendorOrder.routes.js';
 import jobCardRoutes from './src/routes/jobCard.routes.js';
+import analyticsRouter from './src/routes/analytics.routes.js';
 
 dotenv.config();
 
@@ -131,6 +132,9 @@ try {
 
   // JC route
   app.use("/api/jc", jobCardRoutes);
+
+  // ANALYTICS / DASHBOARD
+  app.use("/api/analytics", analyticsRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);
