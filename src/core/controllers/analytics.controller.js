@@ -9,15 +9,7 @@ function handleError(res, err) {
   return sendErrorResponse(res, 500, "INTERNAL_ERROR", err?.message || "Unexpected error");
 }
 
-/**
- * GET /api/analytics/dashboard
- * Returns dashboard analytics:
- *  - activeUsers, pendingOrders, completedOrders
- *  - dailyOrders, weeklyOrders, monthlyOrders
- *  - totalStaff
- *  - orderStatusBreakdown
- *  - recentOrders (last 5)
- */
+
 export const getDashboardAnalytics = async (req, res) => {
   try {
     const data = await getDashboardAnalyticsService();
