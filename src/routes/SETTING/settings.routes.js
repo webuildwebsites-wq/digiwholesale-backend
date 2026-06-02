@@ -3,12 +3,11 @@ import {
   updateSettings,
   getSettingsByStore,
 } from "../../core/controllers/SETTING/settingsController.js";
-import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware";
+import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
 
 const settingRouter = express.Router();
-settingRouter(ProtectUser)
 
-settingRouter.use(isLoggedIn);
+settingRouter.use(ProtectUser);
 
 settingRouter.get("/", getSettingsByStore);
 

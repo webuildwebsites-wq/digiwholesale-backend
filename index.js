@@ -25,6 +25,7 @@ import vendorOrderRouter from './src/routes/vendorOrder.routes.js';
 import jobCardRoutes from './src/routes/jobCard.routes.js';
 import analyticsRouter from './src/routes/analytics.routes.js';
 import Salesrouter  from './src/routes/SALES/sales.routes.js'
+import settingRouter from "./src/routes/SETTING/settings.routes.js"
 
 dotenv.config();
 
@@ -140,7 +141,7 @@ try {
   app.use("/api/sale", Salesrouter);
 
   // SETTINGS
-  app.use("/api/settings", settingsRoutes);
+  app.use("/api/settings", settingRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);

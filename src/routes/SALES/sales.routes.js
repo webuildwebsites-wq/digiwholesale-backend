@@ -1,6 +1,6 @@
 import express from "express";
-import { createSale, getAllSales, getSaleById, updateSale, deleteSale, filterSales } from "../../core/controllers/SALES/sales.controller";
-import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware";
+import { createSale, getAllSales, getSaleById, updateSale, deleteSale, filterSales } from "../../core/controllers/SALES/sales.controller.js";
+import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
 
 const Salesrouter = express.Router();
 

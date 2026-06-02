@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import Sale from "../../../models/SALES/Sale.model"
+import Sale from "../../../models/SALES/Sale.model.js"
 
 export const createSale = async (req, res) => {
   try {
