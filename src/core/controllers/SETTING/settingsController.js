@@ -1,48 +1,38 @@
 import Settings from "../../../models/SETTING/Settings.js";
+import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 
 export const getSettingsByStore = async (req, res) => {
-    try {
-        console.log("HERE to get settings data");
+  try {
+    const settings = await Settings.findOne({});
 
-        const settings = await Settings.findOne({});
-
-        res.status(200).json({
-            success: true,
-            data: settings,
-        });
-    } catch (error) {
-        console.error("Get Settings Data Error:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to fetch settings data",
-        });
+    if (!settings) {
+      return sendErrorResponse(res, 404, "NOT_FOUND", "Settings data not found");
     }
+
+    return sendSuccessResponse(res, 200, { settings });
+
+  } catch (error) {
+    console.error("Get Settings Data Error:", error);
+    return sendErrorResponse(res, 500, "GET_SETTINGS_ERROR", "Failed to fetch settings data");
+  }
 };
 
 export const updateSettings = async (req, res) => {
-    try {
-        const settings = await Settings.findOneAndUpdate(
-            {}, 
-            req.body,
-            {
-                new: true,
-                upsert: true,
-                runValidators: true,
-            }
-        );
+  try {
+    const settings = await Settings.findOneAndUpdate(
+      {},
+      { $set: req.body },
+      { new: true, runValidators: true }
+    );
 
-        res.status(200).json({
-            success: true,
-            message: "Settings updated successfully",
-            data: settings,
-        });
-    } catch (error) {
-        console.error("Update Settings Data Error:", error);
-
-        res.status(500).json({
-            success: false,
-            message: "Failed to update settings data",
-        });
+    if (!settings) {
+      return sendErrorResponse(res, 404, "NOT_FOUND", "Settings not found");
     }
+
+    return sendSuccessResponse(res, 200, { settings }, "Settings updated successfully");
+
+  } catch (error) {
+    console.error("Update Settings Data Error:", error);
+    return sendErrorResponse(res, 500, "UPDATE_SETTINGS_ERROR", "Failed to update settings data");
+  }
 };

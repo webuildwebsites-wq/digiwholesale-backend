@@ -1,79 +1,46 @@
 import mongoose from "mongoose";
-import Sale from "../../../models/SALES/Sale.model.js"
+import Sale from "../../../models/SALES/Sale.model.js";
+import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
+
 
 export const createSale = async (req, res) => {
   try {
-    const { item, amount, qty, discount, subtotal, gst, gstAmt, gstType, totalAmount, paymentMode, } = req.body;
-    const sale = await Sale.create({ item, amount, qty, discount, subtotal, gst, gstAmt, gstType, totalAmount, paymentMode, createdBy: req.user._id, createdByName: req.user.name, });
+    const { storeId, storeNumber } = req.user;
+    const { item, amount, qty, discount, subtotal, gst, gstAmt, gstType, totalAmount, paymentMode } = req.body;
 
-    res.status(201).json({
-      success: true,
-      sale,
+    const sale = await Sale.create({
+      storeId,
+      storeNumber,
+      item,
+      amount,
+      qty,
+      discount,
+      subtotal,
+      gst,
+      gstAmt,
+      gstType,
+      totalAmount,
+      paymentMode,
+      createdBy: req.user._id,
+      createdByName: req.user.name,
     });
+
+    return sendSuccessResponse(res, 201, { sale }, "Sale created successfully");
 
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-export const updateSale = async (req, res) => {
-  try {
-    const sale = await Sale.findOne({
-      _id: req.params.id,
-    });
-
-    if (!sale) {
-      return res.status(404).json({
-        success: false,
-        message: "Sale not found",
-      });
-    }
-
-    const fields = [
-      "items",
-      "amount",
-      "qty",
-      "discount",
-      "subtotal",
-      "gst",
-      "gstAmt",
-      "gstType",
-      "totalAmount",
-      "paymentMode",
-    ];
-
-    fields.forEach((field) => {
-      if (req.body[field] !== undefined) {
-        sale[field] = req.body[field];
-      }
-    });
-
-    await sale.save();
-
-    res.status(200).json({
-      success: true,
-      sale,
-    });
-
-  } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return sendErrorResponse(res, 400, "CREATE_SALE_ERROR", error.message);
   }
 };
 
 export const getAllSales = async (req, res) => {
   try {
+    const { storeId } = req.user;
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const filter = {  };
+    const filter = { storeId };
 
     const sales = await Sale.find(filter)
       .sort({ createdAt: -1 })
@@ -82,8 +49,7 @@ export const getAllSales = async (req, res) => {
 
     const totalSales = await Sale.countDocuments(filter);
 
-    res.status(200).json({
-      success: true,
+    return sendSuccessResponse(res, 200, {
       page,
       limit,
       total: totalSales,
@@ -93,10 +59,7 @@ export const getAllSales = async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendErrorResponse(res, 500, "GET_SALES_ERROR", error.message);
   }
 };
 
@@ -104,25 +67,45 @@ export const getSaleById = async (req, res) => {
   try {
     const sale = await Sale.findOne({
       _id: req.params.id,
-    })
+      storeId: req.user.storeId,
+    });
 
     if (!sale) {
-      return res.status(404).json({
-        success: false,
-        message: "Sale not found",
-      });
+      return sendErrorResponse(res, 404, "NOT_FOUND", "Sale not found");
     }
 
-    res.status(200).json({
-      success: true,
-      sale,
-    });
+    return sendSuccessResponse(res, 200, { sale });
 
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message,
+    return sendErrorResponse(res, 400, "GET_SALE_ERROR", error.message);
+  }
+};
+
+export const updateSale = async (req, res) => {
+  try {
+    const sale = await Sale.findOne({
+      _id: req.params.id,
+      storeId: req.user.storeId,
     });
+
+    if (!sale) {
+      return sendErrorResponse(res, 404, "NOT_FOUND", "Sale not found");
+    }
+
+    const fields = ["item", "amount", "qty", "discount", "subtotal", "gst", "gstAmt", "gstType", "totalAmount", "paymentMode"];
+
+    fields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        sale[field] = req.body[field];
+      }
+    });
+
+    await sale.save();
+
+    return sendSuccessResponse(res, 200, { sale }, "Sale updated successfully");
+
+  } catch (error) {
+    return sendErrorResponse(res, 400, "UPDATE_SALE_ERROR", error.message);
   }
 };
 
@@ -130,40 +113,32 @@ export const deleteSale = async (req, res) => {
   try {
     const sale = await Sale.findOneAndDelete({
       _id: req.params.id,
+      storeId: req.user.storeId,
     });
 
     if (!sale) {
-      return res.status(404).json({
-        success: false,
-        message: "Sale not found",
-      });
+      return sendErrorResponse(res, 404, "NOT_FOUND", "Sale not found");
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Sale deleted successfully",
-    });
+    return sendSuccessResponse(res, 200, null, "Sale deleted successfully");
 
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return sendErrorResponse(res, 400, "DELETE_SALE_ERROR", error.message);
   }
 };
 
 export const filterSales = async (req, res) => {
   try {
+    const { storeId } = req.user;
     const { startDate, endDate, keyword } = req.body;
 
     if (!startDate && !keyword) {
-      return res.status(400).json({
-        success: false,
-        message: "Date range or keyword is required",
-      });
+      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Date range or keyword is required");
     }
 
-    let query = {    };
+    let query = {
+      storeId: new mongoose.Types.ObjectId(storeId),
+    };
 
     if (startDate && endDate) {
       const start = new Date(startDate);
@@ -178,32 +153,22 @@ export const filterSales = async (req, res) => {
 
     if (keyword) {
       const regex = new RegExp(keyword, "i");
-
-      query.$or = [
-        { item: regex },
-      ];
+      query.$or = [{ item: regex }];
     }
 
     const salesData = await Sale.find(query).sort({ createdAt: -1 });
 
     if (!salesData.length) {
-      return res.status(200).json({
-        success: false,
-        message: "No data exist with this date/keyword filter",
-      });
+      return sendErrorResponse(res, 200, "NO_DATA", "No data exist with this date/keyword filter");
     }
 
-    return res.status(200).json({
-      success: true,
+    return sendSuccessResponse(res, 200, {
       total: salesData.length,
       sales: salesData,
     });
 
   } catch (error) {
     console.error("Filter Sales Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendErrorResponse(res, 500, "FILTER_SALES_ERROR", error.message);
   }
 };
