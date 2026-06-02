@@ -3,14 +3,6 @@ import mongoose from "mongoose";
 
 const settingsSchema = new mongoose.Schema(
     {
-        storeNumber: {
-            type: String,
-            required: true,
-        },
-        storeName: {
-            type: String,
-            required: true,
-        },
         allCategories: [String],
         gst: [String],
         paymentFor: [String],
