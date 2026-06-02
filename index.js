@@ -24,6 +24,7 @@ import vendorRouter from './src/routes/vendor.routes.js';
 import vendorOrderRouter from './src/routes/vendorOrder.routes.js';
 import jobCardRoutes from './src/routes/jobCard.routes.js';
 import analyticsRouter from './src/routes/analytics.routes.js';
+import Salesrouter  from './src/routes/SALES/sales.routes.js'
 
 dotenv.config();
 
@@ -120,10 +121,8 @@ try {
   // PRODUCTS MODULE
   app.use('/api/digi/product', productRouter);
 
-
   // Repair route
   app.use("/api/repair", repairRouter);
-
 
   // vendor route
   app.use("/api/vendor", vendorRouter);
@@ -131,12 +130,17 @@ try {
   // vendor order & return route
   app.use("/api/vendor-order", vendorOrderRouter);
 
-
   // JC route
   app.use("/api/jc", jobCardRoutes);
 
   // ANALYTICS / DASHBOARD
   app.use("/api/analytics", analyticsRouter);
+
+  // SALES
+  app.use("/api/sale", Salesrouter);
+
+  // SETTINGS
+  app.use("/api/settings", settingsRoutes);
 
 } catch (error) {
   console.error("Error occurred:", error);
