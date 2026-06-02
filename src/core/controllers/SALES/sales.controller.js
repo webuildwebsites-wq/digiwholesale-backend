@@ -3,9 +3,8 @@ import Sale from "../../../models/SALES/Sale.model.js"
 
 export const createSale = async (req, res) => {
   try {
-    const { storeId, storeNumber } = req.user;
     const { item, amount, qty, discount, subtotal, gst, gstAmt, gstType, totalAmount, paymentMode, } = req.body;
-    const sale = await Sale.create({ storeId, storeNumber, item, amount, qty, discount, subtotal, gst, gstAmt, gstType, totalAmount, paymentMode, createdBy: req.user._id, createdByName: req.user.name, });
+    const sale = await Sale.create({ item, amount, qty, discount, subtotal, gst, gstAmt, gstType, totalAmount, paymentMode, createdBy: req.user._id, createdByName: req.user.name, });
 
     res.status(201).json({
       success: true,
@@ -24,7 +23,6 @@ export const updateSale = async (req, res) => {
   try {
     const sale = await Sale.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!sale) {
@@ -70,13 +68,12 @@ export const updateSale = async (req, res) => {
 
 export const getAllSales = async (req, res) => {
   try {
-    const { storeId } = req.user;
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const filter = { storeId };
+    const filter = {  };
 
     const sales = await Sale.find(filter)
       .sort({ createdAt: -1 })
@@ -107,7 +104,6 @@ export const getSaleById = async (req, res) => {
   try {
     const sale = await Sale.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     })
 
     if (!sale) {
@@ -134,7 +130,6 @@ export const deleteSale = async (req, res) => {
   try {
     const sale = await Sale.findOneAndDelete({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!sale) {
@@ -159,7 +154,6 @@ export const deleteSale = async (req, res) => {
 
 export const filterSales = async (req, res) => {
   try {
-    const { storeId } = req.user;
     const { startDate, endDate, keyword } = req.body;
 
     if (!startDate && !keyword) {
@@ -169,9 +163,7 @@ export const filterSales = async (req, res) => {
       });
     }
 
-    let query = {
-      storeId: new mongoose.Types.ObjectId(storeId),
-    };
+    let query = {    };
 
     if (startDate && endDate) {
       const start = new Date(startDate);
