@@ -8,8 +8,6 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/
 ===================================================== */
 export const createExchange = async (req, res) => {
   try {
-    const { storeId, storeNumber } = req.user;
-
     const {
       name, phone, email,
       dateOfPurchase, itemType, condition, reasonForExchange,
@@ -51,8 +49,6 @@ export const createExchange = async (req, res) => {
     }
 
     const exchange = await Exchange.create({
-      storeId,
-      storeNumber,
       name: name.trim().toUpperCase(),
       phone: phone.trim(),
       email: email?.trim(),
@@ -85,7 +81,6 @@ export const selectNewProduct = async (req, res) => {
   try {
     const exchange = await Exchange.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -125,13 +120,11 @@ export const selectNewProduct = async (req, res) => {
 ===================================================== */
 export const getAllExchanges = async (req, res) => {
   try {
-    const { storeId } = req.user;
-
     const page  = parseInt(req.query.page)  || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip  = (page - 1) * limit;
 
-    const filter = { storeId };
+    const filter = {  };
     if (req.query.status) filter.status = req.query.status;
 
     const [exchanges, total] = await Promise.all([
@@ -160,7 +153,6 @@ export const getExchangeById = async (req, res) => {
   try {
     const exchange = await Exchange.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -191,7 +183,6 @@ export const updateExchangeStatus = async (req, res) => {
 
     const exchange = await Exchange.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -216,7 +207,6 @@ export const updateExchange = async (req, res) => {
   try {
     const exchange = await Exchange.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -258,7 +248,6 @@ export const deleteExchange = async (req, res) => {
   try {
     const exchange = await Exchange.findOneAndDelete({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -277,7 +266,6 @@ export const deleteExchange = async (req, res) => {
 ===================================================== */
 export const filterExchanges = async (req, res) => {
   try {
-    const { storeId } = req.user;
     const { startDate, endDate, keyword, status } = req.body;
 
     if (!startDate && !keyword && !status) {
@@ -287,7 +275,7 @@ export const filterExchanges = async (req, res) => {
       );
     }
 
-    let query = { storeId: new mongoose.Types.ObjectId(storeId) };
+    let query = {  };
 
     if (startDate && endDate) {
       const start = new Date(startDate);

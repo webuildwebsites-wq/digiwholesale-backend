@@ -47,14 +47,6 @@ const newProductSchema = new mongoose.Schema(
 ───────────────────────────────────────── */
 const exchangeSchema = new mongoose.Schema(
   {
-    storeId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Store",
-      required: true,
-      index: true,
-    },
-    storeNumber: { type: String, required: true },
-
     /* ---------- Basic Info ---------- */
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },

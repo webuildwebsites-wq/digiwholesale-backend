@@ -8,8 +8,6 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/
 ===================================================== */
 export const createReturnRefund = async (req, res) => {
   try {
-    const { storeId, storeNumber } = req.user;
-
     const {
       name, phone, email,
       dateOfPurchase, itemType, condition, reasonForReturn,
@@ -56,8 +54,6 @@ export const createReturnRefund = async (req, res) => {
     }
 
     const returnRefund = await ReturnRefund.create({
-      storeId,
-      storeNumber,
       name: name.trim().toUpperCase(),
       phone: phone.trim(),
       email: email?.trim(),
@@ -89,14 +85,13 @@ export const createReturnRefund = async (req, res) => {
 ===================================================== */
 export const getAllReturnRefunds = async (req, res) => {
   try {
-    const { storeId } = req.user;
 
     const page  = parseInt(req.query.page)  || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip  = (page - 1) * limit;
 
     // Optional status filter  ?status=Pending
-    const filter = { storeId };
+    const filter = {  };
     if (req.query.status) filter.status = req.query.status;
 
     const [returnRefunds, total] = await Promise.all([
@@ -125,7 +120,6 @@ export const getReturnRefundById = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!returnRefund) {
@@ -153,7 +147,6 @@ export const updateReturnRefundStatus = async (req, res) => {
 
     const returnRefund = await ReturnRefund.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!returnRefund) {
@@ -178,7 +171,6 @@ export const updateReturnRefund = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!returnRefund) {
@@ -215,7 +207,6 @@ export const deleteReturnRefund = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOneAndDelete({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!returnRefund) {
@@ -234,14 +225,13 @@ export const deleteReturnRefund = async (req, res) => {
 ===================================================== */
 export const filterReturnRefunds = async (req, res) => {
   try {
-    const { storeId } = req.user;
     const { startDate, endDate, keyword, status } = req.body;
 
     if (!startDate && !keyword && !status) {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Date range, keyword, or status is required");
     }
 
-    let query = { storeId: new mongoose.Types.ObjectId(storeId) };
+    let query = {  };
 
     if (startDate && endDate) {
       const start = new Date(startDate);

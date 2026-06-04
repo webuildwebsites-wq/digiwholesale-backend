@@ -5,12 +5,9 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/
 
 export const createSale = async (req, res) => {
   try {
-    const { storeId, storeNumber } = req.user;
     const { item, amount, qty, discount, subtotal, gst, gstAmt, gstType, totalAmount, paymentMode } = req.body;
 
     const sale = await Sale.create({
-      storeId,
-      storeNumber,
       item,
       amount,
       qty,
@@ -34,13 +31,11 @@ export const createSale = async (req, res) => {
 
 export const getAllSales = async (req, res) => {
   try {
-    const { storeId } = req.user;
-
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const filter = { storeId };
+    const filter = {  };
 
     const sales = await Sale.find(filter)
       .sort({ createdAt: -1 })
@@ -67,7 +62,6 @@ export const getSaleById = async (req, res) => {
   try {
     const sale = await Sale.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!sale) {
@@ -85,7 +79,6 @@ export const updateSale = async (req, res) => {
   try {
     const sale = await Sale.findOne({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!sale) {
@@ -113,7 +106,6 @@ export const deleteSale = async (req, res) => {
   try {
     const sale = await Sale.findOneAndDelete({
       _id: req.params.id,
-      storeId: req.user.storeId,
     });
 
     if (!sale) {
@@ -129,7 +121,6 @@ export const deleteSale = async (req, res) => {
 
 export const filterSales = async (req, res) => {
   try {
-    const { storeId } = req.user;
     const { startDate, endDate, keyword } = req.body;
 
     if (!startDate && !keyword) {
@@ -137,7 +128,6 @@ export const filterSales = async (req, res) => {
     }
 
     let query = {
-      storeId: new mongoose.Types.ObjectId(storeId),
     };
 
     if (startDate && endDate) {
