@@ -25,6 +25,8 @@ import vendorOrderRouter from './src/routes/vendorOrder.routes.js';
 import jobCardRoutes from './src/routes/jobCard.routes.js';
 import analyticsRouter from './src/routes/analytics.routes.js';
 import Salesrouter  from './src/routes/SALES/sales.routes.js'
+import returnRefundRouter from './src/routes/SALES/returnRefund.routes.js'
+import exchangeRouter from './src/routes/SALES/exchange.routes.js'
 import settingRouter from "./src/routes/SETTING/settings.routes.js"
 
 dotenv.config();
@@ -139,6 +141,12 @@ try {
 
   // SALES
   app.use("/api/sale", Salesrouter);
+
+  // RETURN & REFUND
+  app.use("/api/return-refund", returnRefundRouter);
+
+  // EXCHANGE
+  app.use("/api/exchange", exchangeRouter);
 
   // SETTINGS
   app.use("/api/settings", settingRouter);
