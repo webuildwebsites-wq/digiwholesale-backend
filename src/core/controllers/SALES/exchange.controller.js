@@ -1,18 +1,20 @@
 import mongoose from "mongoose";
 import Exchange from "../../../models/SALES/Exchange.model.js";
+import DigiProduct from "../../../models/Product/Product.model.js";
 import { uploadReturnRefundFile } from "../../../Utils/uploads/returnRefund.upload.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 
 /* =====================================================
-   CREATE EXCHANGE REQUEST
+   CREATE EXCHANGE REQUEST  (Step 1)
 ===================================================== */
 export const createExchange = async (req, res) => {
   try {
+    const { storeId, storeNumber } = req.user;
+
     const {
       name, phone, email,
       dateOfPurchase, itemType, condition, reasonForExchange,
       items,
-      newProduct,
       priceDifference, priceDifferenceMode,
       remark,
     } = req.body;
@@ -32,13 +34,6 @@ export const createExchange = async (req, res) => {
       throw new Error("At least one item is required");
     }
 
-    // ── Parse newProduct (optional at creation, can be added later) ──
-    let parsedNewProduct = null;
-    if (newProduct) {
-      parsedNewProduct =
-        typeof newProduct === "string" ? JSON.parse(newProduct) : newProduct;
-    }
-
     // ── Upload photos ─────────────────────────────
     let photos = [];
     if (req.files && req.files.photos && req.files.photos.length > 0) {
@@ -49,6 +44,8 @@ export const createExchange = async (req, res) => {
     }
 
     const exchange = await Exchange.create({
+      storeId,
+      storeNumber,
       name: name.trim().toUpperCase(),
       phone: phone.trim(),
       email: email?.trim(),
@@ -57,7 +54,7 @@ export const createExchange = async (req, res) => {
       condition,
       reasonForExchange,
       items: parsedItems,
-      newProduct: parsedNewProduct,
+      newProduct: null,         // filled in Step 2
       priceDifference: Number(priceDifference) || 0,
       priceDifferenceMode: priceDifferenceMode || "NIL",
       photos,
@@ -75,12 +72,25 @@ export const createExchange = async (req, res) => {
 };
 
 /* =====================================================
-   SELECT / ATTACH NEW PRODUCT  (after "Select Product")
+   SELECT NEW PRODUCT  (Step 2 — "Select Product" button)
+
+   Staff searches product via GET /api/digi/product/suggestion?q=...
+   Frontend sends back the chosen DigiProduct's _id here.
+
+   Body: {
+     productId: "DigiProduct _id",
+     remarks: "optional note",
+     priceDifferenceMode: "CASH" | "CARD" | "UPI" | "NIL"
+   }
+
+   priceDifference is AUTO-CALCULATED:
+     newProduct.price  −  sum(items amount×qty − discount)
 ===================================================== */
 export const selectNewProduct = async (req, res) => {
   try {
     const exchange = await Exchange.findOne({
       _id: req.params.id,
+      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -94,16 +104,43 @@ export const selectNewProduct = async (req, res) => {
       );
     }
 
-    const { orderId, brand, category, productName, coating, treatment, index, price, remarks } = req.body;
+    const { productId, remarks, priceDifferenceMode } = req.body;
 
-    exchange.newProduct = { orderId, brand, category, productName, coating, treatment, index, price, remarks };
+    if (!productId) {
+      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "productId is required");
+    }
 
-    // Auto-calculate price difference
-    const returnedTotal = exchange.items.reduce((sum, i) => sum + i.amount * i.qty - (i.discount || 0), 0);
-    exchange.priceDifference = (price || 0) - returnedTotal;
+    // ── Fetch product from DigiProduct collection ─
+    const product = await DigiProduct.findById(productId);
+    if (!product) {
+      return sendErrorResponse(res, 404, "NOT_FOUND", "Product not found in inventory");
+    }
 
-    if (req.body.priceDifferenceMode) {
-      exchange.priceDifferenceMode = req.body.priceDifferenceMode;
+    // ── Snapshot product details onto exchange ────
+    exchange.newProduct = {
+      productId:   product._id,
+      productCode: product.productCode,
+      productName: product.productName,
+      category:    product.category,
+      brand:       product.brand,
+      coating:     product.coating,
+      index:       product.index,
+      price:       product.price,
+      mrp:         product.mrp,
+      remarks:     remarks || "",
+    };
+
+    // ── Auto-calculate price difference ───────────
+    // returnedTotal = (amount × qty) − discount  per item
+    const returnedTotal = exchange.items.reduce(
+      (sum, i) => sum + i.amount * i.qty - (i.discount || 0),
+      0
+    );
+    // positive → customer pays extra | negative → store refunds
+    exchange.priceDifference = product.price - returnedTotal;
+
+    if (priceDifferenceMode) {
+      exchange.priceDifferenceMode = priceDifferenceMode;
     }
 
     await exchange.save();
@@ -120,11 +157,13 @@ export const selectNewProduct = async (req, res) => {
 ===================================================== */
 export const getAllExchanges = async (req, res) => {
   try {
+    const { storeId } = req.user;
+
     const page  = parseInt(req.query.page)  || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip  = (page - 1) * limit;
 
-    const filter = {  };
+    const filter = { storeId };
     if (req.query.status) filter.status = req.query.status;
 
     const [exchanges, total] = await Promise.all([
@@ -153,6 +192,7 @@ export const getExchangeById = async (req, res) => {
   try {
     const exchange = await Exchange.findOne({
       _id: req.params.id,
+      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -183,6 +223,7 @@ export const updateExchangeStatus = async (req, res) => {
 
     const exchange = await Exchange.findOne({
       _id: req.params.id,
+      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -201,12 +242,13 @@ export const updateExchangeStatus = async (req, res) => {
 };
 
 /* =====================================================
-   UPDATE EXCHANGE REQUEST (full edit — before approval)
+   UPDATE EXCHANGE REQUEST (full edit — Pending only)
 ===================================================== */
 export const updateExchange = async (req, res) => {
   try {
     const exchange = await Exchange.findOne({
       _id: req.params.id,
+      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -223,9 +265,7 @@ export const updateExchange = async (req, res) => {
     const editableFields = [
       "name", "phone", "email",
       "dateOfPurchase", "itemType", "condition", "reasonForExchange",
-      "items", "newProduct",
-      "priceDifference", "priceDifferenceMode",
-      "remark",
+      "items", "priceDifference", "priceDifferenceMode", "remark",
     ];
 
     editableFields.forEach((field) => {
@@ -248,6 +288,7 @@ export const deleteExchange = async (req, res) => {
   try {
     const exchange = await Exchange.findOneAndDelete({
       _id: req.params.id,
+      storeId: req.user.storeId,
     });
 
     if (!exchange) {
@@ -266,6 +307,7 @@ export const deleteExchange = async (req, res) => {
 ===================================================== */
 export const filterExchanges = async (req, res) => {
   try {
+    const { storeId } = req.user;
     const { startDate, endDate, keyword, status } = req.body;
 
     if (!startDate && !keyword && !status) {
@@ -275,7 +317,7 @@ export const filterExchanges = async (req, res) => {
       );
     }
 
-    let query = {  };
+    let query = { storeId: new mongoose.Types.ObjectId(storeId) };
 
     if (startDate && endDate) {
       const start = new Date(startDate);
@@ -294,7 +336,8 @@ export const filterExchanges = async (req, res) => {
         { itemType: regex },
         { reasonForExchange: regex },
         { "items.item": regex },
-        { "newProduct.productName.name": regex },
+        { "newProduct.productName": regex },
+        { "newProduct.brand": regex },
       ];
     }
 

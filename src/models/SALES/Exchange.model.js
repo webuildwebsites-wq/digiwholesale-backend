@@ -21,22 +21,23 @@ const exchangeItemSchema = new mongoose.Schema(
 
 /* ─────────────────────────────────────────
    Sub-schema: new product selected by customer
-   (mirrors relevant fields from Order model)
+   (linked to DigiProduct)
 ───────────────────────────────────────── */
 const newProductSchema = new mongoose.Schema(
   {
-    orderId: {
+    productId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Order",
+      ref: "DigiProduct",
       default: null,
     },
-    brand: { id: mongoose.Schema.Types.ObjectId, name: String },
-    category: { id: mongoose.Schema.Types.ObjectId, name: String },
-    productName: { id: mongoose.Schema.Types.ObjectId, name: String },
-    coating: { id: mongoose.Schema.Types.ObjectId, name: String },
-    treatment: { id: mongoose.Schema.Types.ObjectId, name: String },
-    index: Number,
+    productCode: String,
+    productName: String,
+    category: String,
+    brand: String,
+    coating: String,
+    index: String,
     price: { type: Number, default: 0 },
+    mrp: { type: Number, default: 0 },
     remarks: String,
   },
   { _id: false }
