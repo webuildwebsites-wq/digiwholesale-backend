@@ -10,7 +10,11 @@ const returnItemSchema = new mongoose.Schema(
     amount: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
     gst: { type: Number, default: 0, enum: [0, 5, 12, 18, 24] },
-    gstType: { type: String, default: "excluded", enum: ["included", "excluded"] },
+    gstType: {
+      type: String,
+      default: "EXCLUDED",
+      enum: ["INCLUDED", "EXCLUDED"],
+    },
   },
   { _id: false }
 );

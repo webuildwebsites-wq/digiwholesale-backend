@@ -12,8 +12,8 @@ const exchangeItemSchema = new mongoose.Schema(
     gst: { type: Number, default: 0, enum: [0, 5, 12, 18, 24] },
     gstType: {
       type: String,
-      default: "excluded",
-      enum: ["included", "excluded"],
+      default: "EXCLUDED",
+      enum: ["INCLUDED", "EXCLUDED"],
     },
   },
   { _id: false }

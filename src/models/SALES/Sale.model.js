@@ -46,8 +46,8 @@ const saleSchema = new mongoose.Schema(
 
         gstType: {
             type: String,
-            default: "included",
-            enum: ["included", "excluded"],
+            default: "INCLUDED",
+            enum: ["INCLUDED", "EXCLUDED"],
         },
 
         totalAmount: {
