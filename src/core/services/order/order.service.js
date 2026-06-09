@@ -5,21 +5,28 @@ import FrameType from "../../../models/order/FrameType.js";
 import ProductTreatment from "../../../models/order/ProductTreatment.js";
 import ProductType from "../../../models/order/ProductType.js";
 import DigiProduct from "../../../models/Product/Product.model.js";
+import BulkOrder from "../../../models/order/BulkOrder.js";
 
 
 export async function generateOrderNumber() {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const prefix = "ORD-" + dateStr + "-";
+  const prefix = "BO-" + dateStr + "-";
 
-  const last = await Order.findOne(
-    { orderNumber: { $regex: "^" + prefix } },
-    { orderNumber: 1 },
-    { sort: { orderNumber: -1 } }
+  const last = await BulkOrder.findOne(
+    { "orders.orderNumber": { $regex: "^" + prefix } },
+    { "orders.orderNumber": 1 },
+    { sort: { createdAt: -1 } }
   ).lean();
 
-  const seq = last?.orderNumber
-    ? parseInt(last.orderNumber.split("-").pop(), 10) + 1
-    : 1;
+  let seq = 1;
+  if (last?.orders?.length) {
+    const nums = last.orders
+      .map((o) => o.orderNumber)
+      .filter((n) => n?.startsWith(prefix))
+      .map((n) => parseInt(n.split("-").pop(), 10))
+      .filter((n) => !isNaN(n));
+    if (nums.length) seq = Math.max(...nums) + 1;
+  }
 
   return prefix + String(seq).padStart(4, "0");
 }
@@ -101,126 +108,6 @@ function sanitizeFitting(fitting) {
   return fitting;
 }
 
-
-export async function createOrderService(data, userId) {
-  const isDraft = data.status === "Draft";
-  const { productMode, powerType, powers = [] } = data;
-
-  data.fitting = sanitizeFitting(data.fitting);
-
-  const [brandResolved, categoryResolved, productNameResolved, coatingResolved, treatmentResolved, tintResolved] = await Promise.all([
-    data.brand       ? resolveDiigProductField("brand",    data.brand,     "Brand")     : null,
-    data.category    ? resolveDiigProductField("category", data.category,  "Category")  : null,
-    data.coating     ? resolveDiigProductField("coating",  data.coating,   "Coating")   : null,
-    data.productName ? resolveProductNameField(data.productName) : null,
-    data.treatment   ? resolveDropdownField(ProductTreatment, data.treatment, "Treatment") : null,
-    data.tint        ? resolveDropdownField(Tint,             data.tint,      "Tint")      : null,
-  ]);
-
-  const missing = [];
-  if (!data.customer?.customerId)    missing.push("customer.customerId");
-  if (!data.customer?.customerShipToId) missing.push("customer.customerShipToId");
-  if (missing.length) {
-    throw { statusCode: 400, code: "MISSING_FIELDS", message: `Missing required fields: ${missing.join(", ")}` };
-  }
-
-  if (!isDraft) {
-    const submitMissing = [];
-    if (!brandResolved)     submitMissing.push("brand");
-    if (!categoryResolved)  submitMissing.push("category");
-    if (!productNameResolved) submitMissing.push("productName");
-    if (!productMode)       submitMissing.push("productMode");
-    if (!powerType)         submitMissing.push("powerType");
-    if (!powers.length)     submitMissing.push("powers (at least one eye required)");
-    if (!coatingResolved)   submitMissing.push("coating");
-    if (data.index == null) submitMissing.push("index");
-    if (!tintResolved)      submitMissing.push("tint");
-    if (!treatmentResolved) submitMissing.push("treatment");
-
-    if (submitMissing.length) {
-      throw { statusCode: 400, code: "MISSING_FIELDS", message: `Missing required fields for submission: ${submitMissing.join(", ")}` };
-    }
-
-    if (!["Stock Lens", "Rx"].includes(productMode)) {
-      throw { statusCode: 400, code: "INVALID_VALUE", message: `productMode must be "Stock Lens" or "Rx"` };
-    }
-    if (!["Single", "Both"].includes(powerType)) {
-      throw { statusCode: 400, code: "INVALID_VALUE", message: `powerType must be "Single" or "Both"` };
-    }
-    for (const p of powers) {
-      if (!["R", "L"].includes(p.side)) {
-        throw { statusCode: 400, code: "INVALID_VALUE", message: `powers[].side must be "R" or "L"` };
-      }
-      if (p.sph == null) {
-        throw { statusCode: 400, code: "MISSING_FIELDS", message: `powers[].sph is required for side "${p.side}"` };
-      }
-    }
-    if (powerType === "Both") {
-      const sides = powers.map((p) => p.side);
-      if (!sides.includes("R") || !sides.includes("L")) {
-        throw { statusCode: 400, code: "MISSING_FIELDS", message: `powerType is "Both" but powers must include both "R" and "L" sides` };
-      }
-    }
-  }
-
-  const customer = await Customer.findById(data.customer.customerId).lean();
-  if (!customer) throw { statusCode: 404, code: "NOT_FOUND", message: "Customer not found" };
-  if (!customer.status?.isActive) throw { statusCode: 403, code: "CUSTOMER_INACTIVE", message: "Customer account is not active" };
-
-  let customerShipToBranchName = null;
-  if (data.customer.customerShipToId) {
-    const shipTo = (customer.customerShipToDetails || []).find(
-      (s) => s._id.toString() === data.customer.customerShipToId.toString()
-    );
-    if (!shipTo) throw { statusCode: 404, code: "NOT_FOUND", message: "Ship-to address not found for this customer" };
-    customerShipToBranchName = shipTo.branchName;
-  }
-
-  const orderNumber = await generateOrderNumber();
-
-  const order = await Order.create({
-    orderNumber,
-    customer: {
-      customerId:               customer._id,
-      customerName:             customer.shopName,
-      customerShipToId:         data.customer.customerShipToId ?? null,
-      customerShipToBranchName: customerShipToBranchName,
-    },
-    orderReference:   data.orderReference,
-    consumerCardName: data.consumerCardName,
-    opticianName:     data.opticianName,
-    powerType:        data.powerType,
-    productMode:      data.productMode,
-    hasPrism:         data.hasPrism ?? false,
-    powers:           data.powers ?? [],
-    prisms:           data.prisms ?? [],
-    brand:            brandResolved,
-    category:         categoryResolved,
-    index:            data.index,
-    productName:      productNameResolved,
-    coating:          coatingResolved,
-    treatment:        treatmentResolved,
-    tint:             tintResolved,
-    tintDetails:      data.tintDetails,
-    remarks:          data.remarks,
-    mirror:           data.mirror ?? false,
-    centration:       data.centration ?? [],
-    fitting:          data.fitting,
-    lensData:         data.lensData,
-    directCustomer:   data.directCustomer,
-    price:            productNameResolved?.price ?? 0,
-    shippingCharges:  data.shippingCharges ?? 0,
-    otherCharges:     data.otherCharges ?? 0,
-    totalOrderPrice:  (productNameResolved?.price ?? 0) + (data.shippingCharges ?? 0) + (data.otherCharges ?? 0),
-    status:           isDraft ? "Draft" : "Submitted",
-    submittedAt:      isDraft ? null : new Date(),
-    createdBy:        userId,
-  });
-
-  return order;
-}
-
-
 export async function getOrderService(orderId) {
   const order = await Order.findById(orderId)
     .populate("customer.customerId", "shopName ownerName customerCode mobileNo1 businessEmail customerBalance creditLimit creditUsed zone")
@@ -239,24 +126,24 @@ export async function deleteOrderService(orderId) {
   await Order.findByIdAndDelete(orderId);
 }
 
-export async function listOrdersService({ customerId, status = "Submitted", page = 1, limit = 20, search, fromDate, toDate }) {
-  const VALID_STATUSES = ["Draft", "Submitted", "Processing", "Completed", "Cancelled"];
+export async function listOrdersService({ customerId, status, page = 1, limit = 20, search, fromDate, toDate }) {
+  const VALID_STATUSES = ["PENDING", "CONFIRMED", "PROCESSING", "COMPLETED", "CANCELLED"];
   const filter = {};
 
   if (customerId) filter["customer.customerId"] = customerId;
 
   if (status) {
-    if (!VALID_STATUSES.includes(status)) {
+    if (!VALID_STATUSES.includes(status.toUpperCase())) {
       throw { statusCode: 400, code: "INVALID_VALUE", message: `Invalid status. Allowed: ${VALID_STATUSES.join(", ")}` };
     }
-    filter.status = status;
+    filter["orders"] = { $elemMatch: { status: status.toUpperCase() } };
   }
 
   if (search) {
     filter.$or = [
-      { orderNumber:    { $regex: search, $options: "i" } },
-      { opticianName:   { $regex: search, $options: "i" } },
-      { orderReference: { $regex: search, $options: "i" } },
+      { "customer.customerName":          { $regex: search, $options: "i" } },
+      { "orders.orderNumber":             { $regex: search, $options: "i" } },
+      { "orders.items.itemName":          { $regex: search, $options: "i" } },
     ];
   }
 
@@ -271,8 +158,8 @@ export async function listOrdersService({ customerId, status = "Submitted", page
   }
 
   const skip  = (parseInt(page) - 1) * parseInt(limit);
-  const total = await Order.countDocuments(filter);
-  const orders = await Order.find(filter)
+  const total = await BulkOrder.countDocuments(filter);
+  const orders = await BulkOrder.find(filter)
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(parseInt(limit))
@@ -290,22 +177,29 @@ export async function listOrdersService({ customerId, status = "Submitted", page
 }
 
 export async function cancelOrderService(orderId, reason) {
-  const order = await Order.findById(orderId);
-  if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
-  if (order.status === "Draft") {
-    throw { statusCode: 400, code: "INVALID_STATUS", message: "Cannot cancel a Draft order. Only submitted orders can be cancelled." };
+  const bulkOrder = await BulkOrder.findById(orderId);
+  if (!bulkOrder) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
+
+  const cancellable = ["PENDING", "CONFIRMED"];
+  let anyChanged = false;
+
+  bulkOrder.orders.forEach((order) => {
+    if (cancellable.includes(order.status)) {
+      order.status = "CANCELLED";
+      anyChanged = true;
+    }
+  });
+
+  if (!anyChanged) {
+    throw { statusCode: 400, code: "INVALID_STATUS", message: "No orders in a cancellable state (PENDING or CONFIRMED)" };
   }
-  if (!["Submitted"].includes(order.status)) {
-    throw { statusCode: 400, code: "INVALID_STATUS", message: "Cannot cancel an order with status: " + order.status };
-  }
-  order.status = "Cancelled";
-  order.cancelReason = reason || "";
-  await order.save();
-  return order;
+
+  await bulkOrder.save();
+  return bulkOrder;
 }
 
 export async function updateDraftOrderService(orderId, data) {
-  const order = await Order.findById(orderId);
+  const order = await BulkOrder.findById(orderId);
   if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
   if (order.status !== "Draft" && order.status !== "Submitted") {
     throw { statusCode: 400, code: "INVALID_STATUS", message: "Only Draft or Submitted orders can be updated." };

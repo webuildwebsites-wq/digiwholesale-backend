@@ -1,0 +1,355 @@
+import mongoose from "mongoose";
+import Customer from "../../../../models/Auth/Customer.js";
+import BulkOrder from "../../../../models/order/BulkOrder.js";
+import DigiProduct from "../../../../models/Product/Product.model.js";
+import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
+
+const VALID_CATEGORIES = [
+  "FRAME",
+  "SUNGLASS",
+  "LENS",
+  "CONTACT_LENS",
+];
+
+const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
+const LENS_CATEGORIES = ["LENS", "CONTACT_LENS"];
+
+const generateOrderNumber = () => `BO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+const validateItemByCategory = (item, product) => {
+  const category = (item.category || product.category || "").toUpperCase();
+  if (!VALID_CATEGORIES.includes(category)) {
+    return `Invalid category "${category}"`;
+  }
+
+  if (FRAME_SUNGLASS_CATEGORIES.includes(category)) {
+    const requiredFields = [
+      "code",
+      "brand",
+      "color",
+      "size",
+      "type",
+      "shape",
+      "dimensions",
+    ];
+
+    for (const field of requiredFields) {
+      if (!item[field] && !product[field]) {
+        return `${field} is required for ${category}`;
+      }
+    }
+  }
+
+  if (LENS_CATEGORIES.includes(category)) {
+    if (item.sph === undefined && item.sph === null && product.sph === undefined) {
+      return `sph is required for ${category}`;
+    }
+
+    if (!item.tint && !product.tint) {
+      return `tint is required for ${category}`;
+    }
+
+    if (!item.coating && !product.coating) {
+      return `coating is required for ${category}`;
+    }
+  }
+
+  if (category === "CONTACT_LENS") {
+    if (!item.expiry && !product.expiry) {
+      return "expiry is required for CONTACT_LENS";
+    }
+
+    if (!item.disposability && !product.disposability) {
+      return "disposability is required for CONTACT_LENS";
+    }
+  }
+
+  if (item.orderType && item.orderType === "RX" && category !== "LENS") {
+    return "RX order type is only allowed for LENS category";
+  }
+
+  if (item.orderType && !["STOCK", "RX"].includes(item.orderType)) {
+    return "Invalid orderType";
+  }
+
+  if (item.discountPercent !== undefined && (item.discountPercent < 0 || item.discountPercent > 100)) {
+    return "discountPercent must be between 0 and 100";
+  }
+
+  if (item.discountAmount !== undefined && item.discountAmount < 0) {
+    return "discountAmount cannot be negative";
+  }
+
+  return null;
+};
+
+export const createBulkOrder = async (req, res) => {
+  try {
+    const { customerId, customerShipToId, orders } = req.body;
+
+    if (!customerId) {
+      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "customerId is required");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return sendErrorResponse(res, 400, "INVALID_CUSTOMER_ID", "Invalid customerId");
+    }
+
+    if (customerShipToId && !mongoose.Types.ObjectId.isValid(customerShipToId)) {
+      return sendErrorResponse(res, 400, "INVALID_SHIP_TO_ID", "Invalid customerShipToId");
+    }
+
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "orders array is required and must not be empty");
+    }
+
+    const customer = await Customer.findById(customerId);
+
+    if (!customer) {
+      return sendErrorResponse(res, 404, "NOT_FOUND", "Customer not found");
+    }
+
+    if (customer.status?.isSuspended) {
+      return sendErrorResponse(res, 403, "CUSTOMER_SUSPENDED", "Customer account is suspended");
+    }
+
+    if (customer.isBlacklisted) {
+      return sendErrorResponse(res, 403, "CUSTOMER_BLACKLISTED", "Customer is blacklisted");
+    }
+
+    let shipToBranchName = null;
+    let resolvedShipToId = null;
+
+    if (customerShipToId) {
+      const shipTo = customer.customerShipToDetails?.find((s) => s._id.toString() === customerShipToId.toString());
+
+      if (!shipTo) {
+        return sendErrorResponse(res, 404, "NOT_FOUND", "Ship-to address not found for this customer");
+      }
+
+      resolvedShipToId = shipTo._id;
+      shipToBranchName = shipTo.branchName;
+    }
+
+    const allProductIds = [];
+
+    for (const order of orders) {
+      if (!Array.isArray(order.items) || order.items.length === 0) {
+        return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Each order must have at least one item");
+      }
+
+      for (const item of order.items) {
+        if (!item.productId) {
+          return sendErrorResponse(res, 400, "VALIDATION_ERROR", "productId is required for every item");
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+          return sendErrorResponse(res, 400, "INVALID_PRODUCT_ID", `Invalid productId: ${item.productId}`);
+        }
+
+        allProductIds.push(item.productId.toString());
+      }
+    }
+
+    const products = await DigiProduct.find({ _id: { $in: allProductIds } }).lean();
+    const productMap = {};
+    products.forEach((product) => { productMap[product._id.toString()] = product; });
+
+    // if (products.length !== allProductIds.length) {
+    //   const foundIds = products.map((p) => p._id.toString());
+    //   const missingProducts = allProductIds.filter((id) => !foundIds.includes(id));
+    //   return sendErrorResponse(res, 404, "PRODUCT_NOT_FOUND", `Products not found: ${missingProducts.join(", ")}`);
+    // }
+
+    console.log("products. : ", products);
+    console.log("allProductIds : ", allProductIds);
+
+    const uniqueProductIds = [...new Set(allProductIds)];
+    const foundIds = products.map((p) => p._id.toString());
+    const missingProducts = uniqueProductIds.filter((id) => !foundIds.includes(id));
+    if (missingProducts.length > 0) {
+      return sendErrorResponse(res,404, "PRODUCT_NOT_FOUND",`Products not found: ${missingProducts.join(", ")}`);
+    }
+
+    for (const order of orders) {
+      for (const item of order.items) {
+        const product =
+          productMap[item.productId.toString()];
+
+        if (!product) {
+          return sendErrorResponse(res, 404, "PRODUCT_NOT_FOUND", `Product not found: ${item.productId}`);
+        }
+
+        const qty = Number(item.qty);
+
+        if (!qty || qty <= 0) {
+          return sendErrorResponse(res, 400, "INVALID_QUANTITY", `Quantity must be greater than 0 for ${product.productName}`);
+        }
+
+        if (product.qty !== undefined && Number(product.qty) < qty) {
+          return sendErrorResponse(res, 400, "INSUFFICIENT_STOCK", `${product.productName} has only ${product.qty} quantity available`);
+        }
+
+        const rawCategory = (
+          item.category ||
+          product.category ||
+          ""
+        ).toUpperCase();
+
+        const validationError = validateItemByCategory(
+          item,
+          product
+        );
+
+        if (validationError) {
+          return sendErrorResponse(
+            res,
+            400,
+            "VALIDATION_ERROR",
+            `${validationError}. Product: ${product.productName}`
+          );
+        }
+
+        // ----------------------------
+        // Common Fields
+        // ----------------------------
+
+        item.itemName =
+          item.itemName || product.productName;
+
+        item.category = rawCategory;
+
+        item.price =
+          item.price ?? product.price ?? 0;
+
+        item.mrp =
+          item.mrp ?? product.mrp ?? 0;
+
+        item.gst =
+          item.gst ?? product.gst ?? 0;
+
+        item.hsnSac =
+          item.hsnSac || product.hsnSac;
+
+        item.qty = qty;
+
+        // ----------------------------
+        // FRAME / SUNGLASS
+        // ----------------------------
+
+        if (
+          FRAME_SUNGLASS_CATEGORIES.includes(
+            rawCategory
+          )
+        ) {
+          item.code =
+            item.code || product.productCode;
+
+          item.brand =
+            item.brand || product.brand;
+
+          item.color =
+            item.color || product.color;
+
+          item.size =
+            item.size || product.size;
+
+          item.type =
+            item.type || product.type;
+
+          item.shape =
+            item.shape || product.shape;
+
+          item.material =
+            item.material || product.material;
+
+          item.dimensions =
+            item.dimensions ||
+            product.dimensions;
+        }
+
+        // ----------------------------
+        // LENS / CONTACT LENS
+        // ----------------------------
+
+        if (
+          LENS_CATEGORIES.includes(rawCategory)
+        ) {
+          item.sph =
+            item.sph ?? product.sph;
+
+          item.cyl =
+            item.cyl ?? product.cyl;
+
+          item.axis =
+            item.axis ?? product.axis;
+
+          item.add =
+            item.add ?? product.add;
+
+          item.index =
+            item.index ?? product.index;
+
+          item.tint =
+            item.tint || product.tint;
+
+          item.coating =
+            item.coating || product.coating;
+        }
+
+        // ----------------------------
+        // CONTACT LENS
+        // ----------------------------
+
+        if (rawCategory === "CONTACT_LENS") {
+          item.color =
+            item.color || product.color;
+
+          item.expiry =
+            item.expiry || product.expiry;
+
+          item.disposability =
+            item.disposability ||
+            product.disposability;
+        }
+      }
+
+      if (!order.orderNumber) {
+        order.orderNumber = generateOrderNumber();
+      }
+
+      if (!order.status) {
+        order.status = "Submitted";
+      }
+    }
+
+    const customerDoc = {
+      customerId: customer._id,
+      customerName:
+        customer.ownerName || customer.shopName,
+      customerShipToId: resolvedShipToId,
+      customerShipToBranchName: shipToBranchName,
+    };
+
+    const bulkOrder = await BulkOrder.create({
+      customer: customerDoc,
+      orders,
+    });
+
+    return sendSuccessResponse(
+      res,
+      201,
+      { bulkOrder },
+      "Bulk order created successfully"
+    );
+  } catch (error) {
+    console.error("Create Bulk Order Error:", error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      "CREATE_BULK_ORDER_ERROR",
+      error.message || "Something went wrong"
+    );
+  }
+};

@@ -1,5 +1,5 @@
 import {
-  createOrderService, getOrderService, listOrdersService,
+  getOrderService, listOrdersService,
   cancelOrderService,
   getProductNamesService, getTintOptionsService, updateDraftOrderService,
   getFrameTypesService, deleteOrderService,
@@ -16,15 +16,6 @@ function handleError(res, err) {
   }
   return sendErrorResponse(res, 500, "INTERNAL_ERROR", err?.message || "Unexpected error");
 }
-
-export const createOrder = async (req, res) => {
-  try {
-    const order = await createOrderService(req.body, req.user?.id);
-    return sendSuccessResponse(res, 201, order, "Order created successfully");
-  } catch (err) {
-    return handleError(res, err);
-  }
-};
 
 export const getOrder = async (req, res) => {
   try {

@@ -1,6 +1,7 @@
 import express from "express";
-import { createOrder, getOrder, listOrders, updateDraftOrder, cancelOrder, deleteOrder, getProductNames, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductTypes, getProductCoatings } from "../../core/controllers/order/order.controller.js";
+import { getOrder, listOrders, updateDraftOrder, cancelOrder, deleteOrder, getProductNames, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductTypes, getProductCoatings } from "../../core/controllers/order/order.controller.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
+import { createBulkOrder } from "../../core/controllers/order/bulkorder/bulkorder.js";
 
 const orderRouter = express.Router();
 
@@ -19,7 +20,7 @@ orderRouter.get("/product-fields/productType", getProductTypes);
 orderRouter.get("/product-fields/coating", getProductCoatings);
 orderRouter.get("/product-names", getProductNames);
 
-orderRouter.post("/create", createOrder);
+orderRouter.post("/create-bulk-orders", createBulkOrder);
 orderRouter.get("/get-all-orders", listOrders);
 
 // /:id routes last
