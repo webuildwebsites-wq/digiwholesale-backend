@@ -542,6 +542,53 @@ export const getInventoryByProductCode = async (req, res) => {
 };
 
 
+export const getDigiProductNames = async (req, res) => {
+  try {
+    const { search = "", brand = "", category = "", page = 1, limit = 100 } = req.query;
+
+    const filter = { productName: { $nin: [null, ""] } };
+
+    if (brand.trim())    filter.brand    = { $regex: `^${brand.trim()}$`,    $options: "i" };
+    if (category.trim()) filter.category = { $regex: `^${category.trim()}$`, $options: "i" };
+    if (search.trim())   filter.productName = { $regex: search.trim(), $options: "i" };
+
+    const parsedPage  = parseInt(page)  || 1;
+    const parsedLimit = parseInt(limit) || 100;
+    const skip        = (parsedPage - 1) * parsedLimit;
+
+    const [data, total] = await Promise.all([
+      DigiProduct.find(filter, {
+        _id: 1, productCode: 1, productName: 1, brand: 1, category: 1,
+        coating: 1, index: 1, price: 1, mrp: 1, gst: 1, qty: 1,
+      })
+        .sort({ productName: 1 })
+        .skip(skip)
+        .limit(parsedLimit)
+        .lean(),
+      DigiProduct.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data,
+      pagination: {
+        total,
+        page:       parsedPage,
+        limit:      parsedLimit,
+        totalPages: Math.ceil(total / parsedLimit),
+      },
+    });
+
+  } catch (error) {
+    console.error("Get DigiProduct Names Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
 // get vendors data by date range or by keyword
 export const filterProducts = async (req, res) => {
   try {

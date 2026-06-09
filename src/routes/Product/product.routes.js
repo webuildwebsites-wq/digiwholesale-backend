@@ -1,5 +1,5 @@
 import express from "express";
-import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode } from "../../core/controllers/Product/Product.controller.js";
+import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames } from "../../core/controllers/Product/Product.controller.js";
 import { digiupload } from "../uploads/multer.js";
 
 const router = express.Router();
@@ -8,6 +8,8 @@ const router = express.Router();
 router.get("/", getProducts);
 // Suggestions — must be before /:id to avoid route conflict
 router.get("/suggestion", suggestionProduct);
+// GET /api/digi/product/names?search=E&page=1&limit=100&brand=ZEISS&category=LENS
+router.get("/names", getDigiProductNames);
 // Inventory by product code — must be before /inventory/:productId
 router.get("/inventory/productCode/:productCode", getInventoryByProductCode);
 // Inventory by product ID
