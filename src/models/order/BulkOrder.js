@@ -20,6 +20,10 @@ const BulkOrderItemSchema = new mongoose.Schema(
             type: String,
             enum: ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"],
         },
+        unit : {
+            type: String,
+            enum: ["PIECE", "PAIR", "BOX"],
+        },
 
         brand: String,
         color: String,
@@ -67,6 +71,9 @@ const BulkOrderOrderSchema = new mongoose.Schema(
                 message: "At least one item is required",
             },
         },
+
+        cgst : String,
+        sgst : String,
 
         status: {
             type: String,

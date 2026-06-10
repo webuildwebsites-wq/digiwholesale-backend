@@ -80,6 +80,10 @@ const validateItemByCategory = (item, product) => {
     return "discountAmount cannot be negative";
   }
 
+  if (item.unit !== undefined && !["PIECE", "PAIR", "BOX"].includes(item.unit)) {
+    return `Invalid unit "${item.unit}". Must be PIECE, PAIR, or BOX`;
+  }
+
   return null;
 };
 
@@ -233,6 +237,8 @@ export const createBulkOrder = async (req, res) => {
 
         item.qty = qty;
 
+        item.unit = item.unit || undefined;
+
         // ----------------------------
         // FRAME / SUNGLASS
         // ----------------------------
@@ -321,6 +327,9 @@ export const createBulkOrder = async (req, res) => {
       if (!order.status) {
         order.status = "Submitted";
       }
+
+      if (order.cgst !== undefined) order.cgst = String(order.cgst);
+      if (order.sgst !== undefined) order.sgst = String(order.sgst);
     }
 
     const customerDoc = {
