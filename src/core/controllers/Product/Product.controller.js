@@ -560,6 +560,7 @@ export const getDigiProductNames = async (req, res) => {
       DigiProduct.find(filter, {
         _id: 1, productCode: 1, productName: 1, brand: 1, category: 1,
         coating: 1, index: 1, price: 1, mrp: 1, gst: 1, qty: 1,
+        sph: 1, cyl: 1, axis: 1, addition: 1,
       })
         .sort({ productName: 1 })
         .skip(skip)
