@@ -34,12 +34,6 @@ dotenv.config();
 const app = express();
 
 const allowedOrigins = [
-  "https://visualeye.digibysr.in",
-  "https://www.visualeye.digibysr.in",
-  "http://visualeye.digibysr.in",
-  "http://www.visualeye.digibysr.in",
-  "https://visualeyeye.netlify.app",
-  "https://www.visualeyeye.netlify.app",
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:5175",

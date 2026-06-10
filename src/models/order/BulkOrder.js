@@ -28,7 +28,6 @@ const BulkOrderItemSchema = new mongoose.Schema(
         brand: String,
         color: String,
         size: String,
-        type: String,
         shape: String,
         material: String,
         dimensions: String,

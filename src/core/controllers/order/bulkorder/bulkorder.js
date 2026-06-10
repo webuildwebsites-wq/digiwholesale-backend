@@ -28,7 +28,6 @@ const validateItemByCategory = (item, product) => {
       "brand",
       "color",
       "size",
-      "type",
       "shape",
       "dimensions",
     ];
@@ -172,7 +171,7 @@ export const createBulkOrder = async (req, res) => {
     const foundIds = products.map((p) => p._id.toString());
     const missingProducts = uniqueProductIds.filter((id) => !foundIds.includes(id));
     if (missingProducts.length > 0) {
-      return sendErrorResponse(res,404, "PRODUCT_NOT_FOUND",`Products not found: ${missingProducts.join(", ")}`);
+      return sendErrorResponse(res, 404, "PRODUCT_NOT_FOUND", `Products not found: ${missingProducts.join(", ")}`);
     }
 
     for (const order of orders) {
@@ -194,129 +193,46 @@ export const createBulkOrder = async (req, res) => {
           return sendErrorResponse(res, 400, "INSUFFICIENT_STOCK", `${product.productName} has only ${product.qty} quantity available`);
         }
 
-        const rawCategory = (
-          item.category ||
-          product.category ||
-          ""
-        ).toUpperCase();
-
-        const validationError = validateItemByCategory(
-          item,
-          product
-        );
+        const rawCategory = (item.category || product.category || "").toUpperCase();
+        const validationError = validateItemByCategory(item, product);
 
         if (validationError) {
-          return sendErrorResponse(
-            res,
-            400,
-            "VALIDATION_ERROR",
-            `${validationError}. Product: ${product.productName}`
-          );
+          return sendErrorResponse(res, 400, "VALIDATION_ERROR", `${validationError}. Product: ${product.productName}`);
         }
 
-        // ----------------------------
-        // Common Fields
-        // ----------------------------
-
-        item.itemName =
-          item.itemName || product.productName;
-
+        item.itemName = item.itemName || product.productName;
         item.category = rawCategory;
-
-        item.price =
-          item.price ?? product.price ?? 0;
-
-        item.mrp =
-          item.mrp ?? product.mrp ?? 0;
-
-        item.gst =
-          item.gst ?? product.gst ?? 0;
-
-        item.hsnSac =
-          item.hsnSac || product.hsnSac;
-
+        item.price = item.price ?? product.price ?? 0;
+        item.mrp = item.mrp ?? product.mrp ?? 0;
+        item.gst = item.gst ?? product.gst ?? 0;
+        item.hsnSac = item.hsnSac || product.hsnSac;
         item.qty = qty;
-
         item.unit = item.unit || undefined;
 
-        // ----------------------------
-        // FRAME / SUNGLASS
-        // ----------------------------
-
-        if (
-          FRAME_SUNGLASS_CATEGORIES.includes(
-            rawCategory
-          )
-        ) {
-          item.code =
-            item.code || product.productCode;
-
-          item.brand =
-            item.brand || product.brand;
-
-          item.color =
-            item.color || product.color;
-
-          item.size =
-            item.size || product.size;
-
-          item.type =
-            item.type || product.type;
-
-          item.shape =
-            item.shape || product.shape;
-
-          item.material =
-            item.material || product.material;
-
-          item.dimensions =
-            item.dimensions ||
-            product.dimensions;
+        if (FRAME_SUNGLASS_CATEGORIES.includes(rawCategory)) {
+          item.code = item.code || product.productCode;
+          item.brand = item.brand || product.brand;
+          item.color = item.color || product.color;
+          item.size = item.size || product.size;
+          item.shape = item.shape || product.shape;
+          item.material = item.material || product.material;
+          item.dimensions = item.dimensions || product.dimensions;
         }
 
-        // ----------------------------
-        // LENS / CONTACT LENS
-        // ----------------------------
-
-        if (
-          LENS_CATEGORIES.includes(rawCategory)
-        ) {
-          item.sph =
-            item.sph ?? product.sph;
-
-          item.cyl =
-            item.cyl ?? product.cyl;
-
-          item.axis =
-            item.axis ?? product.axis;
-
-          item.add =
-            item.add ?? product.add;
-
-          item.index =
-            item.index ?? product.index;
-
-          item.tint =
-            item.tint || product.tint;
-
-          item.coating =
-            item.coating || product.coating;
+        if (LENS_CATEGORIES.includes(rawCategory)) {
+          item.sph = item.sph ?? product.sph;
+          item.cyl = item.cyl ?? product.cyl;
+          item.axis = item.axis ?? product.axis;
+          item.add = item.add ?? product.add;
+          item.index = item.index ?? product.index;
+          item.tint = item.tint || product.tint;
+          item.coating = item.coating || product.coating;
         }
-
-        // ----------------------------
-        // CONTACT LENS
-        // ----------------------------
 
         if (rawCategory === "CONTACT_LENS") {
-          item.color =
-            item.color || product.color;
-
-          item.expiry =
-            item.expiry || product.expiry;
-
-          item.disposability =
-            item.disposability ||
-            product.disposability;
+          item.color = item.color || product.color;
+          item.expiry = item.expiry || product.expiry;
+          item.disposability = item.disposability || product.disposability;
         }
       }
 
@@ -334,8 +250,7 @@ export const createBulkOrder = async (req, res) => {
 
     const customerDoc = {
       customerId: customer._id,
-      customerName:
-        customer.ownerName || customer.shopName,
+      customerName: customer.ownerName || customer.shopName,
       customerShipToId: resolvedShipToId,
       customerShipToBranchName: shipToBranchName,
     };
@@ -345,20 +260,9 @@ export const createBulkOrder = async (req, res) => {
       orders,
     });
 
-    return sendSuccessResponse(
-      res,
-      201,
-      { bulkOrder },
-      "Bulk order created successfully"
-    );
+    return sendSuccessResponse(res, 201, { bulkOrder }, "Bulk order created successfully");
   } catch (error) {
     console.error("Create Bulk Order Error:", error);
-
-    return sendErrorResponse(
-      res,
-      500,
-      "CREATE_BULK_ORDER_ERROR",
-      error.message || "Something went wrong"
-    );
+    return sendErrorResponse(res, 500, "CREATE_BULK_ORDER_ERROR", error.message || "Something went wrong");
   }
 };
