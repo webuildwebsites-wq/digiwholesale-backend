@@ -1,10 +1,8 @@
 import express from "express";
-const router = express.Router();
-
-import {
-    createVendor, getAllVendors, getVendorById, updateVendor, deleteVendor, filterVendors, suggestionVendors
-} from "../core/controllers/vendor.controller.js";
+import { createVendor, getAllVendors, getVendorById, updateVendor, deleteVendor, filterVendors, suggestionVendors } from "../core/controllers/vendor.controller.js";
 import { ProtectUser } from "../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
+
+const router = express.Router();
 
 // Create vendor
 router.post("/", ProtectUser, createVendor);
