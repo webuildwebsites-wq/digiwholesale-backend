@@ -480,8 +480,8 @@ export const getInventoryByProductId = async (req, res) => {
       });
     }
 
-    const inventory = await Inventory.find({
-      productId,
+    const inventory = await DigiProduct.find({
+     _id : productId,
     });
 
     if (!inventory) {
