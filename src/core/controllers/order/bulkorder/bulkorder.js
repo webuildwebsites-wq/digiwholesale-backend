@@ -15,9 +15,9 @@ const generateOrderNumber = () => `BO-${Date.now()}-${Math.floor(1000 + Math.ran
 const validateItemByCategory = (item, product) => {
     const category = (item.category || product.category || "").toUpperCase();
 
-    if (!VALID_CATEGORIES.includes(category)) {
-        return `Invalid category "${category}"`;
-    }
+    // if (!VALID_CATEGORIES.includes(category)) {
+    //     return `Invalid category "${category}"`;
+    // }
 
     if (item.orderType && !["STOCK", "RX"].includes(item.orderType)) {
         return "Invalid orderType";

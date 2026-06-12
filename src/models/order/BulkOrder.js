@@ -63,7 +63,7 @@ const BulkOrderItemSchema = new mongoose.Schema(
 
         category: {
             type: String,
-            enum: ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"],
+            // enum: ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"],
         },
 
         unit: {
