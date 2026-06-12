@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import Customer from "../../../../models/Auth/Customer.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
+import generatePDF from "../../../services/pdfService.js";
+import { generateDeliveryChallanHTML } from "../../../../Utils/templates/deliveryChallanTemplate.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 
 const VALID_CATEGORIES        = ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"];
@@ -262,9 +264,78 @@ export const createBulkOrder = async (req, res) => {
 
         const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders });
 
-        return sendSuccessResponse(res, 201, { bulkOrder }, "Bulk order created successfully");
+        const challanHTML = generateDeliveryChallanHTML({
+            billNumber:      bulkOrder.orders[0]?.orderNumber,
+            orderDate:       bulkOrder.createdAt,
+            deliveryDate:    bulkOrder.createdAt,
+            companyName:     process.env.COMPANY_NAME    || "DigiOptics",
+            companyAddress:  process.env.COMPANY_ADDRESS || "Delhi",
+            companyEmail:    process.env.COMPANY_EMAIL   || "sid@digibysr.com",
+            companyPhone:    process.env.COMPANY_PHONE   || "+91 9650560526",
+            companyGstin:    process.env.COMPANY_GSTIN   || "GST9876543210",
+            customerName:    customerDoc.customerName,
+            customerAddress: shipToBranchName || customer.billToAddress?.address || "",
+            customerPhone:   customer.mobileNo1 || "",
+            orders:          bulkOrder.orders,
+        });
+
+        const pdfBuffer = await generatePDF(challanHTML);
+        const pdfBase64 = pdfBuffer.toString("base64");
+
+        return sendSuccessResponse(res, 201, {
+            bulkOrder,
+            challan: {
+                base64: pdfBase64,
+                mimeType: "application/pdf",
+                fileName: `challan-${bulkOrder.orders[0]?.orderNumber}.pdf`,
+            },
+        }, "Bulk order created successfully");
     } catch (error) {
         console.error("Create Bulk Order Error:", error);
         return sendErrorResponse(res, 500, "CREATE_BULK_ORDER_ERROR", error.message || "Something went wrong");
+    }
+};
+
+export const getBulkOrderChallan = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
+        }
+
+        const bulkOrder = await BulkOrder.findById(orderId).lean();
+
+        if (!bulkOrder) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
+        }
+
+        const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
+
+        const challanHTML = generateDeliveryChallanHTML({
+            billNumber:      bulkOrder.orders[0]?.orderNumber,
+            orderDate:       bulkOrder.createdAt,
+            deliveryDate:    bulkOrder.createdAt,
+            companyName:     process.env.COMPANY_NAME    || "DigiOptics",
+            companyAddress:  process.env.COMPANY_ADDRESS || "Delhi",
+            companyEmail:    process.env.COMPANY_EMAIL   || "sid@digibysr.com",
+            companyPhone:    process.env.COMPANY_PHONE   || "+91 9650560526",
+            companyGstin:    process.env.COMPANY_GSTIN   || "GST9876543210",
+            customerName:    bulkOrder.customer.customerName,
+            customerAddress: bulkOrder.customer.customerShipToBranchName || customer?.billToAddress?.address || "",
+            customerPhone:   customer?.mobileNo1 || "",
+            orders:          bulkOrder.orders,
+        });
+
+        const pdfBuffer = await generatePDF(challanHTML);
+        const fileName  = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        res.setHeader("Content-Length", pdfBuffer.length);
+        return res.end(pdfBuffer);
+    } catch (error) {
+        console.error("Get Bulk Order Challan Error:", error);
+        return sendErrorResponse(res, 500, "CHALLAN_ERROR", error.message || "Something went wrong");
     }
 };
