@@ -38,18 +38,18 @@ export const generateDeliveryChallanHTML = (data) => {
         const sgstRate = parseFloat(order.sgst || 0);
 
         for (const item of order.items) {
-            const price      = Number(item.price || 0);
-            const qty        = Number(item.qty || 0);
-            const discAmt    = Number(item.discountAmount || 0);
+            const price = Number(item.price || 0);
+            const qty = Number(item.qty || 0);
+            const discAmt = Number(item.discountAmount || 0);
             const baseAmount = price * qty;
-            const amount     = baseAmount - discAmt;
+            const amount = baseAmount - discAmt;
 
             const cgstAmt = (amount * cgstRate) / 100;
             const sgstAmt = (amount * sgstRate) / 100;
 
-            subTotal      += amount;
-            totalCgst     += cgstAmt;
-            totalSgst     += sgstAmt;
+            subTotal += amount;
+            totalCgst += cgstAmt;
+            totalSgst += sgstAmt;
             totalDiscount += discAmt;
 
             const powers = item.rx?.powers || [];
@@ -57,12 +57,12 @@ export const generateDeliveryChallanHTML = (data) => {
             const lPower = powers.find(p => p.side === "L");
 
             allItems.push({
-                itemName:  item.itemName  || "-",
-                type:      item.orderType || "-",
-                sph:       item.sph       ?? (rPower?.sph ?? "-"),
-                cyl:       item.cyl       ?? (rPower?.cyl ?? "-"),
-                axis:      item.axis      ?? (rPower?.axis ?? "-"),
-                add:       item.add       ?? (rPower?.add ?? "-"),
+                itemName: item.itemName || "-",
+                type: item.orderType || "-",
+                sph: item.sph ?? (rPower?.sph ?? "-"),
+                cyl: item.cyl ?? (rPower?.cyl ?? "-"),
+                axis: item.axis ?? (rPower?.axis ?? "-"),
+                add: item.add ?? (rPower?.add ?? "-"),
                 qty,
                 price,
                 discAmt,
@@ -94,47 +94,180 @@ export const generateDeliveryChallanHTML = (data) => {
 <meta charset="UTF-8">
 <title>Sale Challan</title>
 <style>
-    @page { size: A4; margin: 24px; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; font-size: 12px; color: #222; }
+    @page {
+    size: A4;
+    margin: 24px;
+}
 
-    .wrap { max-width: 800px; margin: auto; padding: 20px; }
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
 
-    .top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+html,
+body {
+    height: 100%;
+}
 
-    .top-left p { margin-bottom: 3px; }
-    .top-left strong { font-weight: bold; }
+body {
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    color: #222;
+    min-height: 100vh;
+}
 
-    .top-center { text-align: center; }
-    .challan-title { font-size: 14px; font-weight: bold; margin-top: 4px; }
+.wrap {
+    max-width: 800px;
+    margin: auto;
+    padding: 20px;
+    min-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+}
 
-    .top-right { text-align: right; }
-    .top-right p { margin-bottom: 3px; }
-    .customer-details { margin-top: 8px; }
-    .customer-details p { margin-bottom: 2px; }
+.main-content {
+    flex: 1;
+}
 
-    .divider { border: none; border-top: 1.5px solid #bbb; margin: 14px 0; }
+.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
 
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    thead tr { background: #cce0f5; }
-    th { padding: 8px 6px; text-align: center; font-weight: bold; font-size: 11px; border: 1px solid #b0c8e0; }
-    td { padding: 7px 6px; text-align: center; border: 1px solid #d0dce8; font-size: 11px; }
-    td:first-child { text-align: left; }
+.top-left p {
+    margin-bottom: 3px;
+}
 
-    .tax-box { border: 1px solid #ccc; border-radius: 6px; padding: 14px; margin-bottom: 20px; }
-    .tax-box .tax-title { font-weight: bold; font-size: 12px; margin-bottom: 10px; }
-    .tax-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
-    .tax-row .tax-col { flex: 1; }
-    .tax-row .tax-col .label { font-weight: bold; font-size: 11px; margin-bottom: 3px; }
-    .tax-row .tax-col .val { font-size: 12px; }
-    .tax-divider { border: none; border-top: 1px solid #ddd; margin: 8px 0; }
+.top-left strong {
+    font-weight: bold;
+}
 
-    .footer { margin-top: 24px; font-size: 10px; color: #444; display: flex; justify-content: space-between; align-items: flex-end; }
-    .footer-tc { border: 1px solid #ccc; border-radius: 6px; padding: 10px 14px; background: #f9f9f9; }
-    .footer-tc strong { display: block; margin-bottom: 5px; font-size: 11px; }
-    .footer ul { padding-left: 14px; margin: 0; }
-    .footer ul li { margin-bottom: 3px; }
-    .sig { font-style: italic; font-size: 10px; }
+.top-center {
+    text-align: center;
+}
+
+.challan-title {
+    font-size: 14px;
+    font-weight: bold;
+    margin-top: 4px;
+}
+
+.top-right {
+    text-align: right;
+}
+
+.top-right p {
+    margin-bottom: 3px;
+}
+
+.customer-details {
+    margin-top: 8px;
+}
+
+.customer-details p {
+    margin-bottom: 2px;
+}
+
+.divider {
+    border: none;
+    border-top: 1.5px solid #bbb;
+    margin: 14px 0;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+thead tr {
+    background: #cce0f5;
+}
+
+th {
+    padding: 8px 6px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 11px;
+    border: 1px solid #b0c8e0;
+}
+
+td {
+    padding: 7px 6px;
+    text-align: center;
+    border: 1px solid #d0dce8;
+    font-size: 11px;
+}
+
+td:first-child {
+    text-align: left;
+}
+
+.tax-box {
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 20px;
+}
+
+.tax-box .tax-title {
+    font-weight: bold;
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+
+.tax-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.tax-row .tax-col {
+    flex: 1;
+}
+
+.tax-row .tax-col .label {
+    font-weight: bold;
+    font-size: 11px;
+    margin-bottom: 3px;
+}
+
+.tax-row .tax-col .val {
+    font-size: 12px;
+}
+
+.tax-divider {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 8px 0;
+}
+
+.footer {
+    margin-top: auto;
+    padding-top: 12px;
+    font-size: 10px;
+    color: #444;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-top: 1px solid #ddd;
+}
+
+.footer ul {
+    padding-left: 14px;
+}
+
+.footer ul li {
+    margin-bottom: 3px;
+}
+
+.footer .sig {
+    font-style: italic;
+    font-size: 10px;
+}
 </style>
 </head>
 <body>
@@ -213,10 +346,12 @@ export const generateDeliveryChallanHTML = (data) => {
             <strong>Terms &amp; Conditions</strong>
             <ul>
                 <li>Goods once sold will not be taken back or exchanged</li>
-                <li>24% interest will be charged, is the payment is made past the delivery date</li>
+                <li>24% interest will be charged, if the payment is made past the delivery date</li>
             </ul>
         </div>
-        <div class="sig">No signature required as this is a system generated invoice</div>
+        <div class="sig">
+            No signature required as this is a system generated invoice
+        </div>
     </div>
 
 </div>
