@@ -130,9 +130,11 @@ export const generateDeliveryChallanHTML = (data) => {
     .tax-divider { border: none; border-top: 1px solid #ddd; margin: 8px 0; }
 
     .footer { margin-top: 24px; font-size: 10px; color: #444; display: flex; justify-content: space-between; align-items: flex-end; }
-    .footer ul { padding-left: 14px; }
+    .footer-tc { border: 1px solid #ccc; border-radius: 6px; padding: 10px 14px; background: #f9f9f9; }
+    .footer-tc strong { display: block; margin-bottom: 5px; font-size: 11px; }
+    .footer ul { padding-left: 14px; margin: 0; }
     .footer ul li { margin-bottom: 3px; }
-    .footer .sig { font-style: italic; font-size: 10px; }
+    .sig { font-style: italic; font-size: 10px; }
 </style>
 </head>
 <body>
@@ -207,7 +209,7 @@ export const generateDeliveryChallanHTML = (data) => {
     </div>
 
     <div class="footer">
-        <div>
+        <div class="footer-tc">
             <strong>Terms &amp; Conditions</strong>
             <ul>
                 <li>Goods once sold will not be taken back or exchanged</li>
