@@ -1,3 +1,11 @@
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const logoBase64 = readFileSync(join(__dirname, "../../../public/DigiOptics.png")).toString("base64");
+const logoDataUrl = `data:image/png;base64,${logoBase64}`;
+
 export const generateDeliveryChallanHTML = (data) => {
     const {
         billNumber,
@@ -98,8 +106,6 @@ export const generateDeliveryChallanHTML = (data) => {
     .top-left strong { font-weight: bold; }
 
     .top-center { text-align: center; }
-    .logo { font-size: 26px; font-weight: bold; color: #000; }
-    .logo span { color: #e05a00; }
     .challan-title { font-size: 14px; font-weight: bold; margin-top: 4px; }
 
     .top-right { text-align: right; }
@@ -143,7 +149,7 @@ export const generateDeliveryChallanHTML = (data) => {
         </div>
 
         <div class="top-center">
-            <div class="logo">Digi<span>&#9673;</span>ptics</div>
+            <img src="${logoDataUrl}" alt="DigiOptics" style="height:48px;object-fit:contain;" />
             <div class="challan-title">Sale Challan</div>
         </div>
 
