@@ -109,10 +109,7 @@ function sanitizeFitting(fitting) {
 }
 
 export async function getOrderService(orderId) {
-  const order = await Order.findById(orderId)
-    .populate("customer.customerId", "shopName ownerName customerCode mobileNo1 businessEmail customerBalance creditLimit creditUsed zone")
-    .populate("createdBy", "employeeName email EmployeeType username")
-    .lean();
+  const order = await BulkOrder.findById(orderId);
   if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
   return order;
 }
