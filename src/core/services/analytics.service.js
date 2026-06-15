@@ -1,31 +1,74 @@
+import Customer from "../../models/Auth/Customer.js";
 import employeeSchema from "../../models/Auth/Employee.js";
 import BulkOrder from "../../models/order/BulkOrder.js";
 
 export async function getDashboardAnalyticsService() {
     const now = new Date();
 
-    const [statusCounts, totalEmployees] = await Promise.all([
+    const [activeCustomers, totalStaff, recentOrders, statusCounts] = await Promise.all([
+        Customer.countDocuments({
+            "status.isActive": true,
+            "status.isSuspended": false,
+            isDeleted: false,
+        }),
+
+        employeeSchema.countDocuments({
+            isActive: true,
+            isDeleted: false,
+        }),
+
+        BulkOrder.find({})
+            .sort({ createdAt: -1 })
+            .limit(5)
+            .lean(),
+
         BulkOrder.aggregate([
             { $unwind: "$orders" },
-            { $group: { _id: "$orders.status", count: { $sum: 1 } } },
+            {
+                $group: {
+                    _id: "$orders.status",
+                    count: { $sum: 1 },
+                },
+            },
         ]),
-        employeeSchema.countDocuments({ isActive: true, isDeleted: false }),
     ]);
 
-    const statusMap = { Processing: 0, Submitted: 0, Deliverable : 0, Completed: 0, Draft: 0, Cancelled: 0 };
+    const statusMap = {
+        Processing: 0,
+        Submitted: 0,
+        Deliverable: 0,
+        Completed: 0,
+        Draft: 0,
+        Cancelled: 0,
+    };
+
     for (const item of statusCounts) {
-        if (item._id in statusMap) statusMap[item._id] = item.count;
+        if (item._id in statusMap) {
+            statusMap[item._id] = item.count;
+        }
     }
 
-    const totalOrders = Object.values(statusMap).reduce((a, b) => a + b, 0);
+    const totalOrders = Object.values(statusMap).reduce((sum, count) => sum + count, 0);
+
+    const orderdata = {
+        active: statusMap.Processing,
+        totalOrders,
+        totalEmployees: totalStaff,
+        delivered: statusMap.Completed,
+        readyToDeliver: statusMap.Deliverable,
+        draft: statusMap.Draft,
+        generatedAt: now.toISOString(),
+    };
 
     return {
-        active:          statusMap.Processing,
-        totalOrders,
-        totalEmployees,
-        delivered:       statusMap.Completed,
-        readyToDeliver:  statusMap.Deliverable,
-        draft:           statusMap.Draft,
-        generatedAt:     now.toISOString(),
+        customers: {
+            activeUsers: activeCustomers,
+        },
+        orders: orderdata,
+        staff: {
+            total: totalStaff,
+        },
+        recentOrders,
+        generatedAt: now.toISOString(),
     };
 }
