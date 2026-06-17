@@ -162,13 +162,37 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     .limit(parseInt(limit))
     .lean();
 
+
+  // without decimal
+  //     const ordersWithTotalPrice = orders.map((bulkOrder) => ({
+  //   ...bulkOrder,
+  //   orders: bulkOrder.orders.map((order) => ({
+  //     ...order,
+  //     totalOrderPrice: order.items.reduce((sum, item) => {
+  //       const price = Number(item.price || 0);
+  //       const gstPercent = Number(item.gst || 0);
+
+  //       const priceWithGst = price + (price * gstPercent) / 100;
+
+  //       return sum + priceWithGst;
+  //     }, 0),
+  //   })),
+  // }));
+
+  // For 2 decimal Number :
   const ordersWithTotalPrice = orders.map((bulkOrder) => ({
     ...bulkOrder,
     orders: bulkOrder.orders.map((order) => ({
       ...order,
-      totalOrderPrice: order.items.reduce(
-        (sum, item) => sum + Number(item.price || 0),
-        0
+      totalOrderPrice: Number(
+        order.items
+          .reduce((sum, item) => {
+            const price = Number(item.price || 0);
+            const gstPercent = Number(item.gst || 0);
+
+            return sum + price + (price * gstPercent) / 100;
+          }, 0)
+          .toFixed(2),
       ),
     })),
   }));
