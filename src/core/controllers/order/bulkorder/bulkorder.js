@@ -40,9 +40,9 @@ const validateItemByCategory = (item, product) => {
         if (item.sph === undefined && item.sph === null && product.sph === undefined) {
             return `sph is required for ${category}`;
         }
-        if (!item.tint && !product.tint) {
-            return `tint is required for ${category}`;
-        }
+        // if (!item.tint && !product.tint) {
+        //     return `tint is required for ${category}`;
+        // }
         if (!item.coating && !product.coating) {
             return `coating is required for ${category}`;
         }
