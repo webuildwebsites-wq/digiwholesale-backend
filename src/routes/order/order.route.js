@@ -1,7 +1,7 @@
 import express from "express";
 import { getOrder, listOrders, updateDraftOrder, cancelOrder, deleteOrder, getProductNames, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductTypes, getProductCoatings } from "../../core/controllers/order/order.controller.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
-import { createBulkOrder, getBulkOrderChallan } from "../../core/controllers/order/bulkorder/bulkorder.js";
+import { createBulkOrder, getBulkOrderChallan, getBulkOrderInvoice } from "../../core/controllers/order/bulkorder/bulkorder.js";
 
 const orderRouter = express.Router();
 
@@ -22,6 +22,11 @@ orderRouter.get("/product-names", getProductNames);
 
 orderRouter.post("/create-bulk-orders", createBulkOrder);
 orderRouter.get("/bulk-orders/:orderId/challan", getBulkOrderChallan);
+
+
+orderRouter.get("/bulk-orders/:orderId/invoice", getBulkOrderInvoice);
+
+
 orderRouter.get("/get-all-orders", listOrders);
 
 // /:id routes last

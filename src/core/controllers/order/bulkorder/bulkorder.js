@@ -3,10 +3,10 @@ import Customer from "../../../../models/Auth/Customer.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
 import generatePDF from "../../../services/pdfService.js";
-import { generateDeliveryChallanHTML } from "../../../../Utils/templates/deliveryChallanTemplate.js";
+import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../../../Utils/templates/deliveryChallanTemplate.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 
-const VALID_CATEGORIES        = ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"];
+// const VALID_CATEGORIES        = ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"];
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
 const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
 
@@ -264,31 +264,8 @@ export const createBulkOrder = async (req, res) => {
 
         const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders });
 
-        const challanHTML = generateDeliveryChallanHTML({
-            billNumber:      bulkOrder.orders[0]?.orderNumber,
-            orderDate:       bulkOrder.createdAt,
-            deliveryDate:    bulkOrder.createdAt,
-            companyName:     process.env.COMPANY_NAME    || "DigiOptics",
-            companyAddress:  process.env.COMPANY_ADDRESS || "Delhi",
-            companyEmail:    process.env.COMPANY_EMAIL   || "sid@digibysr.com",
-            companyPhone:    process.env.COMPANY_PHONE   || "+91 9650560526",
-            companyGstin:    process.env.COMPANY_GSTIN   || "GST9876543210",
-            customerName:    customerDoc.customerName,
-            customerAddress: shipToBranchName || customer.billToAddress?.address || "",
-            customerPhone:   customer.mobileNo1 || "",
-            orders:          bulkOrder.orders,
-        });
-
-        const pdfBuffer = await generatePDF(challanHTML);
-        const pdfBase64 = pdfBuffer.toString("base64");
-
         return sendSuccessResponse(res, 201, {
             bulkOrder,
-            challan: {
-                base64: pdfBase64,
-                mimeType: "application/pdf",
-                fileName: `challan-${bulkOrder.orders[0]?.orderNumber}.pdf`,
-            },
         }, "Bulk order created successfully");
     } catch (error) {
         console.error("Create Bulk Order Error:", error);
@@ -337,5 +314,125 @@ export const getBulkOrderChallan = async (req, res) => {
     } catch (error) {
         console.error("Get Bulk Order Challan Error:", error);
         return sendErrorResponse(res, 500, "CHALLAN_ERROR", error.message || "Something went wrong");
+    }
+};
+
+export const getBulkOrderInvoice = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
+        }
+
+        const bulkOrder = await BulkOrder.findById(orderId).lean();
+
+        if (!bulkOrder) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
+        }
+
+        const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
+
+        const buildMaterialDescription = (item) => {
+            let desc = item.itemName || "";
+
+            const fmtVal = (v) => (v !== undefined && v !== null && v !== "" ? v : "0.00");
+
+            if (item.orderType === "RX" && item.rx?.powers?.length) {
+                const rPower = item.rx.powers.find((p) => p.side === "R");
+                const lPower = item.rx.powers.find((p) => p.side === "L");
+                if (rPower) {
+                    desc += `<br/>Side : R ( SPH : ${fmtVal(rPower.sph)}, CYL : ${fmtVal(rPower.cyl)},<br/>AXIS : ${fmtVal(rPower.axis)}, ADD : ${fmtVal(rPower.add)} )`;
+                }
+                if (lPower) {
+                    desc += `<br/>Side : L ( SPH : ${fmtVal(lPower.sph)}, CYL : ${fmtVal(lPower.cyl)},<br/>AXIS : ${fmtVal(lPower.axis)}, ADD : ${fmtVal(lPower.add)} ) - ( ${fmtVal(item.price)} / pc )`;
+                }
+                desc += `<br/>Tint : ${item.rx?.tint?.name || "No Tint"} ( ${fmtVal(item.rx?.tintValue ?? 0.00)} )`;
+            } else if (item.sph !== undefined || item.cyl !== undefined) {
+                desc += `<br/>Side : R ( SPH : ${fmtVal(item.sph)}, CYL : ${fmtVal(item.cyl)}, AXIS : ${fmtVal(item.axis)}, ADD : ${fmtVal(item.add)} )`;
+                desc += `<br/>Side : L ( SPH : ${fmtVal(item.sph)}, CYL : ${fmtVal(item.cyl)}, AXIS : ${fmtVal(item.axis)}, ADD : ${fmtVal(item.add)} ) - ( ${fmtVal(item.price)} / pc )`;
+                desc += `<br/>Tint : ${item.tint || "No Tint"} ( 0.00 )`;
+            }
+
+            return desc;
+        };
+
+        const allItems = bulkOrder.orders.flatMap((order) =>
+            order.items.map((item) => {
+                const price    = item.price || 0;
+                const qty      = item.qty || 0;
+                const value    = price * qty;
+                const discount = item.discountPercent || 0;
+                const netValue = discount ? value * (1 - discount / 100) : value;
+
+                return {
+                    orderNo:             order.orderNumber || "",
+                    dcNo:                "",
+                    orderDate:           new Date(order.createdAt || bulkOrder.createdAt).toLocaleDateString("en-IN"),
+                    referenceNo:         item.code || "",
+                    materialDescription: buildMaterialDescription(item),
+                    hsn:                 item.hsnSac || "",
+                    quantity:            qty,
+                    unitRate:            price,
+                    value,
+                    discount,
+                    netValue,
+                };
+            })
+        );
+
+        const totalQty      = allItems.reduce((sum, i) => sum + Number(i.quantity), 0);
+        const grossAmount   = allItems.reduce((sum, i) => sum + Number(i.value), 0);
+        const discountAmount = allItems.reduce((sum, i) => sum + (Number(i.value) - Number(i.netValue)), 0);
+        const taxableAmount = grossAmount - discountAmount;
+        const cgstAmount    = bulkOrder.orders.reduce((sum, o) => sum + (parseFloat(o.cgst) || 0), 0);
+        const sgstAmount    = bulkOrder.orders.reduce((sum, o) => sum + (parseFloat(o.sgst) || 0), 0);
+        const grandTotal    = taxableAmount + cgstAmount + sgstAmount;
+
+        const invoiceHTML = generatedorderInvoice({
+            invoiceNo:    bulkOrder.orders[0]?.orderNumber || orderId,
+            invoiceDate:  new Date(bulkOrder.createdAt).toLocaleDateString("en-IN"),
+            irnNo:        "",
+            placeOfSupply: "",
+            company: {
+                name:         process.env.COMPANY_NAME    || "DigiOptics",
+                addressLine1: process.env.COMPANY_ADDRESS || "Delhi",
+                addressLine2: "",
+                city:         "",
+                gstin:        process.env.COMPANY_GSTIN   || "GST9876543210",
+                stateCode:    "",
+            },
+            billTo: {
+                name:    bulkOrder.customer.customerName,
+                address: customer?.billToAddress?.address || "",
+                city:    customer?.billToAddress?.city    || "",
+                gstin:   customer?.gstin                  || "",
+            },
+            shipTo: {
+                name:    bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName,
+                address: customer?.billToAddress?.address || "",
+                city:    customer?.billToAddress?.city    || "",
+            },
+            items:          allItems,
+            totalQty,
+            grossAmount:    grossAmount.toFixed(2),
+            discountAmount: discountAmount.toFixed(2),
+            taxableAmount:  taxableAmount.toFixed(2),
+            cgstAmount,
+            sgstAmount,
+            igstAmount:     0,
+            grandTotal:     grandTotal.toFixed(2),
+        });
+
+        const pdfBuffer = await generatePDF(invoiceHTML);
+        const fileName  = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        res.setHeader("Content-Length", pdfBuffer.length);
+        return res.end(pdfBuffer);
+    } catch (error) {
+        console.error("Get Bulk Order Invoice Error:", error);
+        return sendErrorResponse(res, 500, "INVOICE_ERROR", error.message || "Something went wrong");
     }
 };

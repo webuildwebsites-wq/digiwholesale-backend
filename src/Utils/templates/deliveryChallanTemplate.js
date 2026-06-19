@@ -1,80 +1,90 @@
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const logoBase64 = readFileSync(join(__dirname, "../../../public/DigiOptics.png")).toString("base64");
+const logoBase64 = readFileSync(
+  join(__dirname, '../../../public/DigiOptics.png'),
+).toString('base64');
 const logoDataUrl = `data:image/png;base64,${logoBase64}`;
 
 export const generateDeliveryChallanHTML = (data) => {
-    const {
-        billNumber,
-        orderDate,
-        deliveryDate,
-        companyName,
-        companyAddress,
-        companyEmail,
-        companyPhone,
-        companyGstin,
-        customerName,
-        customerAddress,
-        customerPhone,
-        orders = [],
-    } = data;
+  const {
+    billNumber,
+    orderDate,
+    deliveryDate,
+    companyName,
+    companyAddress,
+    companyEmail,
+    companyPhone,
+    companyGstin,
+    customerName,
+    customerAddress,
+    customerPhone,
+    orders = [],
+  } = data;
 
-    const fmt = (d) => d ? new Date(d).toLocaleDateString("en-IN") : "-";
-    const fmtTime = (d) => d ? new Date(d).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "-";
-    const fmtNum = (n) => Number(n || 0).toFixed(2);
+  const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
+  const fmtTime = (d) =>
+    d
+      ? new Date(d).toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : '-';
+  const fmtNum = (n) => Number(n || 0).toFixed(2);
 
-    let allItems = [];
-    let totalCgst = 0;
-    let totalSgst = 0;
-    let totalIgst = 0;
-    let subTotal = 0;
-    let totalDiscount = 0;
+  let allItems = [];
+  let totalCgst = 0;
+  let totalSgst = 0;
+  let totalIgst = 0;
+  let subTotal = 0;
+  let totalDiscount = 0;
 
-    for (const order of orders) {
-        const cgstRate = parseFloat(order.cgst || 0);
-        const sgstRate = parseFloat(order.sgst || 0);
+  for (const order of orders) {
+    const cgstRate = parseFloat(order.cgst || 0);
+    const sgstRate = parseFloat(order.sgst || 0);
 
-        for (const item of order.items) {
-            const price = Number(item.price || 0);
-            const qty = Number(item.qty || 0);
-            const discAmt = Number(item.discountAmount || 0);
-            const baseAmount = price * qty;
-            const amount = baseAmount - discAmt;
+    for (const item of order.items) {
+      const price = Number(item.price || 0);
+      const qty = Number(item.qty || 0);
+      const discAmt = Number(item.discountAmount || 0);
+      const baseAmount = price * qty;
+      const amount = baseAmount - discAmt;
 
-            const cgstAmt = (amount * cgstRate) / 100;
-            const sgstAmt = (amount * sgstRate) / 100;
+      const cgstAmt = (amount * cgstRate) / 100;
+      const sgstAmt = (amount * sgstRate) / 100;
 
-            subTotal += amount;
-            totalCgst += cgstAmt;
-            totalSgst += sgstAmt;
-            totalDiscount += discAmt;
+      subTotal += amount;
+      totalCgst += cgstAmt;
+      totalSgst += sgstAmt;
+      totalDiscount += discAmt;
 
-            const powers = item.rx?.powers || [];
-            const rPower = powers.find(p => p.side === "R");
-            const lPower = powers.find(p => p.side === "L");
+      const powers = item.rx?.powers || [];
+      const rPower = powers.find((p) => p.side === 'R');
+      const lPower = powers.find((p) => p.side === 'L');
 
-            allItems.push({
-                itemName: item.itemName || "-",
-                type: item.orderType || "-",
-                sph: item.sph ?? (rPower?.sph ?? "-"),
-                cyl: item.cyl ?? (rPower?.cyl ?? "-"),
-                axis: item.axis ?? (rPower?.axis ?? "-"),
-                add: item.add ?? (rPower?.add ?? "-"),
-                qty,
-                price,
-                discAmt,
-                amount,
-            });
-        }
+      allItems.push({
+        itemName: item.itemName || '-',
+        type: item.orderType || '-',
+        sph: item.sph ?? rPower?.sph ?? '-',
+        cyl: item.cyl ?? rPower?.cyl ?? '-',
+        axis: item.axis ?? rPower?.axis ?? '-',
+        add: item.add ?? rPower?.add ?? '-',
+        qty,
+        price,
+        discAmt,
+        amount,
+      });
     }
+  }
 
-    const grandTotal = subTotal + totalCgst + totalSgst + totalIgst;
+  const grandTotal = subTotal + totalCgst + totalSgst + totalIgst;
 
-    const itemRows = allItems.map((item, i) => `
-        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#ddeeff"}">
+  const itemRows = allItems
+    .map(
+      (item, i) => `
+        <tr style="background:${i % 2 === 0 ? '#ffffff' : '#ddeeff'}">
             <td>${item.itemName}</td>
             <td>${item.type}</td>
             <td>${item.sph}</td>
@@ -86,9 +96,11 @@ export const generateDeliveryChallanHTML = (data) => {
             <td>₹${fmtNum(item.discAmt)}</td>
             <td>₹${fmtNum(item.amount)}</td>
         </tr>
-    `).join("");
+    `,
+    )
+    .join('');
 
-    return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -295,8 +307,8 @@ td:first-child {
             <div class="customer-details">
                 <p><strong>CUSTOMER DETAILS:</strong></p>
                 <p><strong>Name:</strong> ${customerName}</p>
-                <p><strong>Address:</strong> ${customerAddress || "-"}</p>
-                <p><strong>Phone:</strong> ${customerPhone || "-"}</p>
+                <p><strong>Address:</strong> ${customerAddress || '-'}</p>
+                <p><strong>Phone:</strong> ${customerPhone || '-'}</p>
             </div>
         </div>
     </div>
@@ -352,6 +364,267 @@ td:first-child {
         <div class="sig">
             No signature required as this is a system generated invoice
         </div>
+    </div>
+
+</div>
+</body>
+</html>`;
+};
+
+export const generatedorderInvoice = (data) => {
+  const {invoiceNo,invoiceDate,irnNo,placeOfSupply,company = {},billTo = {},shipTo = {},items = [],totalQty = 0,grossAmount = 0,discountAmount = 0,taxableAmount = 0,cgstAmount = 0,sgstAmount = 0,igstAmount = 0,grandTotal = 0, qrCode = '',} = data;
+  const itemRows = items
+    .map(
+      (item, idx) => `
+        <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f9f9f9'};">
+            <td style="font-size:11px;padding:5px 4px;">
+                <b>${item.orderNo || ''}</b><br/>
+                ${item.dcNo ? `( DC No :<br/>${item.dcNo} )<br/>` : ''}
+                ${item.orderDate || ''}
+            </td>
+            <td style="font-size:11px;padding:5px 4px;text-align:center;">${item.referenceNo || ''}</td>
+            <td style="font-size:11px;padding:5px 4px;text-align:left;">${item.materialDescription || ''}</td>
+            <td style="font-size:11px;padding:5px 4px;text-align:center;">${item.hsn || ''}</td>
+            <td style="font-size:11px;padding:5px 4px;text-align:center;">${item.quantity || ''}</td>
+            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.unitRate || 0).toFixed(2)}</td>
+            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.value || 0).toFixed(2)}</td>
+            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.discount || 0).toFixed(2)}</td>
+            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.netValue || 0).toFixed(2)}</td>
+        </tr>
+    `,
+    )
+    .join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+@page {
+    size: A4;
+    margin: 12px;
+}
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    color: #000;
+}
+.invoice-container {
+    width: 100%;
+    border: 2px solid #000;
+}
+.title {
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+    border-bottom: 2px solid #000;
+    padding: 6px 8px;
+    letter-spacing: 1px;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+td, th {
+    border: 1px solid #000;
+    padding: 4px 6px;
+    vertical-align: top;
+}
+.header-table td {
+    padding: 6px 8px;
+    vertical-align: top;
+}
+.header-table .company-cell {
+    width: 60%;
+    border-right: 1px solid #000;
+    border-bottom: 1px solid #000;
+}
+.header-table .meta-cell {
+    width: 40%;
+    border-bottom: 1px solid #000;
+    padding: 6px 8px;
+}
+.company-name {
+    font-size: 15px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+.meta-row {
+    display: flex;
+    margin-bottom: 4px;
+    font-size: 12px;
+}
+.meta-label {
+    font-weight: bold;
+    white-space: nowrap;
+    min-width: 110px;
+}
+.address-section table {
+    border-top: none;
+}
+.address-section th {
+    background: #d9d9d9;
+    font-weight: bold;
+    font-size: 12px;
+    padding: 5px 8px;
+    border: 1px solid #000;
+}
+.address-section td {
+    padding: 8px;
+    vertical-align: top;
+    min-height: 100px;
+    font-size: 12px;
+    width: 50%;
+}
+.address-name {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+.item-table {
+    border-top: none;
+}
+.item-table th {
+    background: #d9d9d9;
+    font-weight: bold;
+    font-size: 11px;
+    text-align: center;
+    padding: 5px 4px;
+    border: 1px solid #000;
+}
+.item-table tbody tr td {
+    border: 1px solid #000;
+}
+.summary-table td {
+    font-size: 12px;
+    padding: 4px 8px;
+    border: 1px solid #000;
+}
+.footer-note {
+    text-align: center;
+    font-style: italic;
+    font-size: 11px;
+    padding: 8px;
+    border-top: 1px solid #000;
+}
+</style>
+</head>
+<body>
+<div class="invoice-container">
+
+    <div class="title">TAX INVOICE</div>
+
+    <table class="header-table" style="border:none;border-bottom:1px solid #000;">
+        <tr>
+            <td class="company-cell">
+                <div class="company-name">DigiOptics</div>
+                <div>WeWork Eldeco Centre, Block A</div>
+                <div>Shivalik Colony, Malviya Nagar</div>
+                <div>New Delhi, Delhi 110017</div>
+                ${company.gstin ? `<div style="margin-top:6px;">GST No. : ${company.gstin}</div>` : ''}
+                ${company.stateCode ? `<div>State Code : ${company.stateCode}</div>` : ''}
+            </td>
+            <td class="meta-cell">
+                <table style="border:none;width:100%;">
+                    <tr>
+                        <td style="border:none;font-weight:bold;white-space:nowrap;padding:3px 4px;">Invoice No</td>
+                        <td style="border:none;padding:3px 4px;">: ${invoiceNo || ''}</td>
+                    </tr>
+                    <tr>
+                        <td style="border:none;font-weight:bold;padding:3px 4px;">IRN No</td>
+                        <td style="border:none;padding:3px 4px;">: ${irnNo || ''}</td>
+                    </tr>
+                    <tr>
+                        <td style="border:none;font-weight:bold;padding:3px 4px;">Invoice<br/>Date</td>
+                        <td style="border:none;padding:3px 4px;">: ${invoiceDate || ''}</td>
+                    </tr>
+                    <tr>
+                        <td style="border:none;font-weight:bold;padding:3px 4px;">Place of<br/>Supply</td>
+                        <td style="border:none;padding:3px 4px;">: ${placeOfSupply || ''}</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <div class="address-section">
+        <table>
+            <tr>
+                <th style="width:50%;">Bill To</th>
+                <th style="width:50%;">Ship To</th>
+            </tr>
+            <tr>
+                <td style="width:50%;min-height:110px;">
+                    <div class="address-name">${billTo.name || ''}</div>
+                    ${billTo.address ? `<div>${billTo.address}</div>` : ''}
+                    ${billTo.city ? `<div>${billTo.city}</div>` : ''}
+                    ${billTo.gstin ? `<div style="margin-top:4px;">GSTIN ${billTo.gstin}</div>` : ''}
+                </td>
+                <td style="width:50%;min-height:110px;">
+                    <div class="address-name">${shipTo.name || ''}</div>
+                    ${shipTo.address ? `<div>${shipTo.address}</div>` : ''}
+                    ${shipTo.city ? `<div>${shipTo.city}</div>` : ''}
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <table class="item-table">
+        <thead>
+            <tr>
+                <th style="width:13%;">Order No</th>
+                <th style="width:9%;">Reference No</th>
+                <th style="width:32%;text-align:left;">Material Description</th>
+                <th style="width:8%;">HSN</th>
+                <th style="width:7%;">Quantity</th>
+                <th style="width:9%;">Unit rate</th>
+                <th style="width:9%;">Value</th>
+                <th style="width:7%;">Discount %</th>
+                <th style="width:9%;">Net value</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${itemRows}
+        </tbody>
+    </table>
+
+    <table class="summary-table">
+        <tr>
+            <td style="width:70%;border-right:1px solid #000;" rowspan="6">
+                <b>Amount in Words:</b><br/>${grandTotal}
+            </td>
+            <td style="width:20%;">Total Qty</td>
+            <td style="width:10%;text-align:right;">${totalQty}</td>
+        </tr>
+        <tr>
+            <td>Gross Amount</td>
+            <td style="text-align:right;">${grossAmount}</td>
+        </tr>
+        <tr>
+            <td>Discount</td>
+            <td style="text-align:right;">${discountAmount}</td>
+        </tr>
+        <tr>
+            <td>Taxable Amount</td>
+            <td style="text-align:right;">${taxableAmount}</td>
+        </tr>
+        <tr>
+            <td>CGST + SGST</td>
+            <td style="text-align:right;">${(Number(cgstAmount) + Number(sgstAmount)).toFixed(2)}</td>
+        </tr>
+        <tr>
+            <td><b>Grand Total</b></td>
+            <td style="text-align:right;"><b>${grandTotal}</b></td>
+        </tr>
+    </table>
+
+    <div class="footer-note">
+        This is a system-generated invoice. No signature required.
     </div>
 
 </div>
