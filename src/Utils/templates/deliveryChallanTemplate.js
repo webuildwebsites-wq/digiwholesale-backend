@@ -561,14 +561,20 @@ td, th {
             <tr>
                 <td style="width:50%;min-height:110px;">
                     <div class="address-name">${billTo.name || ''}</div>
+                    ${billTo.branchName ? `<div>${billTo.branchName}</div>` : ''}
                     ${billTo.address ? `<div>${billTo.address}</div>` : ''}
-                    ${billTo.city ? `<div>${billTo.city}</div>` : ''}
+                    ${(billTo.city || billTo.state || billTo.pincode) ? `<div>${[billTo.city, billTo.state, billTo.pincode].filter(Boolean).join(', ')}</div>` : ''}
+                    ${billTo.contactName ? `<div><b>Contact:</b> ${billTo.contactName}</div>` : ''}
+                    ${billTo.contactNumber ? `<div><b>Ph:</b> ${billTo.contactNumber}</div>` : ''}
                     ${billTo.gstin ? `<div style="margin-top:4px;">GSTIN ${billTo.gstin}</div>` : ''}
                 </td>
                 <td style="width:50%;min-height:110px;">
                     <div class="address-name">${shipTo.name || ''}</div>
+                    ${shipTo.branchName ? `<div>${shipTo.branchName}</div>` : ''}
                     ${shipTo.address ? `<div>${shipTo.address}</div>` : ''}
-                    ${shipTo.city ? `<div>${shipTo.city}</div>` : ''}
+                    ${(shipTo.city || shipTo.state || shipTo.pincode) ? `<div>${[shipTo.city, shipTo.state, shipTo.pincode].filter(Boolean).join(', ')}</div>` : ''}
+                    ${shipTo.contactName ? `<div><b>Contact:</b> ${shipTo.contactName}</div>` : ''}
+                    ${shipTo.contactNumber ? `<div><b>Ph:</b> ${shipTo.contactNumber}</div>` : ''}
                 </td>
             </tr>
         </table>

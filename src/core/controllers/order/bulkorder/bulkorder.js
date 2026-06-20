@@ -389,11 +389,20 @@ export const getBulkOrderInvoice = async (req, res) => {
         const sgstAmount    = bulkOrder.orders.reduce((sum, o) => sum + (parseFloat(o.sgst) || 0), 0);
         const grandTotal    = taxableAmount + cgstAmount + sgstAmount;
 
+        const billTo = customer?.billToAddress || {};
+
+        const shipToAddress = bulkOrder.customer.customerShipToId
+            ? customer?.customerShipToDetails?.find(
+                (s) => s._id.toString() === bulkOrder.customer.customerShipToId.toString()
+              )
+            : null;
+        const shipTo = shipToAddress || billTo;
+
         const invoiceHTML = generatedorderInvoice({
             invoiceNo:    bulkOrder.orders[0]?.orderNumber || orderId,
             invoiceDate:  new Date(bulkOrder.createdAt).toLocaleDateString("en-IN"),
             irnNo:        "",
-            placeOfSupply: "",
+            placeOfSupply: billTo.state || "",
             company: {
                 name:         process.env.COMPANY_NAME    || "DigiOptics",
                 addressLine1: process.env.COMPANY_ADDRESS || "Delhi",
@@ -403,15 +412,25 @@ export const getBulkOrderInvoice = async (req, res) => {
                 stateCode:    "",
             },
             billTo: {
-                name:    bulkOrder.customer.customerName,
-                address: customer?.billToAddress?.address || "",
-                city:    customer?.billToAddress?.city    || "",
-                gstin:   customer?.gstin                  || "",
+                name:         bulkOrder.customer.customerName,
+                branchName:   billTo.branchName            || "",
+                contactName:  billTo.customerContactName   || "",
+                contactNumber:billTo.customerContactNumber || "",
+                address:      billTo.address               || "",
+                state:        billTo.state                 || "",
+                city:         billTo.city                  || "",
+                pincode:      billTo.zipCode               || "",
+                gstin:        customer?.gstNumber          || "",
             },
             shipTo: {
-                name:    bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName,
-                address: customer?.billToAddress?.address || "",
-                city:    customer?.billToAddress?.city    || "",
+                name:         bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName,
+                branchName:   shipTo.branchName            || "",
+                contactName:  shipTo.customerContactName   || "",
+                contactNumber:shipTo.customerContactNumber || "",
+                address:      shipTo.address               || "",
+                state:        shipTo.state                 || "",
+                city:         shipTo.city                  || "",
+                pincode:      shipTo.zipCode               || "",
             },
             items:          allItems,
             totalQty,
