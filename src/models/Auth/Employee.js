@@ -218,6 +218,36 @@ const employee = new mongoose.Schema({
     select: false
   },
 
+  pageAccess: {
+    type: [String],
+    enum: [
+      "DASHBOARD", "REGISTER_CUSTOMER", "REGISTER_STAFF", "STAFF_LIST",
+      "CUSTOMER_LIST", "SHIP_TO", "APPROVALS", "CORRECTIONS", "NEW_ORDER",
+      "ALL_ORDERS", "PENDING_ORDERS", "OTHER_SALES", "SALES_LIST",
+      "RETURN_REFUND", "EXCHANGE_REQUESTS", "DRAFTS", "DAILY_REPORT",
+      "MAIN_REPORT", "ADD_REPAIR", "REPAIR_LIST", "ADD_VENDOR",
+      "VENDOR_LIST", "VENDOR_ORDER", "QUALITY", "FITTING", "SHIPPING",
+      "INVENTORY",
+    ],
+    default: [],
+  },
+
+  accessPermissions: {
+    type: [String],
+    enum: [
+      "ADD_USER", "UPDATE_USER", "DELETE_USER",
+      "ADD_CUSTOMER", "UPDATE_CUSTOMER", "DELETE_CUSTOMER",
+      "ADD_STAFF", "UPDATE_STAFF", "DELETE_STAFF",
+      "ADD_ORDER", "UPDATE_ORDER", "DELETE_ORDER", "APPROVE_ORDER",
+      "ADD_DRAFT", "UPDATE_DRAFT", "DELETE_DRAFT",
+      "ADD_REPAIR", "UPDATE_REPAIR", "DELETE_REPAIR",
+      "ADD_VENDOR", "UPDATE_VENDOR", "DELETE_VENDOR",
+      "UPDATE_QUALITY", "UPDATE_FITTING", "UPDATE_SHIPPING",
+      "UPDATE_INVENTORY", "VIEW_REPORTS", "EXPORT_REPORTS",
+    ],
+    default: [],
+  },
+
   permissions: {
     CanCreateEmployee: {
       type: Boolean,

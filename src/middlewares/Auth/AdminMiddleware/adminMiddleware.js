@@ -60,10 +60,11 @@ export const ProtectUser = async (req, res, next) => {
         EmployeeType: decoded.EmployeeType,
         AccountType: decoded.AccountType || 'EMPLOYEE',
         ...userObj,
-        // Override to ensure string values for middleware checks
         EmployeeType: decoded.EmployeeType,
         Department: userObj.Department?.name || userObj.Department,
-        zone : userObj.zone?.name || userObj.zone
+        zone: userObj.zone?.name || userObj.zone,
+        pageAccess:        userObj.pageAccess        || [],
+        accessPermissions: userObj.accessPermissions || [],
       };
 
       next();

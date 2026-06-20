@@ -73,7 +73,8 @@ const removeHierarchicalRelationships = async (employeeId, oldSupervisorId, oldT
 export const createEmployee = async (req, res) => {
   try {
     const { employeeType, username, employeeName, email, password, phone, address, department, departmentRefId, country,
-      pincode, expiry, zone, zoneRefId, aadharCard, panCard, lab, labRefId, subRoles, aadharCardImg, panCardImg, draftEmployeeId, employeeProfileImg } = req.body;
+      pincode, expiry, zone, zoneRefId, aadharCard, panCard, lab, labRefId, subRoles, aadharCardImg, panCardImg, draftEmployeeId, employeeProfileImg,
+      pageAccess, accessPermissions } = req.body;
 
     let assignedSupervisor = null;
 
@@ -364,6 +365,8 @@ export const createEmployee = async (req, res) => {
       aadharCardImg,
       panCardImg,
       employeeProfileImg,
+      pageAccess:        Array.isArray(pageAccess)        ? pageAccess        : [],
+      accessPermissions: Array.isArray(accessPermissions) ? accessPermissions : [],
     };
 
     if (employeeType.toUpperCase() !== 'SUPERADMIN') {
@@ -835,6 +838,73 @@ export const updateEmployeeDetails = async (req, res) => {
     delete updates.createdBy;
     delete updates._id;
 
+    if (updates.pageAccess !== undefined && !Array.isArray(updates.pageAccess)) {
+      return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'pageAccess must be an array');
+    }
+    if (updates.accessPermissions !== undefined && !Array.isArray(updates.accessPermissions)) {
+      return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'accessPermissions must be an array');
+    }
+
+    const validPageAccess = [
+      "DASHBOARD", "REGISTER_CUSTOMER", "REGISTER_STAFF", "STAFF_LIST",
+      "CUSTOMER_LIST", "SHIP_TO", "APPROVALS", "CORRECTIONS", "NEW_ORDER",
+      "ALL_ORDERS", "PENDING_ORDERS", "OTHER_SALES", "SALES_LIST",
+      "RETURN_REFUND", "EXCHANGE_REQUESTS", "DRAFTS", "DAILY_REPORT",
+      "MAIN_REPORT", "ADD_REPAIR", "REPAIR_LIST", "ADD_VENDOR",
+      "VENDOR_LIST", "VENDOR_ORDER", "QUALITY", "FITTING", "SHIPPING",
+      "INVENTORY",
+    ];
+    const validAccessPermissions = [
+      "ADD_USER", "UPDATE_USER", "DELETE_USER",
+      "ADD_CUSTOMER", "UPDATE_CUSTOMER", "DELETE_CUSTOMER",
+      "ADD_STAFF", "UPDATE_STAFF", "DELETE_STAFF",
+      "ADD_ORDER", "UPDATE_ORDER", "DELETE_ORDER", "APPROVE_ORDER",
+      "ADD_DRAFT", "UPDATE_DRAFT", "DELETE_DRAFT",
+      "ADD_REPAIR", "UPDATE_REPAIR", "DELETE_REPAIR",
+      "ADD_VENDOR", "UPDATE_VENDOR", "DELETE_VENDOR",
+      "UPDATE_QUALITY", "UPDATE_FITTING", "UPDATE_SHIPPING",
+      "UPDATE_INVENTORY", "VIEW_REPORTS", "EXPORT_REPORTS",
+    ];
+    const validPermissionKeys = [
+      "CanCreateEmployee", "CanManageEmployee", "CanManageDepartments",
+      "CanManageAllDepartments", "CanCreateOrders", "CanUpdateOrders",
+      "CanViewOrders", "CanDeleteOrders", "CanProcessWorkflow",
+      "CanApproveWorkflow", "CanCreateCustomers", "CanManageCustomers",
+      "CanManageProducts", "CanViewFinancials", "CanManageFinancials",
+      "CanManageSettings", "CanViewReports", "CanExportReports",
+    ];
+
+    if (Array.isArray(updates.pageAccess)) {
+      const invalid = updates.pageAccess.filter(p => !validPageAccess.includes(p));
+      if (invalid.length > 0) {
+        return sendErrorResponse(res, 400, 'VALIDATION_ERROR', `Invalid pageAccess values: ${invalid.join(', ')}`);
+      }
+    }
+
+    if (Array.isArray(updates.accessPermissions)) {
+      const invalid = updates.accessPermissions.filter(p => !validAccessPermissions.includes(p));
+      if (invalid.length > 0) {
+        return sendErrorResponse(res, 400, 'VALIDATION_ERROR', `Invalid accessPermissions values: ${invalid.join(', ')}`);
+      }
+    }
+
+    if (updates.permissions !== undefined) {
+      if (typeof updates.permissions !== 'object' || Array.isArray(updates.permissions)) {
+        return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'permissions must be an object');
+      }
+      const invalidKeys = Object.keys(updates.permissions).filter(k => !validPermissionKeys.includes(k));
+      if (invalidKeys.length > 0) {
+        return sendErrorResponse(res, 400, 'VALIDATION_ERROR', `Invalid permission keys: ${invalidKeys.join(', ')}`);
+      }
+      const nonBoolValues = Object.entries(updates.permissions).filter(([, v]) => typeof v !== 'boolean');
+      if (nonBoolValues.length > 0) {
+        return sendErrorResponse(res, 400, 'VALIDATION_ERROR', `Permission values must be boolean. Invalid: ${nonBoolValues.map(([k]) => k).join(', ')}`);
+      }
+      updates.permissions = Object.fromEntries(
+        Object.entries(updates.permissions).map(([k, v]) => [`permissions.${k}`, v])
+      );
+    }
+
     if (Object.keys(updates).length === 0) {
       return sendErrorResponse(res, 400, 'NO_UPDATES', 'No updatable fields supplied');
     }
@@ -883,7 +953,15 @@ export const updateEmployeeDetails = async (req, res) => {
       await removeHierarchicalRelationships(userId, oldSupervisorId, oldTeamLeadId);
     }
 
+    const permissionsDotNotation = updates.permissions;
+    delete updates.permissions;
+
     Object.assign(user, updates);
+
+    if (permissionsDotNotation) {
+      await employeeSchema.findByIdAndUpdate(userId, { $set: permissionsDotNotation });
+    }
+
     await user.save();
 
     if (supervisorChanged || teamLeadChanged) {
@@ -894,10 +972,8 @@ export const updateEmployeeDetails = async (req, res) => {
       );
     }
 
-    const userResponse = user.toObject();
-    delete userResponse.password;
-
-    return sendSuccessResponse(res, 200, { user: userResponse }, 'Employee updated successfully');
+    const updatedUser = await employeeSchema.findById(userId).select('-password');
+    return sendSuccessResponse(res, 200, { user: updatedUser }, 'Employee updated successfully');
 
   } catch (error) {
     console.error('Update employee error:', error);
