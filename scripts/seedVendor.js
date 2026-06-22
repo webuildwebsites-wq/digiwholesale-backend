@@ -6,8 +6,7 @@ dotenv.config();
 
 const seedVendor = async () => {
   try {
-    await mongoose.connect("mongodb+srv://digitalsolutions_db_user:o1rNKhidNpz5K8IO@digiopticsmanufacture.iuilxjp.mongodb.net/digioptics-wholeseller?retryWrites=true&w=majority");
-    console.log('Connected to database');
+    await mongoose.connect(process.env.MONGODB_URL);
 
     const existing = await Vendor.findOne({ email: 'testingd12221@gmail.com' });
     if (existing) {
