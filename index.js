@@ -18,7 +18,6 @@ import salesPersonRouter from './src/routes/Auth/SalesPerson.js';
 import locationRouter from './src/routes/Location/location.routes.js';
 import orderRouter from './src/routes/order/order.route.js';
 import productRouter from './src/routes/Product/product.routes.js';
-
 import repairRouter from './src/routes/repair.routes.js';
 import vendorRouter from './src/routes/vendor.routes.js';
 import vendorOrderRouter from './src/routes/vendorOrder.routes.js';

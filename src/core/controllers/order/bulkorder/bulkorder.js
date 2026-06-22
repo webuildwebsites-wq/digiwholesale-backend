@@ -2,15 +2,84 @@ import mongoose from "mongoose";
 import Customer from "../../../../models/Auth/Customer.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
+import Vendor from "../../../../models/Vendor.model.js";
 import generatePDF from "../../../services/pdfService.js";
 import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../../../Utils/templates/deliveryChallanTemplate.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
+import { sendEmail } from "../../../config/Email/emailService.js";
+import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
 
 // const VALID_CATEGORIES        = ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"];
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
 const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
 
 const generateOrderNumber = () => `BO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
+    try {
+        const vendorItemsMap = new Map();
+
+        for (const order of bulkOrder.orders) {
+            for (const item of order.items) {
+                if (item.orderType !== "RX") continue;
+
+                const vendorId = item.rx?.vendor?.id?.toString();
+                const vendorName = item.rx?.vendor?.name;
+                if (!vendorId) continue;
+
+                if (!vendorItemsMap.has(vendorId)) {
+                    vendorItemsMap.set(vendorId, { vendorName, items: [] });
+                }
+                vendorItemsMap.get(vendorId).items.push(item);
+            }
+        }
+
+        if (vendorItemsMap.size === 0) return;
+
+        const vendorIds = [...vendorItemsMap.keys()].filter(id => mongoose.Types.ObjectId.isValid(id));
+        const vendors = await Vendor.find({ _id: { $in: vendorIds } }).lean();
+        const vendorEmailMap = new Map(vendors.map(v => [v._id.toString(), v.email]));
+
+        const orderDate = new Date(bulkOrder.createdAt).toLocaleDateString("en-IN");
+        const orderNumber = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
+
+        const shipTo = bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName;
+
+        const emailPromises = [];
+
+        for (const [vendorId, { vendorName, items }] of vendorItemsMap) {
+            const vendorEmail = vendorEmailMap.get(vendorId);
+            if (!vendorEmail) {
+                console.warn(`No email found for vendor ${vendorId} (${vendorName}), skipping.`);
+                continue;
+            }
+
+            const html = VendorRxOrderTemplate({
+                vendorName,
+                orderNumber,
+                orderDate,
+                customer: {
+                    name:  customer.ownerName || customer.shopName,
+                    phone: customer.mobileNo1 || "",
+                },
+                shipTo,
+                items,
+            });
+
+            emailPromises.push(
+                sendEmail({
+                    to:      vendorEmail,
+                    subject: `RX Order ${orderNumber} — DigiOptics`,
+                    html,
+                }).catch(err => console.error(`Failed to send email to vendor ${vendorId}:`, err.message))
+            );
+        }
+
+        await Promise.all(emailPromises);
+    } catch (err) {
+        console.error("sendVendorRxOrderEmails error:", err.message);
+    }
+};
 
 const validateItemByCategory = (item, product) => {
     const category = (item.category || product.category || "").toUpperCase();
@@ -63,6 +132,9 @@ const validateItemByCategory = (item, product) => {
         }
         if (!item.rx.powers || !Array.isArray(item.rx.powers) || item.rx.powers.length === 0) {
             return "rx.powers is required for RX orderType";
+        }
+        if (!item.rx.vendor?.id || !item.rx.vendor?.name) {
+            return "Vendor details are required for RX orders";
         }
     }
 
@@ -263,6 +335,10 @@ export const createBulkOrder = async (req, res) => {
         };
 
         const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders });
+
+        sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
+            console.error("Vendor email notification error:", err.message)
+        );
 
         return sendSuccessResponse(res, 201, {
             bulkOrder,
