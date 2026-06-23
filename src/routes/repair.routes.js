@@ -1,45 +1,25 @@
 import express from "express";
-
-
-import {
-  createRepair,
-  deleteRepair,
-  getSingleRepair,
-  updateRepair,
-  updateRepairStatus,
-  filterRepairs,
-  getRepairs,
-} from "../core/controllers/repair.controller.js";
+import { createRepair, deleteRepair, getSingleRepair, updateRepair, updateRepairStatus, filterRepairs, getRepairs } from "../core/controllers/repair.controller.js";
 import { ProtectUser } from "../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
+import { checkPageAccess, checkPermission } from "../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
+import { digiupload } from "./uploads/multer.js";
 
 const router = express.Router();
 
-import { digiupload } from "./uploads/multer.js"
+router.use(ProtectUser);
 
+router.post("/", checkPermission("ADD_REPAIR"), digiupload.array("images", 10), createRepair);
 
-// Protect all repair routes
-// router.use(isLoggedIn);
-
-
-// Create repair
-router.post("/",  ProtectUser, digiupload.array("images", 10), createRepair);
-
-// Get repairs list
 router.post("/search", filterRepairs);
 
-// Get all repairs (allow ADMIN or STAFF only)
-router.get("/", getRepairs);
+router.get("/", checkPageAccess("REPAIR_LIST"), getRepairs);
 
-// Get single repair
-router.get("/:_id", getSingleRepair);
+router.get("/:_id", checkPageAccess("REPAIR_LIST"), getSingleRepair);
 
-// Update repair
-router.put("/:_id", ProtectUser, updateRepair);
+router.put("/:_id", checkPermission("UPDATE_REPAIR"), updateRepair);
 
-// Update repair status
-router.patch("/:_id/status", ProtectUser, updateRepairStatus);
+router.patch("/:_id/status", checkPermission("UPDATE_REPAIR"), updateRepairStatus);
 
-// Delete repair
-router.delete("/:_id",ProtectUser, deleteRepair);
+router.delete("/:_id", checkPermission("DELETE_REPAIR"), deleteRepair);
 
 export default router;

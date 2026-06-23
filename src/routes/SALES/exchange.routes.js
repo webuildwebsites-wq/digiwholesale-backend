@@ -1,46 +1,29 @@
 import express from "express";
 import { digiupload } from "../uploads/multer.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
-import {
-  createExchange,
-  selectNewProduct,
-  getAllExchanges,
-  getExchangeById,
-  updateExchangeStatus,
-  updateExchange,
-  deleteExchange,
-  filterExchanges,
-} from "../../core/controllers/SALES/exchange.controller.js";
+import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
+import { createExchange, selectNewProduct, getAllExchanges, getExchangeById, updateExchangeStatus, updateExchange, deleteExchange, filterExchanges } from "../../core/controllers/SALES/exchange.controller.js";
 
 const exchangeRouter = express.Router();
 
 exchangeRouter.use(ProtectUser);
 
-// photos only for exchange (max 10)
 const upload = digiupload.fields([{ name: "photos", maxCount: 10 }]);
 
-// Create exchange request
-exchangeRouter.post("/", upload, createExchange);
+exchangeRouter.post("/", checkPermission("ADD_ORDER"), upload, createExchange);
 
-// Get all (paginated) — optional ?status=Pending&page=1&limit=20
-exchangeRouter.get("/", getAllExchanges);
+exchangeRouter.get("/", checkPageAccess("EXCHANGE_REQUESTS"), getAllExchanges);
 
-// Filter / search
-exchangeRouter.post("/search", filterExchanges);
+exchangeRouter.post("/search", checkPageAccess("EXCHANGE_REQUESTS"), filterExchanges);
 
-// Get single
-exchangeRouter.get("/:id", getExchangeById);
+exchangeRouter.get("/:id", checkPageAccess("EXCHANGE_REQUESTS"), getExchangeById);
 
-// Attach / update selected new product  ("Select Product" step)
-exchangeRouter.patch("/:id/select-product", selectNewProduct);
+exchangeRouter.patch("/:id/select-product", checkPermission("UPDATE_ORDER"), selectNewProduct);
 
-// Update full record (only if Pending)
-exchangeRouter.put("/:id", updateExchange);
+exchangeRouter.put("/:id", checkPermission("UPDATE_ORDER"), updateExchange);
 
-// Update status only
-exchangeRouter.patch("/:id/status", updateExchangeStatus);
+exchangeRouter.patch("/:id/status", checkPermission("UPDATE_ORDER"), updateExchangeStatus);
 
-// Delete
-exchangeRouter.delete("/:id", deleteExchange);
+exchangeRouter.delete("/:id", checkPermission("DELETE_ORDER"), deleteExchange);
 
 export default exchangeRouter;

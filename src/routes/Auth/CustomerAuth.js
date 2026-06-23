@@ -1,5 +1,5 @@
 import express from 'express';
-import { customerForgotPassword, customerLogin,customerResetPassword, customerBasicRegistration, updateCustomerProfile, resetCustomerCredit, sendCustomerForCorrection, resubmitCorrectedCustomer, updateCustomerShipToDetails } from '../../core/controllers/Auth/Customers/CustomerAuth.js';
+import { customerForgotPassword, customerLogin, customerResetPassword, customerBasicRegistration, updateCustomerProfile, resetCustomerCredit, sendCustomerForCorrection, resubmitCorrectedCustomer, updateCustomerShipToDetails } from '../../core/controllers/Auth/Customers/CustomerAuth.js';
 import { financeApproveCustomer, salesHeadApproveCustomer, acceptTermsAndConditions, getPendingCustomersByStage, financeResubmitToSalesHead } from '../../core/controllers/Auth/Customers/CustomerApprovalWorkflow.js';
 import { getAllCustomers, getCustomerById, getCustomerProfile, getDraftCustomers, getCorrectionRequiredCustomers, getPendingTermsCustomers } from '../../core/controllers/Auth/Customers/customer.get.controller.js';
 import { requireSalesFinanceOrSuperAdmin, attachDepartmentInfo } from '../../middlewares/Auth/AdminMiddleware/departmentMiddleware.js';
@@ -8,73 +8,55 @@ import { verifyCustomerEmail } from '../../core/controllers/Auth/Customers/Varif
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
 import { logout, refreshToken } from '../../Utils/Auth/tokenUtils.js';
 import { customerDraftRegistration, deactivateCustomer, deactivateDraftCustomer, getAllDraftCustomers, getMyDraftCustomers, updateDraftCustomer, restoreCustomer, restoreDraftCustomer, getDeletedCustomers, getDeletedDraftCustomers } from '../../core/controllers/Auth/Customers/darft.customers.controller.js';
+import { checkPageAccess, checkPermission } from '../../middlewares/Auth/AdminMiddleware/rbac.middleware.js';
 
 const customerRouter = express.Router();
 
-// Authentication routes
-customerRouter.post('/login',  customerLogin);
-customerRouter.post('/register', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, customerBasicRegistration);
+customerRouter.post('/login', customerLogin);
+customerRouter.post('/register', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('REGISTER_CUSTOMER'), checkPermission('ADD_CUSTOMER'), customerBasicRegistration);
+customerRouter.post('/draft-register', ProtectUser, attachDepartmentInfo, checkPageAccess('REGISTER_CUSTOMER'), checkPermission('ADD_CUSTOMER'), customerDraftRegistration);
 
-customerRouter.post('/draft-register', ProtectUser, attachDepartmentInfo, customerDraftRegistration);
-
-// NEW WORKFLOW ROUTES
 customerRouter.put('/:customerId/finance-approve', ProtectUser, attachDepartmentInfo, financeApproveCustomer);
 customerRouter.put('/:customerId/sales-head-approve', ProtectUser, attachDepartmentInfo, salesHeadApproveCustomer);
 customerRouter.put('/:customerId/finance-resubmit', ProtectUser, attachDepartmentInfo, financeResubmitToSalesHead);
 customerRouter.put('/accept-terms-conditions', protectCustomer, acceptTermsAndConditions);
 
+customerRouter.get('/pending-stage', ProtectUser, attachDepartmentInfo, checkPageAccess('APPROVALS'), getPendingCustomersByStage);
 
-// Get Pending Customers by Stage
-customerRouter.get('/pending-stage', ProtectUser, attachDepartmentInfo, getPendingCustomersByStage);
+customerRouter.put('/:customerId/send-for-correction', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), sendCustomerForCorrection);
+customerRouter.put('/:customerId/resubmit-correction', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), resubmitCorrectedCustomer);
 
+customerRouter.put('/update-profile/:customerId', ProtectUser, checkPermission('UPDATE_CUSTOMER'), updateCustomerProfile);
+customerRouter.put('/update-ship-to-details/:customerId', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), updateCustomerShipToDetails);
 
-customerRouter.put('/:customerId/send-for-correction', ProtectUser, attachDepartmentInfo, sendCustomerForCorrection);
-customerRouter.put('/:customerId/resubmit-correction', ProtectUser, attachDepartmentInfo, resubmitCorrectedCustomer);
-
-
-customerRouter.put('/update-profile/:customerId', ProtectUser, updateCustomerProfile);
-customerRouter.put('/update-ship-to-details/:customerId', ProtectUser, attachDepartmentInfo, updateCustomerShipToDetails);
-
-
-// RESET CUSTOMER CREDIT (Finance/SuperAdmin only)
 customerRouter.put('/reset-credit/:customerId', ProtectUser, attachDepartmentInfo, resetCustomerCredit);
 
-// FORGOT PASSWORD
-customerRouter.post('/forgot-password',  customerForgotPassword);
+customerRouter.post('/forgot-password', customerForgotPassword);
 customerRouter.put('/reset-password/confirm', customerResetPassword);
 customerRouter.post('/verify-email', verifyCustomerEmail);
 
-// TOKEN
 customerRouter.post('/refresh', refreshToken);
 customerRouter.post('/logout', protectCustomer, logout);
 
-
-customerRouter.get('/customer/correction-required', ProtectUser, attachDepartmentInfo, getCorrectionRequiredCustomers);
-customerRouter.get('/customer/pending-terms', ProtectUser, attachDepartmentInfo, getPendingTermsCustomers);
-customerRouter.get('/get-all-customers', ProtectUser, getAllCustomers);
+customerRouter.get('/customer/correction-required', ProtectUser, attachDepartmentInfo, checkPageAccess('CORRECTIONS'), getCorrectionRequiredCustomers);
+customerRouter.get('/customer/pending-terms', ProtectUser, attachDepartmentInfo, checkPageAccess('APPROVALS'), getPendingTermsCustomers);
+customerRouter.get('/get-all-customers', ProtectUser, checkPageAccess('CUSTOMER_LIST'), getAllCustomers);
 customerRouter.get('/customers-profile', protectCustomer, getCustomerProfile);
 customerRouter.get('/get-customer/:customerId', getCustomerById);
-customerRouter.get('/get-draft-customer/:customerId',  getDraftCustomers);
+customerRouter.get('/get-draft-customer/:customerId', getDraftCustomers);
 
+customerRouter.get('/get-all-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('CUSTOMER_LIST'), getAllDraftCustomers);
+customerRouter.get('/get-my-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('CUSTOMER_LIST'), getMyDraftCustomers);
 
-// GET DRAFT CUSTOMERS
-customerRouter.get('/get-all-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, getAllDraftCustomers);
-customerRouter.get('/get-my-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, getMyDraftCustomers);
+customerRouter.put('/update-draft-customer/:draftId', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPermission('UPDATE_CUSTOMER'), updateDraftCustomer);
 
-// UPDATE DRAFT CUSTOMER
-customerRouter.put('/update-draft-customer/:draftId', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, updateDraftCustomer);
+customerRouter.delete('/deactivate-customer/:customerId', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPermission('DELETE_CUSTOMER'), deactivateCustomer);
+customerRouter.delete('/deactivate-draft-customer/:draftId', ProtectUser, attachDepartmentInfo, checkPermission('DELETE_CUSTOMER'), deactivateDraftCustomer);
 
-// DEACTIVATE CUSTOMER
-customerRouter.delete('/deactivate-customer/:customerId', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, deactivateCustomer);
-customerRouter.delete('/deactivate-draft-customer/:draftId', ProtectUser, attachDepartmentInfo,  deactivateDraftCustomer);
+customerRouter.put('/restore-customer/:customerId', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPermission('UPDATE_CUSTOMER'), restoreCustomer);
+customerRouter.put('/restore-draft-customer/:draftId', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), restoreDraftCustomer);
 
-// RESTORE CUSTOMER (RECYCLE BIN)
-customerRouter.put('/restore-customer/:customerId', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, restoreCustomer);
-customerRouter.put('/restore-draft-customer/:draftId', ProtectUser, attachDepartmentInfo, restoreDraftCustomer);
-
-// GET DELETED CUSTOMERS (RECYCLE BIN)
-customerRouter.get('/get-deleted-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, getDeletedCustomers);
-customerRouter.get('/get-deleted-draft-customers', ProtectUser, attachDepartmentInfo, getDeletedDraftCustomers);
-
+customerRouter.get('/get-deleted-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('CUSTOMER_LIST'), getDeletedCustomers);
+customerRouter.get('/get-deleted-draft-customers', ProtectUser, attachDepartmentInfo, checkPageAccess('CUSTOMER_LIST'), getDeletedDraftCustomers);
 
 export default customerRouter;
