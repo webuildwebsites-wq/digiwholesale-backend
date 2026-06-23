@@ -3,8 +3,8 @@ import { sendErrorResponse } from '../../../Utils/response/responseHandler.js';
 export const checkPageAccess = (pageName) => {
   return (req, res, next) => {
     const userPageAccess = req.user?.pageAccess || [];
-
-    if (req.user?.EmployeeType === 'SUPERADMIN' && userPageAccess.length === 0) {
+    
+    if (req.user?.EmployeeType === 'SUPERADMIN') {
       return next();
     }
 
@@ -20,7 +20,7 @@ export const checkPermission = (permissionName) => {
   return (req, res, next) => {
     const userPermissions = req.user?.accessPermissions || [];
 
-    if (req.user?.EmployeeType === 'SUPERADMIN' && userPermissions.length === 0) {
+    if (req.user?.EmployeeType === 'SUPERADMIN') {
       return next();
     }
 
