@@ -855,9 +855,8 @@ export const updateEmployeeDetails = async (req, res) => {
       "INVENTORY",
     ];
     const validAccessPermissions = [
-      "ADD_USER", "UPDATE_USER", "DELETE_USER",
-      "ADD_CUSTOMER", "UPDATE_CUSTOMER", "DELETE_CUSTOMER",
       "ADD_STAFF", "UPDATE_STAFF", "DELETE_STAFF",
+      "ADD_CUSTOMER", "UPDATE_CUSTOMER", "DELETE_CUSTOMER",
       "ADD_ORDER", "UPDATE_ORDER", "DELETE_ORDER", "APPROVE_ORDER",
       "ADD_DRAFT", "UPDATE_DRAFT", "DELETE_DRAFT",
       "ADD_REPAIR", "UPDATE_REPAIR", "DELETE_REPAIR",
