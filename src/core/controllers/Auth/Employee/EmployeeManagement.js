@@ -791,7 +791,7 @@ export const getAllEmployees = async (req, res) => {
     const [users, total] = await Promise.all([
       employeeSchema
         .find(query)
-        .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret -permissions -profile')
+        .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret -profile')
         .populate('createdBy supervisor', 'firstName lastName EmployeeType')
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -865,14 +865,6 @@ export const updateEmployeeDetails = async (req, res) => {
       "UPDATE_QUALITY", "UPDATE_FITTING", "UPDATE_SHIPPING",
       "UPDATE_INVENTORY", "VIEW_REPORTS", "EXPORT_REPORTS",
     ];
-    // const validPermissionKeys = [
-    //   "CanCreateEmployee", "CanManageEmployee", "CanManageDepartments",
-    //   "CanManageAllDepartments", "CanCreateOrders", "CanUpdateOrders",
-    //   "CanViewOrders", "CanDeleteOrders", "CanProcessWorkflow",
-    //   "CanApproveWorkflow", "CanCreateCustomers", "CanManageCustomers",
-    //   "CanManageProducts", "CanViewFinancials", "CanManageFinancials",
-    //   "CanManageSettings", "CanViewReports", "CanExportReports",
-    // ];
 
     if (Array.isArray(updates.pageAccess)) {
       const invalid = updates.pageAccess.filter(p => !validPageAccess.includes(p));
@@ -888,22 +880,7 @@ export const updateEmployeeDetails = async (req, res) => {
       }
     }
 
-    if (updates.permissions !== undefined) {
-      if (typeof updates.permissions !== 'object' || Array.isArray(updates.permissions)) {
-        return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'permissions must be an object');
-      }
-      // const invalidKeys = Object.keys(updates.permissions).filter(k => !validPermissionKeys.includes(k));
-      // if (invalidKeys.length > 0) {
-      //   return sendErrorResponse(res, 400, 'VALIDATION_ERROR', `Invalid permission keys: ${invalidKeys.join(', ')}`);
-      // }
-      const nonBoolValues = Object.entries(updates.permissions).filter(([, v]) => typeof v !== 'boolean');
-      if (nonBoolValues.length > 0) {
-        return sendErrorResponse(res, 400, 'VALIDATION_ERROR', `Permission values must be boolean. Invalid: ${nonBoolValues.map(([k]) => k).join(', ')}`);
-      }
-      updates.permissions = Object.fromEntries(
-        Object.entries(updates.permissions).map(([k, v]) => [`permissions.${k}`, v])
-      );
-    }
+    delete updates.permissions;
 
     if (Object.keys(updates).length === 0) {
       return sendErrorResponse(res, 400, 'NO_UPDATES', 'No updatable fields supplied');
@@ -1179,7 +1156,7 @@ export const getAllDraftEmployee = async (req, res) => {
     const [users, total] = await Promise.all([
       employeeDraftSchema
         .find(query)
-        .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret -permissions -profile')
+        .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret -profile')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -1217,7 +1194,7 @@ export const getMyDraftEmployee = async (req, res) => {
     const [users, total] = await Promise.all([
       employeeDraftSchema
         .find(query)
-        .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret -permissions -profile')
+        .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret -profile')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)

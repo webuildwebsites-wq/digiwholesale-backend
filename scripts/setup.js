@@ -31,26 +31,6 @@ const setupProject = async () => {
       profile: {
         dateOfJoining: new Date()
       },
-      permissions: {
-        CanCreateEmployee: true,
-        CanManageEmployee: true,
-        CanManageDepartments: true,
-        CanManageAllDepartments: true,
-        CanCreateOrders: true,
-        CanUpdateOrders: true,
-        CanViewOrders: true,
-        CanDeleteOrders: true,
-        CanProcessWorkflow: true,
-        CanApproveWorkflow: true,
-        CanCreateCustomers: true,
-        CanManageCustomers: true,
-        CanManageProducts: true,
-        CanViewFinancials: true,
-        CanManageFinancials: true,
-        CanManageSettings: true,
-        CanViewReports: true,
-        CanExportReports: true
-      },
     };
 
     let employeeCode = generateEmployeeCode(superAdminData.employeeName);

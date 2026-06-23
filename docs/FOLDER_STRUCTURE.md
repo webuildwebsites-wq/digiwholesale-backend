@@ -172,15 +172,6 @@ src/models/Auth/
 
 **Advanced Features:**
 ```javascript
-// User.js - Dynamic permissions based on user type
-permissions: {
-  canCreateUsers: {
-    type: Boolean,
-    default: function() {
-      return ['superadmin', 'subadmin', 'supervisor'].includes(this.EmployeeType);
-    }
-  }
-}
 
 // Customer.js - Business validation
 gstNumber: {
@@ -210,7 +201,6 @@ src/middlewares/Auth/
 export const requireAdmin = (req, res, next) => {
   // 1. Verify JWT token
   // 2. Check user type/role
-  // 3. Validate permissions
   // 4. Attach user to request
   // 5. Call next() or return error
 };
