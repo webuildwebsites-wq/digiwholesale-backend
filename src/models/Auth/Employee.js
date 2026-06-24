@@ -235,9 +235,8 @@ const employee = new mongoose.Schema({
   accessPermissions: {
     type: [String],
     enum: [
-      "ADD_USER", "UPDATE_USER", "DELETE_USER",
-      "ADD_CUSTOMER", "UPDATE_CUSTOMER", "DELETE_CUSTOMER",
       "ADD_STAFF", "UPDATE_STAFF", "DELETE_STAFF",
+      "ADD_CUSTOMER", "UPDATE_CUSTOMER", "DELETE_CUSTOMER",
       "ADD_ORDER", "UPDATE_ORDER", "DELETE_ORDER", "APPROVE_ORDER",
       "ADD_DRAFT", "UPDATE_DRAFT", "DELETE_DRAFT",
       "ADD_REPAIR", "UPDATE_REPAIR", "DELETE_REPAIR",
@@ -246,99 +245,6 @@ const employee = new mongoose.Schema({
       "UPDATE_INVENTORY", "VIEW_REPORTS", "EXPORT_REPORTS",
     ],
     default: [],
-  },
-
-  permissions: {
-    CanCreateEmployee: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN',].includes(this.EmployeeType);
-      }
-    },
-    CanManageEmployee: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN', 'SUPERVISOR'].includes(this.EmployeeType);
-      }
-    },
-    CanManageDepartments: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN'].includes(this.EmployeeType);
-      }
-    },
-    CanManageAllDepartments: {
-      type: Boolean,
-      default: function () {
-        return this.EmployeeType === 'SUPERADMIN';
-      }
-    },
-    CanCreateOrders: {
-      type: Boolean,
-      default: true
-    },
-    CanUpdateOrders: {
-      type: Boolean,
-      default: true
-    },
-    CanViewOrders: {
-      type: Boolean,
-      default: true
-    },
-    CanDeleteOrders: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN', 'SUPERVISOR'].includes(this.EmployeeType);
-      }
-    },
-    CanProcessWorkflow: {
-      type: Boolean,
-      default: true
-    },
-    CanApproveWorkflow: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN', 'SUPERVISOR'].includes(this.EmployeeType);
-      }
-    },
-    CanCreateCustomers: {
-      type: Boolean,
-      default: true
-    },
-    CanManageCustomers: {
-      type: Boolean,
-      default: true
-    },
-    CanManageProducts: {
-      type: Boolean,
-      default: true
-    },
-    CanViewFinancials: {
-      type: Boolean,
-      default: true
-    },
-    CanManageFinancials: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN'].includes(this.EmployeeType);
-      }
-    },
-    CanManageSettings: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN'].includes(this.EmployeeType);
-      }
-    },
-    CanViewReports: {
-      type: Boolean,
-      default: true
-    },
-    CanExportReports: {
-      type: Boolean,
-      default: function () {
-        return ['SUPERADMIN', 'ADMIN', 'SUPERVISOR'].includes(this.EmployeeType);
-      }
-    }
   },
 
   profile: {

@@ -1,45 +1,30 @@
 import express from "express";
 import { digiupload } from "../uploads/multer.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
-import {
-  createReturnRefund,
-  getAllReturnRefunds,
-  getReturnRefundById,
-  updateReturnRefundStatus,
-  updateReturnRefund,
-  deleteReturnRefund,
-  filterReturnRefunds,
-} from "../../core/controllers/SALES/returnRefund.controller.js";
+import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
+import { createReturnRefund, getAllReturnRefunds, getReturnRefundById, updateReturnRefundStatus, updateReturnRefund, deleteReturnRefund, filterReturnRefunds } from "../../core/controllers/SALES/returnRefund.controller.js";
 
 const returnRefundRouter = express.Router();
 
 returnRefundRouter.use(ProtectUser);
 
-// photos (max 10) + optional giftVoucher (1)
 const upload = digiupload.fields([
   { name: "photos", maxCount: 10 },
   { name: "giftVoucher", maxCount: 1 },
 ]);
 
-// Create
-returnRefundRouter.post("/", upload, createReturnRefund);
+returnRefundRouter.post("/", checkPermission("ADD_ORDER"), upload, createReturnRefund);
 
-// Get all (paginated) — optional ?status=Pending&page=1&limit=20
-returnRefundRouter.get("/", getAllReturnRefunds);
+returnRefundRouter.get("/", checkPageAccess("RETURN_REFUND"), getAllReturnRefunds);
 
-// Filter / search
-returnRefundRouter.post("/search", filterReturnRefunds);
+returnRefundRouter.post("/search", checkPageAccess("RETURN_REFUND"), filterReturnRefunds);
 
-// Get single
-returnRefundRouter.get("/:id", getReturnRefundById);
+returnRefundRouter.get("/:id", checkPageAccess("RETURN_REFUND"), getReturnRefundById);
 
-// Update full record
-returnRefundRouter.put("/:id", updateReturnRefund);
+returnRefundRouter.put("/:id", checkPermission("UPDATE_ORDER"), updateReturnRefund);
 
-// Update status only
-returnRefundRouter.patch("/:id/status", updateReturnRefundStatus);
+returnRefundRouter.patch("/:id/status", checkPermission("UPDATE_ORDER"), updateReturnRefundStatus);
 
-// Delete
-returnRefundRouter.delete("/:id", deleteReturnRefund);
+returnRefundRouter.delete("/:id", checkPermission("DELETE_ORDER"), deleteReturnRefund);
 
 export default returnRefundRouter;

@@ -26,9 +26,6 @@ const userSchema = new mongoose.Schema({
   EmployeeType: {
     type: String,
     enum: ['superadmin', 'subadmin', 'supervisor', 'user']
-  },
-  permissions: {
-    canCreateUsers: { type: Boolean, default: function() { ... } }
   }
 });
 ```
@@ -168,15 +165,6 @@ router.post('/protected-route',
 
 #### **Schema Design Philosophy**
 ```javascript
-// User schema with computed permissions
-permissions: {
-  canCreateUsers: {
-    type: Boolean,
-    default: function() {
-      return ['superadmin', 'subadmin', 'supervisor'].includes(this.EmployeeType);
-    }
-  }
-}
 ```
 
 **Design Principles:**

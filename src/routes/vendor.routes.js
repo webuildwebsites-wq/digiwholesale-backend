@@ -1,29 +1,24 @@
 import express from "express";
 import { createVendor, getAllVendors, getVendorById, updateVendor, deleteVendor, filterVendors, suggestionVendors } from "../core/controllers/vendor.controller.js";
 import { ProtectUser } from "../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
+import { checkPageAccess, checkPermission } from "../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
 
 const router = express.Router();
 
-// Create vendor
-router.post("/", ProtectUser, createVendor);
+router.use(ProtectUser);
 
-// GET /api/vendor/suggestion?q=john  → search by name or mobile (max 5)
+router.post("/", checkPermission("ADD_VENDOR"), createVendor);
+
 router.get("/suggestion", suggestionVendors);
 
-// Get all vendors
-router.get("/", getAllVendors);
+router.get("/", checkPageAccess("VENDOR_LIST"), getAllVendors);
 
-// Get vendor by ID
-router.get("/:_id", getVendorById);
+router.get("/:_id", checkPageAccess("VENDOR_LIST"), getVendorById);
 
-// Update vendor
-router.put("/:_id", ProtectUser, updateVendor);
+router.put("/:_id", checkPermission("UPDATE_VENDOR"), updateVendor);
 
-// Delete vendor (ADMIN only)
-router.delete("/:_id",ProtectUser, deleteVendor);
+router.delete("/:_id", checkPermission("DELETE_VENDOR"), deleteVendor);
 
-// fiter vendors by date range and keyword
 router.post("/search", filterVendors);
 
 export default router;
-

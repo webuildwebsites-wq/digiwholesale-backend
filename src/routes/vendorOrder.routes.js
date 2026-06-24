@@ -1,35 +1,26 @@
 import express from "express";
+import { createVendorOrder, getVendorOrderById, updateVendorOrderStatus, getVendorOrders, deleteVendorOrder, updateVendorOrderIssues, filterVendorsOrders, suggestionVendorOrder } from "../core/controllers/vendorOrder.controller.js";
+import { ProtectUser } from "../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
+import { checkPageAccess, checkPermission } from "../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
+
 const router = express.Router();
 
-import {
-    createVendorOrder, getVendorOrderById, updateVendorOrderStatus, getVendorOrders, deleteVendorOrder, updateVendorOrderIssues, filterVendorsOrders, suggestionVendorOrder
-} from "../core/controllers/vendorOrder.controller.js";
-import { ProtectUser } from "../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
+router.use(ProtectUser);
 
-// create new vendor order
-router.post("/",ProtectUser, createVendorOrder);
+router.post("/", checkPermission("ADD_VENDOR"), createVendorOrder);
 
-
-// GET /api/vendor-order/search?q=john  → search by name or mobile (max 5)
 router.get("/suggestion", suggestionVendorOrder);
 
-// get all vendor orders
-router.get("/", getVendorOrders);
+router.get("/", checkPageAccess("VENDOR_ORDER"), getVendorOrders);
 
-// get order by id
-router.get("/:_id", getVendorOrderById);
+router.get("/:_id", checkPageAccess("VENDOR_ORDER"), getVendorOrderById);
 
-// update order status
-router.put("/:_id/status",ProtectUser, updateVendorOrderStatus);
+router.put("/:_id/status", checkPermission("UPDATE_VENDOR"), updateVendorOrderStatus);
 
+router.delete("/:_id", checkPermission("DELETE_VENDOR"), deleteVendorOrder);
 
-// delete order
-router.delete("/:_id",ProtectUser, deleteVendorOrder);
+router.put("/issues/:_id", checkPermission("UPDATE_VENDOR"), updateVendorOrderIssues);
 
-// update product status damage or missing qty
-router.put("/issues/:_id",ProtectUser, updateVendorOrderIssues);
-
-// fiter vendors order by date range and keyword
 router.post("/search", filterVendorsOrders);
 
 export default router;
