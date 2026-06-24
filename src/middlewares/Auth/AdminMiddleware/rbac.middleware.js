@@ -3,7 +3,8 @@ import { sendErrorResponse } from '../../../Utils/response/responseHandler.js';
 export const checkPageAccess = (pageName) => {
   return (req, res, next) => {
     const userPageAccess = req.user?.pageAccess || [];
-    
+    console.log("req?.user : ", req?.user);
+
     if (req.user?.EmployeeType === 'SUPERADMIN') {
       return next();
     }

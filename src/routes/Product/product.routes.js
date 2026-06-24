@@ -1,9 +1,11 @@
 import express from "express";
 import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames } from "../../core/controllers/Product/Product.controller.js";
 import { digiupload } from "../uploads/multer.js";
-import { checkPageAccess } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
+import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
+import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
 
 const router = express.Router();
+router.use(ProtectUser);
 
 // Get all products (pagination)
 router.get("/", checkPageAccess('INVENTORY'), getProducts);
@@ -30,9 +32,9 @@ router.post("/search", checkPageAccess('INVENTORY'), filterProducts);
 
 
 // Update product
-router.put("/", checkPageAccess('UPDATE_INVENTORY'), digiupload.single("image"), updateProduct);
+router.put("/", checkPermission('UPDATE_INVENTORY'), digiupload.single("image"), updateProduct);
 
 
 // Delete product
-router.delete("/:id", deleteProduct);
+router.delete("/:id", checkPermission('UPDATE_INVENTORY'), deleteProduct);
 export default router;
