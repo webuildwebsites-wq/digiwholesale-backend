@@ -13,18 +13,26 @@ const upload = digiupload.fields([
   { name: "giftVoucher", maxCount: 1 },
 ]);
 
-returnRefundRouter.post("/", checkPermission("ADD_ORDER"), upload, createReturnRefund);
+const uploadOptional = (req, res, next) => {
+  const ct = req.headers["content-type"] || "";
+  if (ct.includes("multipart/form-data")) {
+    return upload(req, res, next);
+  }
+  next();
+};
 
-returnRefundRouter.get("/", checkPageAccess("RETURN_REFUND"), getAllReturnRefunds);
+returnRefundRouter.post("/create", uploadOptional, createReturnRefund);
 
-returnRefundRouter.post("/search", checkPageAccess("RETURN_REFUND"), filterReturnRefunds);
+returnRefundRouter.get("/get-all-return-items",  getAllReturnRefunds);
 
-returnRefundRouter.get("/:id", checkPageAccess("RETURN_REFUND"), getReturnRefundById);
+returnRefundRouter.post("/search",  filterReturnRefunds);
 
-returnRefundRouter.put("/:id", checkPermission("UPDATE_ORDER"), updateReturnRefund);
+returnRefundRouter.get("/:id",  getReturnRefundById);
 
-returnRefundRouter.patch("/:id/status", checkPermission("UPDATE_ORDER"), updateReturnRefundStatus);
+// returnRefundRouter.put("/:id", updateReturnRefund);
 
-returnRefundRouter.delete("/:id", checkPermission("DELETE_ORDER"), deleteReturnRefund);
+returnRefundRouter.patch("/:id/status", updateReturnRefundStatus);
+
+returnRefundRouter.delete("/:id", deleteReturnRefund);
 
 export default returnRefundRouter;

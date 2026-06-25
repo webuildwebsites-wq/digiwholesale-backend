@@ -2,10 +2,8 @@ import mongoose from "mongoose";
 import ReturnRefund from "../../../models/SALES/ReturnRefund.model.js";
 import { uploadReturnRefundFile } from "../../../Utils/uploads/returnRefund.upload.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
+import BulkOrder from "../../../models/order/BulkOrder.js";
 
-/* =====================================================
-   CREATE RETURN / REFUND REQUEST
-===================================================== */
 export const createReturnRefund = async (req, res) => {
   try {
     const {
@@ -14,19 +12,30 @@ export const createReturnRefund = async (req, res) => {
       items,
       refundAmount, refundMethod, loyaltyPoints,
       remark,
+      OrderId,
+      returnType,
     } = req.body;
 
-    // ── Validate required fields ──────────────────
-    if (!name)             throw new Error("Customer name is required");
-    if (!phone)            throw new Error("Phone number is required");
-    if (!dateOfPurchase)   throw new Error("Date of purchase is required");
-    if (!itemType)         throw new Error("Item type is required");
-    if (!condition)        throw new Error("Condition is required");
-    if (!reasonForReturn)  throw new Error("Reason for return is required");
-    if (!refundAmount)     throw new Error("Refund amount is required");
-    if (!refundMethod)     throw new Error("Refund method is required");
+    if (!name)            throw new Error("Customer name is required");
+    if (!phone)           throw new Error("Phone number is required");
+    if (!email)           throw new Error("Email is required");
+    if (!dateOfPurchase)  throw new Error("Date of purchase is required");
+    if (!itemType)        throw new Error("Item type is required");
+    if (!condition)       throw new Error("Condition is required");
+    if (!reasonForReturn) throw new Error("Reason for return is required");
+    if (!refundAmount)    throw new Error("Refund amount is required");
+    if (!refundMethod)    throw new Error("Refund method is required");
+    if (!OrderId)         throw new Error("Order id is required");
 
-    // ── Parse items (sent as JSON string from FormData) ──
+    if (!mongoose.Types.ObjectId.isValid(OrderId)) {
+      return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid Order ID");
+    }
+
+    const bulkOrder = await BulkOrder.findById(OrderId);
+    if (!bulkOrder) {
+      return sendErrorResponse(res, 404, "ORDER_NOT_FOUND", "Order not found");
+    }
+
     let parsedItems = items;
     if (typeof items === "string") {
       parsedItems = JSON.parse(items);
@@ -35,7 +44,65 @@ export const createReturnRefund = async (req, res) => {
       throw new Error("At least one item is required");
     }
 
-    // ── Upload photos (req.files from multer) ────
+    const requestedStatus = returnType === "REFUND" ? "REFUND_REQUESTED" : "RETURN_REQUESTED";
+
+    const itemsWithMissingCategory = parsedItems.filter(i => i.productId && !i.category);
+    if (itemsWithMissingCategory.length > 0) {
+      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Each item must include 'category' to uniquely identify it in the order");
+    }
+
+    const matchItem = (orderItem, requestedItem) =>
+      orderItem.productId.toString() === requestedItem.productId.toString() &&
+      (orderItem.category || "").toUpperCase() === (requestedItem.category || "").toUpperCase();
+
+    const allOrderItems = bulkOrder.orders.flatMap(o => o.items);
+
+    const notFoundItems = parsedItems
+      .filter(i => i.productId)
+      .filter(i => !allOrderItems.some(oi => matchItem(oi, i)));
+
+    if (notFoundItems.length > 0) {
+      const names = notFoundItems.map(i => `${i.item || i.productId} (${i.category})`).join(", ");
+      return sendErrorResponse(res, 404, "ITEMS_NOT_IN_ORDER", `The following items do not exist in this order: ${names}`);
+    }
+
+    const alreadyInReturnProcess = [];
+
+    for (const requestedItem of parsedItems) {
+      if (!requestedItem.productId) continue;
+      for (const order of bulkOrder.orders) {
+        for (const item of order.items) {
+          if (matchItem(item, requestedItem)) {
+            if (item.itemStatus && item.itemStatus !== "ACTIVE") {
+              alreadyInReturnProcess.push({
+                productId: item.productId,
+                itemName: item.itemName,
+                currentStatus: item.itemStatus,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (alreadyInReturnProcess.length > 0) {
+      const itemNames = alreadyInReturnProcess.map(i => `${i.itemName} (${i.currentStatus})`).join(", ");
+      return sendErrorResponse(res, 400, "ITEMS_ALREADY_IN_RETURN_PROCESS", `The following items are already in return/refund process: ${itemNames}`);
+    }
+
+    for (const requestedItem of parsedItems) {
+      if (!requestedItem.productId) continue;
+      for (const order of bulkOrder.orders) {
+        for (const item of order.items) {
+          if (matchItem(item, requestedItem)) {
+            item.itemStatus = requestedStatus;
+          }
+        }
+      }
+    }
+
+    await bulkOrder.save();
+
     let photos = [];
     if (req.files && req.files.photos && req.files.photos.length > 0) {
       const uploadPromises = req.files.photos.map((file) =>
@@ -44,7 +111,6 @@ export const createReturnRefund = async (req, res) => {
       photos = await Promise.all(uploadPromises);
     }
 
-    // ── Upload gift voucher image (optional) ─────
     let giftVoucherUrl = null;
     if (req.files && req.files.giftVoucher && req.files.giftVoucher.length > 0) {
       giftVoucherUrl = await uploadReturnRefundFile(
@@ -52,6 +118,19 @@ export const createReturnRefund = async (req, res) => {
         "return-refund/vouchers"
       );
     }
+
+    const enrichedItems = parsedItems.map((i) => ({
+      ...i,
+      returnType: requestedStatus,
+      category: (i.category || "").toUpperCase(),
+      images: Array.isArray(i.images) ? i.images : [],
+      orderNumber: bulkOrder.orders.find((o) =>
+        o.items.some((it) =>
+          it.productId.toString() === (i.productId || "").toString() &&
+          (it.category || "").toUpperCase() === (i.category || "").toUpperCase()
+        )
+      )?.orderNumber || "",
+    }));
 
     const returnRefund = await ReturnRefund.create({
       name: name.trim().toUpperCase(),
@@ -61,7 +140,7 @@ export const createReturnRefund = async (req, res) => {
       itemType,
       condition,
       reasonForReturn,
-      items: parsedItems,
+      items: enrichedItems,
       refundAmount: Number(refundAmount),
       refundMethod,
       loyaltyPoints: Number(loyaltyPoints) || 0,
@@ -69,7 +148,7 @@ export const createReturnRefund = async (req, res) => {
       photos,
       remark,
       createdBy: req.user._id,
-      createdByName: req.user.name,
+      createdByName: req.user.employeeName || req.user.name,
     });
 
     return sendSuccessResponse(res, 201, { returnRefund }, "Return & Refund request created successfully");
@@ -80,9 +159,6 @@ export const createReturnRefund = async (req, res) => {
   }
 };
 
-/* =====================================================
-   GET ALL RETURN / REFUND REQUESTS (PAGINATED)
-===================================================== */
 export const getAllReturnRefunds = async (req, res) => {
   try {
 
@@ -90,7 +166,6 @@ export const getAllReturnRefunds = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip  = (page - 1) * limit;
 
-    // Optional status filter  ?status=Pending
     const filter = {  };
     if (req.query.status) filter.status = req.query.status;
 
@@ -99,23 +174,24 @@ export const getAllReturnRefunds = async (req, res) => {
       ReturnRefund.countDocuments(filter),
     ]);
 
+    const totalPages = Math.ceil(total / limit);
+
     return sendSuccessResponse(res, 200, {
-      page,
-      limit,
-      total,
-      count: returnRefunds.length,
-      hasMore: skip + returnRefunds.length < total,
       returnRefunds,
-    });
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalRecords: total,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    }, "Return & Refund records retrieved successfully");
 
   } catch (error) {
     return sendErrorResponse(res, 500, "GET_RETURN_REFUNDS_ERROR", error.message);
   }
 };
 
-/* =====================================================
-   GET SINGLE RETURN / REFUND REQUEST
-===================================================== */
 export const getReturnRefundById = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOne({
@@ -133,22 +209,16 @@ export const getReturnRefundById = async (req, res) => {
   }
 };
 
-/* =====================================================
-   UPDATE STATUS  (Approve / Reject / Complete)
-===================================================== */
 export const updateReturnRefundStatus = async (req, res) => {
   try {
     const { status, remark } = req.body;
 
-    const allowed = ["Pending", "Approved", "Rejected", "Completed"];
+    const allowed = ["Pending", "Return_Approved", "Refund_Approved", "Rejected", "Completed"];
     if (!status || !allowed.includes(status)) {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Status must be one of: ${allowed.join(", ")}`);
     }
 
-    const returnRefund = await ReturnRefund.findOne({
-      _id: req.params.id,
-    });
-
+    const returnRefund = await ReturnRefund.findById(req.params.id);
     if (!returnRefund) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Return/Refund request not found");
     }
@@ -157,6 +227,51 @@ export const updateReturnRefundStatus = async (req, res) => {
     if (remark) returnRefund.remark = remark;
     await returnRefund.save();
 
+    if (status === "Return_Approved" || status === "Refund_Approved") {
+      const orderNumber = returnRefund.items?.[0]?.orderNumber;
+      const productIds  = returnRefund.items.map(i => i.productId?.toString()).filter(Boolean);
+
+      if (productIds.length > 0) {
+        const approvedStatus = status === "Refund_Approved" ? "REFUNDED" : "RETURNED";
+        const bulkOrder = orderNumber
+          ? await BulkOrder.findOne({ "orders.orderNumber": orderNumber })
+          : null;
+
+        if (bulkOrder) {
+          for (const order of bulkOrder.orders) {
+            for (const item of order.items) {
+              if (productIds.includes(item.productId?.toString())) {
+                item.itemStatus = approvedStatus;
+              }
+            }
+          }
+          await bulkOrder.save();
+        }
+      }
+    }
+
+    if (status === "Rejected") {
+      const orderNumber = returnRefund.items?.[0]?.orderNumber;
+      const productIds  = returnRefund.items.map(i => i.productId?.toString()).filter(Boolean);
+
+      if (productIds.length > 0) {
+        const bulkOrder = orderNumber
+          ? await BulkOrder.findOne({ "orders.orderNumber": orderNumber })
+          : null;
+
+        if (bulkOrder) {
+          for (const order of bulkOrder.orders) {
+            for (const item of order.items) {
+              if (productIds.includes(item.productId?.toString())) {
+                item.itemStatus = "ACTIVE";
+              }
+            }
+          }
+          await bulkOrder.save();
+        }
+      }
+    }
+
     return sendSuccessResponse(res, 200, { returnRefund }, `Request marked as ${status}`);
 
   } catch (error) {
@@ -164,9 +279,7 @@ export const updateReturnRefundStatus = async (req, res) => {
   }
 };
 
-/* =====================================================
-   UPDATE RETURN / REFUND REQUEST (full edit)
-===================================================== */
+
 export const updateReturnRefund = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOne({
@@ -200,9 +313,6 @@ export const updateReturnRefund = async (req, res) => {
   }
 };
 
-/* =====================================================
-   DELETE RETURN / REFUND REQUEST
-===================================================== */
 export const deleteReturnRefund = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOneAndDelete({
@@ -220,9 +330,6 @@ export const deleteReturnRefund = async (req, res) => {
   }
 };
 
-/* =====================================================
-   FILTER / SEARCH
-===================================================== */
 export const filterReturnRefunds = async (req, res) => {
   try {
     const { startDate, endDate, keyword, status } = req.body;

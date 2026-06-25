@@ -1,9 +1,5 @@
 import { bucket } from "../../core/config/bucket/gcs.js";
 
-/**
- * Upload a single file to GCS under the "return-refund/" folder.
- * Returns the public URL string.
- */
 export const uploadReturnRefundFile = (file, folder = "return-refund") => {
   return new Promise((resolve, reject) => {
     try {

@@ -1,8 +1,5 @@
 import mongoose from "mongoose";
 
-/* ─────────────────────────────────────────
-   Sub-schema: each returned item row
-───────────────────────────────────────── */
 const returnItemSchema = new mongoose.Schema(
   {
     item: { type: String, required: true },
@@ -15,13 +12,15 @@ const returnItemSchema = new mongoose.Schema(
       default: "EXCLUDED",
       enum: ["INCLUDED", "EXCLUDED"],
     },
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: "DigiProduct" },
+    orderNumber: { type: String },
+    returnType: { type: String },
+    category: { type: String },
+    images: { type: [String], default: [] },
   },
   { _id: false }
 );
 
-/* ─────────────────────────────────────────
-   Main schema
-───────────────────────────────────────── */
 const returnRefundSchema = new mongoose.Schema(
   {
     /* ---------- Basic Info ---------- */
@@ -54,7 +53,7 @@ const returnRefundSchema = new mongoose.Schema(
     /* ---------- Status ---------- */
     status: {
       type: String,
-      enum: ["Pending", "Approved", "Rejected", "Completed"],
+      enum: ["Pending", "Return_Approved", "Refund_Approved", "Rejected", "Completed"],
       default: "Pending",
       index: true,
     },

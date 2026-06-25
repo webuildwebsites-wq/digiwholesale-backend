@@ -93,6 +93,12 @@ const BulkOrderItemSchema = new mongoose.Schema(
         discountPercent: Number,
         discountAmount: Number,
 
+        itemStatus: {
+            type: String,
+            enum: ["ACTIVE", "RETURN_REQUESTED", "RETURNED"],
+            default: "ACTIVE",
+        },
+
         tint: String,
         coating: String,
         expiry: String,
