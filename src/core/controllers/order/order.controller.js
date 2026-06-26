@@ -4,8 +4,9 @@ import {
   getProductNamesService, getTintOptionsService, updateDraftOrderService,
   getFrameTypesService, deleteOrderService,
   getProductBrandsService, getProductCategoriesService, getProductTreatmentsService,
-  getProductIndexesService, getProductTypesService,
+  getProductIndexesService, 
   getProductCoatingsService,
+  suggestionsOrdersService,
 } from "../../services/order/order.service.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 
@@ -136,16 +137,29 @@ export const getProductIndexes = async (req, res) => {
   } catch (err) { return handleError(res, err); }
 };
 
-export const getProductTypes = async (req, res) => {
-  try {
-    const data = await getProductTypesService();
-    return sendSuccessResponse(res, 200, data, "Product types retrieved successfully");
-  } catch (err) { return handleError(res, err); }
-};
+// export const getProductTypes = async (req, res) => {
+//   try {
+//     const data = await getProductTypesService();
+//     return sendSuccessResponse(res, 200, data, "Product types retrieved successfully");
+//   } catch (err) { return handleError(res, err); }
+// };
 
 export const getProductCoatings = async (req, res) => {
   try {
     const data = await getProductCoatingsService(req.query);
     return sendSuccessResponse(res, 200, data, "Product coatings retrieved successfully");
   } catch (err) { return handleError(res, err); }
+};
+
+export const suggestionsOrders = async (req, res) => {
+  try {
+    const limit  = Math.min(parseInt(req.query.limit) || 10, 50);
+    const search = req.query.search || "";
+
+    const orders = await suggestionsOrdersService({ search, limit });
+
+    return sendSuccessResponse(res, 200, { orders }, "Order suggestions retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
 };

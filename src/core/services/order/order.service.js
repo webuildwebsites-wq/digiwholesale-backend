@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Order from "../../../models/order/customer.order.js";
 import Customer from "../../../models/Auth/Customer.js";
 import Tint from "../../../models/order/Tint.js";
@@ -503,6 +504,42 @@ export async function getProductIndexesService() {
   ]);
 }
 
-export async function getProductTypesService() {
-  return await ProductType.find({}).sort({ name: 1 }).lean();
+export async function suggestionsOrdersService({ search, limit = 10 }) {
+  const filter = {};
+
+  if (search && search.trim()) {
+    const regex = { $regex: search.trim(), $options: "i" };
+    filter.$or = [
+      { "orders.orderNumber": regex },
+      { "orders.items.orderType": regex },
+      { "customer.customerName": regex },
+    ];
+
+    if (mongoose.Types.ObjectId.isValid(search.trim())) {
+      filter.$or.push({ _id: new mongoose.Types.ObjectId(search.trim()) });
+    }
+  }
+
+  const orders = await BulkOrder.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit))
+    .lean();
+
+  const ordersWithTotalPrice = orders.map((bulkOrder) => ({
+    ...bulkOrder,
+    orders: bulkOrder.orders.map((order) => ({
+      ...order,
+      totalOrderPrice: Number(
+        order.items
+          .reduce((sum, item) => {
+            const price = Number(item.price || 0);
+            const gstPercent = Number(item.gst || 0);
+            return sum + price + (price * gstPercent) / 100;
+          }, 0)
+          .toFixed(2)
+      ),
+    })),
+  }));
+
+  return ordersWithTotalPrice;
 }
