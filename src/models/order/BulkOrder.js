@@ -95,7 +95,7 @@ const BulkOrderItemSchema = new mongoose.Schema(
 
         itemStatus: {
             type: String,
-            enum: ["ACTIVE", "RETURN_REQUESTED", "RETURNED"],
+            enum: ["ACTIVE", "RETURN_REQUESTED", "RETURNED", "EXCHANGE_REQUESTED", "EXCHANGED"],
             default: "ACTIVE",
         },
 
