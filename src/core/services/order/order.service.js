@@ -543,3 +543,69 @@ export async function suggestionsOrdersService({ search, limit = 10 }) {
 
   return ordersWithTotalPrice;
 }
+
+export async function getRxOrdersService({ page = 1, limit = 20, search, fromDate, toDate, vendorId, customerId }) {
+  const filter = {
+    "orders.items.orderType": "RX",
+  };
+
+  if (customerId) filter["customer.customerId"] = customerId;
+
+  if (vendorId) filter["orders.items.rx.vendor.id"] = vendorId;
+
+  if (search && search.trim()) {
+    const regex = { $regex: search.trim(), $options: "i" };
+    filter.$or = [
+      { "orders.orderNumber": regex },
+      { "customer.customerName": regex },
+      { "orders.items.itemName": regex },
+      { "orders.items.rx.vendor.name": regex },
+    ];
+  }
+
+  if (fromDate || toDate) {
+    filter.createdAt = {};
+    if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+    if (toDate) {
+      const end = new Date(toDate);
+      end.setHours(23, 59, 59, 999);
+      filter.createdAt.$lte = end;
+    }
+  }
+
+  const skip    = (parseInt(page) - 1) * parseInt(limit);
+  const total   = await BulkOrder.countDocuments(filter);
+  const records = await BulkOrder.find(filter)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
+
+  const orders = records.map((bulkOrder) => ({
+    ...bulkOrder,
+    orders: bulkOrder.orders.map((order) => ({
+      ...order,
+      rxItems: order.items.filter((item) => item.orderType === "RX"),
+      totalOrderPrice: Number(
+        order.items
+          .filter((item) => item.orderType === "RX")
+          .reduce((sum, item) => {
+            const price = Number(item.price || 0);
+            const gstPercent = Number(item.gst || 0);
+            return sum + price + (price * gstPercent) / 100;
+          }, 0)
+          .toFixed(2)
+      ),
+    })),
+  }));
+
+  return {
+    orders,
+    pagination: {
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit)),
+    },
+  };
+}

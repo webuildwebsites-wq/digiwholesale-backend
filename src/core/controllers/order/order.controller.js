@@ -4,9 +4,10 @@ import {
   getProductNamesService, getTintOptionsService, updateDraftOrderService,
   getFrameTypesService, deleteOrderService,
   getProductBrandsService, getProductCategoriesService, getProductTreatmentsService,
-  getProductIndexesService, 
+  getProductIndexesService,
   getProductCoatingsService,
   suggestionsOrdersService,
+  getRxOrdersService,
 } from "../../services/order/order.service.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 
@@ -159,6 +160,26 @@ export const suggestionsOrders = async (req, res) => {
     const orders = await suggestionsOrdersService({ search, limit });
 
     return sendSuccessResponse(res, 200, { orders }, "Order suggestions retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getRxOrders = async (req, res) => {
+  try {
+    const { page, limit, search, fromDate, toDate, vendorId, customerId } = req.query;
+
+    const result = await getRxOrdersService({
+      page:       parseInt(page)  || 1,
+      limit:      parseInt(limit) || 20,
+      search,
+      fromDate,
+      toDate,
+      vendorId,
+      customerId,
+    });
+
+    return sendSuccessResponse(res, 200, result, "RX orders retrieved successfully");
   } catch (err) {
     return handleError(res, err);
   }
