@@ -1,6 +1,7 @@
 import DigiProduct from "../../../models/Product/Product.model.js";
 import Inventory from "../../../models/Product/Inventory.model.js";
 import { uploadToGCSProduct } from "../../../Utils/uploads/uploadToGCS.js";
+import mongoose from "mongoose";
 
 
 //  CREATE PRODUCT
@@ -634,5 +635,91 @@ export const filterProducts = async (req, res) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+
+export const bulkUploadProducts = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    const { _id: userId } = req.user;
+
+    let products = JSON.parse(req.body.products || "[]");
+
+    if (!products.length) throw new Error("No products provided");
+
+    for (const p of products) {
+      if (!p.productName || !p.category || p.price == null || p.mrp == null) {
+        throw new Error("Missing required fields: productName, category, price, mrp");
+      }
+      if (!p.productCode) {
+        throw new Error(`productCode is required for product: ${p.productName}`);
+      }
+    }
+
+    const allCodes = products.map(p => p.productCode.trim());
+
+    if (new Set(allCodes).size !== allCodes.length) {
+      throw new Error("Duplicate productCode found in request");
+    }
+
+    const existing = await DigiProduct.find({
+      productCode: { $in: allCodes },
+    }).session(session);
+
+    if (existing.length > 0) {
+      throw new Error(`ProductCodes already exist: ${existing.map(e => e.productCode).join(", ")}`);
+    }
+
+    const docs = products.map(p => ({
+      productCode:  p.productCode.trim(),
+      productName:  p.productName.trim().toUpperCase(),
+      category:     p.category.trim().toUpperCase(),
+      brand:        p.brand?.trim()?.toUpperCase()    || "",
+      color:        p.color?.trim()?.toUpperCase()    || "",
+      size:         p.size?.trim()?.toUpperCase()     || "",
+      type:         p.type?.trim()?.toUpperCase()     || "",
+      shape:        p.shape?.trim()?.toUpperCase()    || "",
+      material:     p.material?.trim()?.toUpperCase() || "",
+      dimensions:   p.dimensions?.trim()              || "",
+      addition:     p.addition?.trim()                || "",
+      sph:          p.sph?.toString().trim()          || "",
+      cyl:          p.cyl?.toString().trim()          || "",
+      axis:         p.axis?.toString().trim()         || "",
+      index:        p.index?.toString().trim()        || "",
+      coating:      p.coating?.trim()?.toUpperCase()  || "",
+      expiry:       p.expiry                          || null,
+      price:        Number(p.price),
+      mrp:          Number(p.mrp),
+      gst:          Number(p.gst)    || 0,
+      hsnSac:       p.hsnSac?.trim() || "",
+      qty:          Number(p.qty)    || 0,
+      image:        p.image          || "",
+      createdBy:    userId,
+    }));
+
+    const saved = await DigiProduct.insertMany(docs, { session });
+
+    await session.commitTransaction();
+
+    return res.status(201).json({
+      success: true,
+      count: saved.length,
+      products: saved,
+    });
+
+  } catch (err) {
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      success: false,
+      message: err.message,
+    });
+
+  } finally {
+    session.endSession();
   }
 };

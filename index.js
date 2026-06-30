@@ -27,6 +27,7 @@ import Salesrouter  from './src/routes/SALES/sales.routes.js'
 import returnRefundRouter from './src/routes/SALES/returnRefund.routes.js'
 import exchangeRouter from './src/routes/SALES/exchange.routes.js'
 import settingRouter from "./src/routes/SETTING/settings.routes.js"
+import purchaseRouter from './src/routes/Purchase/purchase.route.js';
 
 dotenv.config();
 
@@ -144,6 +145,9 @@ try {
 
   // SETTINGS
   app.use("/api/settings", settingRouter);
+
+  // Purchase module
+  app.use("/api/purchase", purchaseRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);
