@@ -5,6 +5,7 @@ import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../config/Email/emailService.js";
 import VendorPurchaseOrderTemplate from "../../../Utils/Mail/VendorPurchaseOrderTemplate.js";
+import { generatePurchaseOrderExcel } from "../../../Utils/excel/generatePurchaseOrderExcel.js";
 
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
 const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
@@ -230,10 +231,18 @@ export const createVendorPurchaseItems = async (req, res) => {
                 orders:          vendorPurchase.orders,
             });
 
+            const excelBuffer = generatePurchaseOrderExcel(vendorPurchase.toObject());
+
             sendEmail({
                 to:      vendor.email,
                 subject: `New Purchase Order — ${vendorPurchase._id}`,
                 html,
+                attachments: [
+                    {
+                        name:    `PurchaseOrder-${vendorPurchase._id}.xlsx`,
+                        content: excelBuffer.toString("base64"),
+                    },
+                ],
             }).catch(err => console.error("Vendor purchase email error:", err.message));
         }
 

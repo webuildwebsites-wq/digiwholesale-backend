@@ -43,25 +43,34 @@ import axios from "axios";
 import dotenv from 'dotenv';
 dotenv.config();
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, attachments = [] }) {
   try {
     console.log("🚀 sendEmail triggered", to);
 
+    const payload = {
+      sender: {
+        name: "DigiBySr",
+        email: "webuildwebsites@digibysr.com",
+      },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+    };
+
+    if (attachments.length > 0) {
+      payload.attachment = attachments.map(file => ({
+        name:    file.name,
+        content: file.content,
+      }));
+    }
+
     const response = await axios.post(
       process.env.BREVO_SMTP_API_URL,
-      {
-        sender: {
-          name: "DigiBySr",
-          email: "webuildwebsites@digibysr.com",
-        },
-        to: [{ email: to }],
-        subject,
-        htmlContent: html,
-      },
+      payload,
       {
         headers: {
-        "api-key" : process.env.BREVO_SMTP_API_KEY,   
-        "Content-Type": "application/json",
+          "api-key":      process.env.BREVO_SMTP_API_KEY,
+          "Content-Type": "application/json",
         },
       }
     );
