@@ -3,6 +3,8 @@ import Vendor from "../../../models/Vendor.model.js";
 import DigiProduct from "../../../models/Product/Product.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
+import { sendEmail } from "../../config/Email/emailService.js";
+import VendorPurchaseOrderTemplate from "../../../Utils/Mail/VendorPurchaseOrderTemplate.js";
 
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
 const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
@@ -219,6 +221,21 @@ export const createVendorPurchaseItems = async (req, res) => {
             orders,
             createdBy: req.user._id,
         });
+
+        if (vendor.email) {
+            const html = VendorPurchaseOrderTemplate({
+                vendorName:      vendor.name,
+                purchaseOrderId: vendorPurchase._id.toString(),
+                orderDate:       new Date(vendorPurchase.createdAt).toLocaleDateString("en-IN"),
+                orders:          vendorPurchase.orders,
+            });
+
+            sendEmail({
+                to:      vendor.email,
+                subject: `New Purchase Order — ${vendorPurchase._id}`,
+                html,
+            }).catch(err => console.error("Vendor purchase email error:", err.message));
+        }
 
         return sendSuccessResponse(res, 201, { vendorPurchase }, "Vendor purchase order created successfully");
 
