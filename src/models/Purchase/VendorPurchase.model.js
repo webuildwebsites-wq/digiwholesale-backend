@@ -36,6 +36,27 @@ const purchaseItemSchema = new mongoose.Schema(
         discountAmount: Number,
         expiry:         String,
         disposability:  String,
+
+        vendorRefId:          { type: String, default: null },
+        vendorRefIdUpdatedAt: { type: Date,   default: null },
+        vendorRefIdUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee", default: null },
+
+        isPriceConfirmed:  { type: Boolean, default: false },
+        priceConfirmedAt:  { type: Date,    default: null },
+        priceConfirmedBy:  { type: mongoose.Schema.Types.ObjectId, ref: "employee", default: null },
+
+        inwardStatus: {
+            type:    String,
+            enum:    ["PENDING", "RECEIVED", "PARTIAL", "NOT_RECEIVED"],
+            default: "PENDING",
+        },
+        receivedQty: { type: Number, default: 0 },
+
+        qcStatus: {
+            type:    String,
+            enum:    ["PENDING", "PASSED", "FAILED", "PARTIAL"],
+            default: "PENDING",
+        },
         rx: {
             vendor:     { id: String, name: String },
             lab:        { id: String, name: String },
@@ -65,7 +86,11 @@ const vendorPurchaseOrderSchema = new mongoose.Schema(
         items:            [purchaseItemSchema],
         cgst:             String,
         sgst:             String,
-        status:           { type: String, default: "Submitted" },
+        status: {
+            type:    String,
+            enum:    ["Submitted", "PartiallyReceived", "Received", "Closed"],
+            default: "Submitted",
+        },
         totalOrderPrice:  Number,
         remarks:          String,
     },

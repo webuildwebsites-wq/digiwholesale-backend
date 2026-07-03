@@ -484,3 +484,64 @@ export const getOrdersByVendorId = async (req, res) => {
         return sendErrorResponse(res, 500, "GET_VENDOR_ORDERS_ERROR", error.message || "Something went wrong");
     }
 };
+
+export const updateVendorRefId = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { refIds } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return sendErrorResponse(res, 400, "INVALID_ID", "Invalid purchase order ID");
+        }
+
+        if (!Array.isArray(refIds) || refIds.length === 0) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "refIds array is required. Each entry: { orderNumber, itemIndex, vendorRefId }");
+        }
+
+        const purchaseOrder = await VendorPurchase.findById(id);
+        if (!purchaseOrder) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
+        }
+
+        const now    = new Date();
+        const userId = req.user._id;
+        const errors = [];
+
+        for (const entry of refIds) {
+            const { orderNumber, itemIndex, vendorRefId } = entry;
+
+            if (!orderNumber || itemIndex === undefined || vendorRefId === undefined) {
+                errors.push(`Invalid entry: ${JSON.stringify(entry)}`);
+                continue;
+            }
+
+            const order = purchaseOrder.orders.find(o => o.orderNumber === orderNumber);
+            if (!order) {
+                errors.push(`Order not found: ${orderNumber}`);
+                continue;
+            }
+
+            const item = order.items[itemIndex];
+            if (!item) {
+                errors.push(`Item index ${itemIndex} not found in order ${orderNumber}`);
+                continue;
+            }
+
+            item.vendorRefId          = vendorRefId;
+            item.vendorRefIdUpdatedAt = now;
+            item.vendorRefIdUpdatedBy = userId;
+        }
+
+        if (errors.length === refIds.length) {
+            return sendErrorResponse(res, 400, "UPDATE_FAILED", `All updates failed: ${errors.join(", ")}`);
+        }
+
+        await purchaseOrder.save();
+
+        return sendSuccessResponse(res, 200, { purchaseOrder, errors: errors.length ? errors : undefined }, "Vendor reference IDs updated successfully");
+
+    } catch (error) {
+        console.error("Update Vendor RefId Error:", error);
+        return sendErrorResponse(res, 500, "UPDATE_VENDOR_REF_ERROR", error.message || "Something went wrong");
+    }
+};
