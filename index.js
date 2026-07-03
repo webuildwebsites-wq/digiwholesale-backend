@@ -28,6 +28,9 @@ import returnRefundRouter from './src/routes/SALES/returnRefund.routes.js'
 import exchangeRouter from './src/routes/SALES/exchange.routes.js'
 import settingRouter from "./src/routes/SETTING/settings.routes.js"
 import purchaseRouter from './src/routes/Purchase/purchase.route.js';
+import purchaseInwardRouter from './src/routes/Purchase/purchaseInward.routes.js';
+import purchaseQCRouter from './src/routes/Purchase/purchaseQC.routes.js';
+import purchaseReturnRouter from './src/routes/Purchase/purchaseReturn.routes.js';
 
 dotenv.config();
 
@@ -148,6 +151,9 @@ try {
 
   // Purchase module
   app.use("/api/purchase", purchaseRouter);
+  app.use("/api/purchase-inward", purchaseInwardRouter);
+  app.use("/api/purchase-qc", purchaseQCRouter);
+  app.use("/api/purchase-return", purchaseReturnRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);
