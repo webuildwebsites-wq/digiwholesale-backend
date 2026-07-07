@@ -609,3 +609,67 @@ export async function getRxOrdersService({ page = 1, limit = 20, search, fromDat
     },
   };
 }
+
+export async function getDraftOrdersService({ page = 1, limit = 20, search, customerId, fromDate, toDate }) {
+  const filter = {
+    "orders.status": "Draft",
+  };
+
+  if (customerId) filter["customer.customerId"] = customerId;
+
+  if (search && search.trim()) {
+    const regex = { $regex: search.trim(), $options: "i" };
+    filter.$or = [
+      { "orders.orderNumber": regex },
+      { "customer.customerName": regex },
+      { "orders.items.itemName": regex },
+    ];
+  }
+
+  if (fromDate || toDate) {
+    filter.createdAt = {};
+    if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+    if (toDate) {
+      const end = new Date(toDate);
+      end.setHours(23, 59, 59, 999);
+      filter.createdAt.$lte = end;
+    }
+  }
+
+  const skip  = (parseInt(page) - 1) * parseInt(limit);
+  const total = await BulkOrder.countDocuments(filter);
+
+  const records = await BulkOrder.find(filter)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit))
+    .lean();
+
+  const orders = records.map((bulkOrder) => ({
+    ...bulkOrder,
+    orders: bulkOrder.orders
+      .filter(o => o.status === "Draft")
+      .map(order => ({
+        ...order,
+        totalOrderPrice: Number(
+          order.items
+            .reduce((sum, item) => {
+              const price      = Number(item.price || 0);
+              const gstPercent = Number(item.gst   || 0);
+              return sum + price + (price * gstPercent) / 100;
+            }, 0)
+            .toFixed(2)
+        ),
+      })),
+  }));
+
+  return {
+    orders,
+    pagination: {
+      total,
+      page:       parseInt(page),
+      limit:      parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit)),
+    },
+  };
+}

@@ -1,5 +1,5 @@
 import express from "express";
-import { getOrder, listOrders, updateDraftOrder, cancelOrder, deleteOrder, getProductNames, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductCoatings, suggestionsOrders, getRxOrders } from "../../core/controllers/order/order.controller.js";
+import { getOrder, listOrders, updateDraftOrder, cancelOrder, deleteOrder, getProductNames, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductCoatings, suggestionsOrders, getRxOrders, getDraftOrders } from "../../core/controllers/order/order.controller.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
 import { createBulkOrder, getBulkOrderChallan, getBulkOrderInvoice } from "../../core/controllers/order/bulkorder/bulkorder.js";
 import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
@@ -23,6 +23,7 @@ orderRouter.get("/bulk-orders/:orderId/challan", checkPageAccess("ALL_ORDERS"), 
 orderRouter.get("/bulk-orders/:orderId/invoice", checkPageAccess("ALL_ORDERS"), getBulkOrderInvoice);
 
 orderRouter.get("/get-all-orders", checkPageAccess("ALL_ORDERS"), listOrders);
+orderRouter.get("/draft-orders", checkPageAccess("DRAFTS"), getDraftOrders);
 orderRouter.get("/rx-orders", checkPageAccess("ALL_ORDERS"), getRxOrders);
 orderRouter.get("/suggestions", checkPageAccess("ALL_ORDERS"), suggestionsOrders);
 

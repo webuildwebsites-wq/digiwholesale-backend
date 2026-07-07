@@ -8,6 +8,7 @@ import {
   getProductCoatingsService,
   suggestionsOrdersService,
   getRxOrdersService,
+  getDraftOrdersService,
 } from "../../services/order/order.service.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 
@@ -180,6 +181,35 @@ export const getRxOrders = async (req, res) => {
     });
 
     return sendSuccessResponse(res, 200, result, "RX orders retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getDraftOrders = async (req, res) => {
+  try {
+    const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+
+    const result = await getDraftOrdersService({
+      page,
+      limit,
+      search:     req.query.search,
+      customerId: req.query.customerId,
+      fromDate:   req.query.fromDate,
+      toDate:     req.query.toDate,
+    });
+
+    return sendSuccessResponse(res, 200, {
+      orders: result.orders,
+      pagination: {
+        currentPage: result.pagination.page,
+        totalPages:  result.pagination.totalPages,
+        totalOrders: result.pagination.total,
+        hasNext: result.pagination.page < result.pagination.totalPages,
+        hasPrev: result.pagination.page > 1,
+      },
+    }, "Draft orders retrieved successfully");
   } catch (err) {
     return handleError(res, err);
   }
