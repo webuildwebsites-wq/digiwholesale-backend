@@ -163,9 +163,31 @@ export const getPurchaseInwardById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
+
         const inward = await PurchaseInward.findById(id).lean();
         if (!inward) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase inward not found");
-        return sendSuccessResponse(res, 200, { inward });
+
+        const purchaseOrder = await VendorPurchase.findById(inward.purchaseOrderId).lean();
+
+        const allPurchaseItems = purchaseOrder
+            ? purchaseOrder.orders.flatMap(o => o.items)
+            : [];
+
+        const enrichedItems = inward.items.map(inwardItem => {
+            const poItem = allPurchaseItems.find(
+                pi => pi._id.toString() === inwardItem.itemId.toString()
+            );
+            return {
+                ...inwardItem,
+                inwardStatus: poItem?.inwardStatus ?? "PENDING",
+                qcStatus:     poItem?.qcStatus     ?? "PENDING",
+            };
+        });
+
+        return sendSuccessResponse(res, 200, {
+            inward: { ...inward, items: enrichedItems },
+        });
+
     } catch (error) {
         return sendErrorResponse(res, 500, "GET_INWARD_ERROR", error.message);
     }
