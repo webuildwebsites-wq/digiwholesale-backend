@@ -495,7 +495,7 @@ export const updateVendorRefId = async (req, res) => {
         }
 
         if (!Array.isArray(refIds) || refIds.length === 0) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "refIds array is required. Each entry: { orderNumber, itemIndex, vendorRefId }");
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "refIds array is required. Each entry: { itemId, vendorRefId }");
         }
 
         const purchaseOrder = await VendorPurchase.findById(id);
@@ -507,26 +507,28 @@ export const updateVendorRefId = async (req, res) => {
         const userId = req.user._id;
         const errors = [];
 
+        const allPurchaseItems = purchaseOrder.orders.flatMap(o => o.items.map(item => ({ order: o, item })));
+
         for (const entry of refIds) {
-            const { orderNumber, itemIndex, vendorRefId } = entry;
+            const { itemId, vendorRefId } = entry;
 
-            if (!orderNumber || itemIndex === undefined || vendorRefId === undefined) {
-                errors.push(`Invalid entry: ${JSON.stringify(entry)}`);
+            if (!itemId || vendorRefId === undefined) {
+                errors.push(`Invalid entry — itemId and vendorRefId are required: ${JSON.stringify(entry)}`);
                 continue;
             }
 
-            const order = purchaseOrder.orders.find(o => o.orderNumber === orderNumber);
-            if (!order) {
-                errors.push(`Order not found: ${orderNumber}`);
+            if (!mongoose.Types.ObjectId.isValid(itemId)) {
+                errors.push(`Invalid itemId: ${itemId}`);
                 continue;
             }
 
-            const item = order.items[itemIndex];
-            if (!item) {
-                errors.push(`Item index ${itemIndex} not found in order ${orderNumber}`);
+            const found = allPurchaseItems.find(({ item }) => item._id.toString() === itemId.toString());
+            if (!found) {
+                errors.push(`Item not found in this purchase order: ${itemId}`);
                 continue;
             }
 
+            const { item } = found;
             item.vendorRefId          = vendorRefId;
             item.vendorRefIdUpdatedAt = now;
             item.vendorRefIdUpdatedBy = userId;

@@ -11,13 +11,14 @@ export const sendSuccessResponse = (res, statusCode = 200, data = null, message 
   return res.status(statusCode).json(response);
 };
 
-export const sendErrorResponse = (res, statusCode = 500, code = 'INTERNAL_ERROR', message = 'Internal server error', timestamp = new Date().toISOString()) => {
+export const sendErrorResponse = (res, statusCode = 500, code = 'INTERNAL_ERROR', message = 'Internal server error', timestamp = new Date().toISOString(), meta = null) => {
   const response = {
     success: false,
     error: {
       code,
       message,
-      timestamp
+      timestamp,
+      ...(meta && { meta }),
     }
   };
   

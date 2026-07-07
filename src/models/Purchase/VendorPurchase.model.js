@@ -76,8 +76,7 @@ const purchaseItemSchema = new mongoose.Schema(
             lensData:   { type: Object, default: {} },
             remarks:    String,
         },
-    },
-    { _id: false }
+    }
 );
 
 const vendorPurchaseOrderSchema = new mongoose.Schema(

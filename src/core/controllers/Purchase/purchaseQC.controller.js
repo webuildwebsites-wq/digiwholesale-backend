@@ -76,29 +76,55 @@ export const createPurchaseQC = async (req, res) => {
 
         const vendor = await Vendor.findById(purchaseOrder.vendor.vendorId).lean();
 
-        const qcItems      = [];
-        const failedItems  = [];
-        const passedItems  = [];
+        const allPurchaseItems = purchaseOrder.orders.flatMap(o =>
+            o.items.map(item => ({ order: o, item }))
+        );
 
         for (const entry of items) {
-            const { orderNumber, itemIndex, passedQty, failedQty, failureReason, remarks: itemRemark } = entry;
+            const { itemId, passedQty, failedQty } = entry;
 
-            const order = purchaseOrder.orders.find(o => o.orderNumber === orderNumber);
-            if (!order) continue;
-            const item = order.items[itemIndex];
-            if (!item)  continue;
+            if (!itemId || !mongoose.Types.ObjectId.isValid(itemId)) {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Invalid or missing itemId: ${itemId}`, new Date().toISOString(), { itemId });
+            }
 
-            const passed = Number(passedQty || 0);
-            const failed = Number(failedQty || 0);
-            const total  = passed + failed;
+            const found = allPurchaseItems.find(({ item }) => item._id.toString() === itemId.toString());
+            if (!found) {
+                return sendErrorResponse(res, 404, "ITEM_NOT_FOUND", `Item not found in this purchase order: ${itemId}`, new Date().toISOString(), { itemId });
+            }
+
+            const passed      = Number(passedQty || 0);
+            const failed      = Number(failedQty || 0);
+            const receivedQty = found.item.receivedQty || 0;
+
+            if (passed < 0 || failed < 0) {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `passedQty and failedQty cannot be negative for item: ${found.item.itemName}`, new Date().toISOString(), { itemId });
+            }
+
+            if (passed + failed > receivedQty) {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `passedQty (${passed}) + failedQty (${failed}) = ${passed + failed} exceeds receivedQty (${receivedQty}) for item: ${found.item.itemName}`, new Date().toISOString(), { itemId });
+            }
+        }
+
+        const qcItems     = [];
+        const failedItems = [];
+        const passedItems = [];
+
+        for (const entry of items) {
+            const { itemId, passedQty, failedQty, failureReason, remarks: itemRemark } = entry;
+
+            const found      = allPurchaseItems.find(({ item }) => item._id.toString() === itemId.toString());
+            const { order, item } = found;
+            const passed     = Number(passedQty || 0);
+            const failed     = Number(failedQty || 0);
+            const total      = passed + failed;
 
             const qcResult = failed === 0 ? "PASSED" : passed === 0 ? "FAILED" : "PARTIAL";
 
             item.qcStatus = qcResult;
 
             qcItems.push({
-                orderNumber,
-                itemIndex,
+                itemId:        item._id,
+                orderNumber:   order.orderNumber,
                 itemName:      item.itemName,
                 productId:     item.productId,
                 category:      item.category,
@@ -117,8 +143,8 @@ export const createPurchaseQC = async (req, res) => {
 
             if (failed > 0) {
                 failedItems.push({
-                    orderNumber,
-                    itemIndex,
+                    itemId:        item._id,
+                    orderNumber:   order.orderNumber,
                     itemName:      item.itemName,
                     productId:     item.productId,
                     category:      item.category,
@@ -133,8 +159,8 @@ export const createPurchaseQC = async (req, res) => {
             }
         }
 
-        const allPassed  = qcItems.every(i => i.qcResult === "PASSED");
-        const allFailed  = qcItems.every(i => i.qcResult === "FAILED");
+        const allPassed     = qcItems.every(i => i.qcResult === "PASSED");
+        const allFailed     = qcItems.every(i => i.qcResult === "FAILED");
         const overallResult = allPassed ? "PASSED" : allFailed ? "FAILED" : "PARTIAL";
 
         await purchaseOrder.save();

@@ -2,8 +2,8 @@ import mongoose from "mongoose";
 
 const inwardItemSchema = new mongoose.Schema(
     {
+        itemId:       { type: mongoose.Schema.Types.ObjectId, required: true },
         orderNumber:  { type: String, required: true },
-        itemIndex:    { type: Number, required: true },
         itemName:     String,
         productId:    { type: mongoose.Schema.Types.ObjectId, ref: "DigiProduct", default: null },
         category:     String,

@@ -19,27 +19,42 @@ export const createPurchaseInward = async (req, res) => {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
         }
 
-        const errors = [];
+        const allItems = purchaseOrder.orders.flatMap(o =>
+            o.items.map(item => ({ order: o, item }))
+        );
+
+        const errors      = [];
+        const inwardItems = [];
 
         for (const entry of items) {
-            const { orderNumber, itemIndex, receivedQty, condition, vendorRefId, remarks: itemRemark } = entry;
+            const { itemId, receivedQty, condition, vendorRefId, remarks: itemRemark } = entry;
 
-            if (!orderNumber || itemIndex === undefined || receivedQty === undefined) {
-                errors.push(`Missing fields in entry: ${JSON.stringify(entry)}`);
+            if (!itemId || !mongoose.Types.ObjectId.isValid(itemId)) {
+                errors.push(`Invalid or missing itemId: ${itemId}`);
+                continue;
+            }
+            if (receivedQty === undefined || receivedQty === null) {
+                errors.push(`receivedQty is required for itemId: ${itemId}`);
                 continue;
             }
 
-            const order = purchaseOrder.orders.find(o => o.orderNumber === orderNumber);
-            if (!order) { errors.push(`Order not found: ${orderNumber}`); continue; }
+            const found = allItems.find(({ item }) => item._id.toString() === itemId.toString());
 
-            const item = order.items[itemIndex];
-            if (!item) { errors.push(`Item index ${itemIndex} not found in order ${orderNumber}`); continue; }
+            if (!found) {
+                errors.push(`Item not found in this purchase order: ${itemId}`);
+                continue;
+            }
 
+            const { order, item } = found;
             const received = Number(receivedQty);
-            if (received < 0) { errors.push(`receivedQty cannot be negative for ${item.itemName}`); continue; }
 
-            item.receivedQty   = received;
-            item.inwardStatus  = received === 0
+            if (received < 0) {
+                errors.push(`receivedQty cannot be negative for item: ${item.itemName}`);
+                continue;
+            }
+
+            item.receivedQty  = received;
+            item.inwardStatus = received === 0
                 ? "NOT_RECEIVED"
                 : received < item.qty
                     ? "PARTIAL"
@@ -50,11 +65,25 @@ export const createPurchaseInward = async (req, res) => {
                 item.vendorRefIdUpdatedAt = new Date();
                 item.vendorRefIdUpdatedBy = req.user._id;
             }
+
+            inwardItems.push({
+                itemId:      item._id,
+                orderNumber: order.orderNumber,
+                itemName:    item.itemName,
+                productId:   item.productId,
+                category:    item.category,
+                unit:        item.unit,
+                orderedQty:  item.qty,
+                receivedQty: received,
+                vendorRefId: vendorRefId || item.vendorRefId,
+                condition:   condition || "GOOD",
+                remarks:     itemRemark,
+            });
         }
 
-        const allItems = purchaseOrder.orders.flatMap(o => o.items);
-        const allReceived  = allItems.every(i => i.inwardStatus === "RECEIVED");
-        const anyReceived  = allItems.some(i => ["RECEIVED", "PARTIAL"].includes(i.inwardStatus));
+        const flatItems    = purchaseOrder.orders.flatMap(o => o.items);
+        const allReceived  = flatItems.every(i => i.inwardStatus === "RECEIVED");
+        const anyReceived  = flatItems.some(i => ["RECEIVED", "PARTIAL"].includes(i.inwardStatus));
 
         for (const order of purchaseOrder.orders) {
             order.status = allReceived ? "Received" : anyReceived ? "PartiallyReceived" : "Submitted";
@@ -62,28 +91,9 @@ export const createPurchaseInward = async (req, res) => {
 
         await purchaseOrder.save();
 
-        const inwardItems = items
-            .filter(entry => {
-                const order = purchaseOrder.orders.find(o => o.orderNumber === entry.orderNumber);
-                return order && order.items[entry.itemIndex];
-            })
-            .map(entry => {
-                const order = purchaseOrder.orders.find(o => o.orderNumber === entry.orderNumber);
-                const item  = order.items[entry.itemIndex];
-                return {
-                    orderNumber:  entry.orderNumber,
-                    itemIndex:    entry.itemIndex,
-                    itemName:     item.itemName,
-                    productId:    item.productId,
-                    category:     item.category,
-                    unit:         item.unit,
-                    orderedQty:   item.qty,
-                    receivedQty:  Number(entry.receivedQty),
-                    vendorRefId:  entry.vendorRefId || item.vendorRefId,
-                    condition:    entry.condition   || "GOOD",
-                    remarks:      entry.remarks,
-                };
-            });
+        if (inwardItems.length === 0) {
+            return sendErrorResponse(res, 400, "UPDATE_FAILED", `All entries failed: ${errors.join(", ")}`);
+        }
 
         const inward = await PurchaseInward.create({
             purchaseOrderId,
@@ -129,8 +139,8 @@ export const getAllPurchaseInwards = async (req, res) => {
         return sendSuccessResponse(res, 200, {
             inwards,
             pagination: {
-                currentPage: page,
-                totalPages:  Math.ceil(total / limit),
+                currentPage:  page,
+                totalPages:   Math.ceil(total / limit),
                 totalRecords: total,
                 hasNext: page < Math.ceil(total / limit),
                 hasPrev: page > 1,

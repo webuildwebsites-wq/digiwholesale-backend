@@ -2,8 +2,8 @@ import mongoose from "mongoose";
 
 const returnItemSchema = new mongoose.Schema(
     {
+        itemId:                { type: mongoose.Schema.Types.ObjectId, required: true },
         orderNumber:           String,
-        itemIndex:             Number,
         itemName:              String,
         productId:             { type: mongoose.Schema.Types.ObjectId, ref: "DigiProduct", default: null },
         category:              String,
