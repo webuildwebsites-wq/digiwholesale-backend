@@ -46,6 +46,11 @@ export const createPurchaseInward = async (req, res) => {
             }
 
             const { order, item } = found;
+
+            if (item.inwardStatus !== "PENDING") {
+                errors.push(`Item already inward processed (status: ${item.inwardStatus}) — ${item.itemName} (itemId: ${itemId})`);
+                continue;
+            }
             const received = Number(receivedQty);
 
             if (received < 0) {

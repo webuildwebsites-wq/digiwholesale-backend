@@ -92,6 +92,10 @@ export const createPurchaseQC = async (req, res) => {
                 return sendErrorResponse(res, 404, "ITEM_NOT_FOUND", `Item not found in this purchase order: ${itemId}`, new Date().toISOString(), { itemId });
             }
 
+            if (found.item.qcStatus !== "PENDING") {
+                return sendErrorResponse(res, 400, "ALREADY_QC_DONE", `QC already completed (status: ${found.item.qcStatus}) for item: ${found.item.itemName}`, new Date().toISOString(), { itemId });
+            }
+
             const passed      = Number(passedQty || 0);
             const failed      = Number(failedQty || 0);
             const receivedQty = found.item.receivedQty || 0;
