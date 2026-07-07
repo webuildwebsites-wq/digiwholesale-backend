@@ -2,6 +2,16 @@ import mongoose from "mongoose";
 import PurchaseReturn from "../../../models/Purchase/PurchaseReturn.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 
+const deriveOverallStatus = (items) => {
+    const statuses = items.map(i => i.itemStatus);
+    if (statuses.every(s => s === "Replaced"))              return "Replaced";
+    if (statuses.every(s => s === "Closed"))                return "Closed";
+    if (statuses.every(s => s === "Pending"))               return "Pending";
+    if (statuses.every(s => s === "VendorNotified"))        return "VendorNotified";
+    if (statuses.some(s  => s === "Replaced"))              return "PartiallyReplaced";
+    return "VendorNotified";
+};
+
 export const getAllPurchaseReturns = async (req, res) => {
     try {
         const page  = Math.max(parseInt(req.query.page)  || 1, 1);
@@ -52,34 +62,49 @@ export const getPurchaseReturnById = async (req, res) => {
     }
 };
 
-export const updatePurchaseReturnStatus = async (req, res) => {
+export const updateItemStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, remarks } = req.body;
+        const { itemId, status, remarks } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
+            return sendErrorResponse(res, 400, "INVALID_ID", "Invalid return ID");
+        }
+
+        if (!itemId || !mongoose.Types.ObjectId.isValid(itemId)) {
+            return sendErrorResponse(res, 400, "INVALID_ID", "Valid itemId is required");
         }
 
         const allowed = ["Pending", "VendorNotified", "Replaced", "Closed"];
         if (!status || !allowed.includes(status)) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Status must be one of: ${allowed.join(", ")}`);
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", `status must be one of: ${allowed.join(", ")}`);
         }
 
         const returnDoc = await PurchaseReturn.findById(id);
         if (!returnDoc) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase return not found");
 
-        returnDoc.status = status;
-        if (remarks) returnDoc.remarks = remarks;
-        if (status === "VendorNotified") {
+        const item = returnDoc.items.find(i => i.itemId.toString() === itemId.toString());
+        if (!item) {
+            return sendErrorResponse(res, 404, "ITEM_NOT_FOUND", `Item not found in this return: ${itemId}`);
+        }
+
+        item.itemStatus    = status;
+        item.itemUpdatedAt = new Date();
+        item.itemUpdatedBy = req.user._id;
+        if (remarks) item.itemRemarks = remarks;
+
+        returnDoc.status = deriveOverallStatus(returnDoc.items);
+
+        if (returnDoc.items.some(i => i.itemStatus === "VendorNotified") && !returnDoc.vendorNotified) {
             returnDoc.vendorNotified   = true;
             returnDoc.vendorNotifiedAt = new Date();
         }
+
         await returnDoc.save();
 
-        return sendSuccessResponse(res, 200, { return: returnDoc }, `Purchase return marked as ${status}`);
+        return sendSuccessResponse(res, 200, { return: returnDoc }, `Item status updated to ${status}. Overall return status: ${returnDoc.status}`);
 
     } catch (error) {
-        return sendErrorResponse(res, 500, "UPDATE_RETURN_ERROR", error.message);
+        return sendErrorResponse(res, 500, "UPDATE_ITEM_STATUS_ERROR", error.message);
     }
 };

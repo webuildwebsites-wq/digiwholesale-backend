@@ -8,45 +8,91 @@ import Vendor from "../../../models/Vendor.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../config/Email/emailService.js";
 import { sendWhatsAppOTP } from "../../config/Whatsapp/sendWhatsappOtp.js";
+import { generateQCRejectionExcel } from "../../../Utils/excel/generateQCRejectionExcel.js";
 
-const buildQCFailureEmailHTML = ({ vendorName, purchaseOrderId, failedItems }) => {
-    const rows = failedItems.map(item => `
-        <tr>
-            <td style="padding:8px 12px;border:1px solid #e5e7eb;">${item.itemName || "-"}</td>
-            <td style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">${item.failedQty}</td>
-            <td style="padding:8px 12px;border:1px solid #e5e7eb;">${item.failureReason || "-"}</td>
-            <td style="padding:8px 12px;border:1px solid #e5e7eb;">${item.remarks || "-"}</td>
+const buildQCRejectionEmailHTML = ({ vendorName, purchaseOrderId, qcDate, failedItems, totalFailed, totalPassed }) => {
+    const fmt    = (v) => (v !== undefined && v !== null && v !== "" ? v : "-");
+    const fmtDate = (d) => d ? new Date(d).toLocaleDateString("en-IN") : "-";
+
+    const rows = failedItems.map((item, idx) => `
+        <tr style="background:${idx % 2 === 0 ? "#fff" : "#fef2f2"};">
+            <td style="padding:9px 12px;border:1px solid #fecaca;vertical-align:top;">
+                <div style="font-weight:bold;font-size:13px;">${fmt(item.itemName)}</div>
+                ${item.category ? `<div style="font-size:11px;color:#666;">${item.category}</div>` : ""}
+                ${item.orderNumber ? `<div style="font-size:11px;color:#999;">${item.orderNumber}</div>` : ""}
+            </td>
+            <td style="padding:9px 12px;border:1px solid #fecaca;text-align:center;font-weight:bold;color:#dc2626;">${item.failedQty || item.qty || 0}</td>
+            <td style="padding:9px 12px;border:1px solid #fecaca;">${fmt(item.unit)}</td>
+            <td style="padding:9px 12px;border:1px solid #fecaca;">${fmt(item.failureReason || item.reason)}</td>
+            <td style="padding:9px 12px;border:1px solid #fecaca;">${fmt(item.remarks)}</td>
         </tr>`).join("");
 
     return `<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"/></head>
-<body style="font-family:Arial,sans-serif;background:#f3f4f6;margin:0;padding:0;">
-  <div style="max-width:640px;margin:40px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
-    <div style="background:#dc2626;padding:20px 28px;color:#fff;">
-      <div style="font-size:20px;font-weight:700;">DigiOptics — QC Rejection Notice</div>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Roboto,Arial,sans-serif;">
+  <div style="max-width:720px;margin:40px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+
+    <div style="background:#dc2626;padding:22px 28px;color:#fff;">
+      <div style="font-size:22px;font-weight:700;">DigiOptics</div>
+      <div style="font-size:13px;margin-top:4px;opacity:0.9;">Quality Control — Rejection Notice</div>
     </div>
-    <div style="padding:24px 28px;">
-      <p style="font-size:15px;margin-bottom:16px;">Dear <b>${vendorName}</b>,</p>
-      <p style="font-size:14px;color:#555;margin-bottom:20px;">
-        The following items from Purchase Order <b>${purchaseOrderId}</b> have <b style="color:#dc2626;">failed QC inspection</b> and will be returned to you.
+
+    <div style="padding:18px 28px;background:#fef2f2;border-bottom:2px solid #dc2626;">
+      <p style="margin:0 0 6px;font-size:15px;">Dear <b>${fmt(vendorName)}</b>,</p>
+      <p style="margin:0;font-size:14px;color:#555;">
+        The following items from your purchase order have <b style="color:#dc2626;">failed our QC inspection</b> and will be returned. Please arrange for a replacement or credit note at the earliest.
       </p>
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    </div>
+
+    <div style="padding:20px 28px;">
+
+      <table style="width:100%;border-collapse:collapse;background:#f9f9f9;border:1px solid #ddd;border-radius:6px;margin-bottom:24px;">
+        <tr>
+          <td style="padding:9px 14px;font-weight:bold;color:#dc2626;font-size:12px;text-transform:uppercase;width:35%;">Purchase Order ID</td>
+          <td style="padding:9px 14px;font-size:13px;font-weight:bold;">${fmt(purchaseOrderId)}</td>
+        </tr>
+        <tr style="background:#fff;">
+          <td style="padding:9px 14px;font-weight:bold;color:#dc2626;font-size:12px;text-transform:uppercase;">QC Date</td>
+          <td style="padding:9px 14px;font-size:13px;">${fmtDate(qcDate)}</td>
+        </tr>
+        <tr>
+          <td style="padding:9px 14px;font-weight:bold;color:#dc2626;font-size:12px;text-transform:uppercase;">Items Passed</td>
+          <td style="padding:9px 14px;font-size:13px;color:#16a34a;font-weight:bold;">${totalPassed}</td>
+        </tr>
+        <tr style="background:#fff;">
+          <td style="padding:9px 14px;font-weight:bold;color:#dc2626;font-size:12px;text-transform:uppercase;">Items Failed</td>
+          <td style="padding:9px 14px;font-size:13px;color:#dc2626;font-weight:bold;">${totalFailed}</td>
+        </tr>
+      </table>
+
+      <div style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:12px;border-left:4px solid #dc2626;padding-left:10px;">
+        Rejected Items (${failedItems.length})
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
         <thead>
-          <tr style="background:#f3f4f6;">
-            <th style="padding:8px 12px;border:1px solid #e5e7eb;text-align:left;">Item</th>
-            <th style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">Failed Qty</th>
-            <th style="padding:8px 12px;border:1px solid #e5e7eb;text-align:left;">Reason</th>
-            <th style="padding:8px 12px;border:1px solid #e5e7eb;text-align:left;">Remarks</th>
+          <tr style="background:#fee2e2;">
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:left;">Item</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:center;">Failed Qty</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:left;">Unit</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:left;">Reason</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:left;">Remarks</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
-      <p style="margin-top:20px;font-size:13px;color:#555;">Please arrange for replacement or credit note at the earliest.</p>
+
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:14px 16px;font-size:13px;color:#7f1d1d;">
+        <b>Next Steps:</b> Please review the attached Excel file for complete rejection details. Arrange for replacement delivery or issue a credit note within 7 working days.
+      </div>
+
     </div>
-    <div style="background:#f5f5f5;text-align:center;padding:14px;font-size:12px;color:#777;">
-      © ${new Date().getFullYear()} DigiOptics. System generated notice.
+
+    <div style="background:#f5f5f5;text-align:center;padding:14px 28px;font-size:12px;color:#777;border-top:1px solid #e0e0e0;">
+      © ${new Date().getFullYear()} DigiOptics. This is a system-generated QC rejection notice. Please do not reply to this email.
     </div>
+
   </div>
 </body>
 </html>`;
@@ -206,9 +252,20 @@ export const createPurchaseQC = async (req, res) => {
             });
 
             if (notifyVendor && vendor) {
-                const html = buildQCFailureEmailHTML({
+                const html = buildQCRejectionEmailHTML({
                     vendorName:      purchaseOrder.vendor.vendorName,
                     purchaseOrderId: purchaseOrderId.toString(),
+                    qcDate:          new Date(),
+                    failedItems,
+                    totalPassed:     passedItems.reduce((s, i) => s + i.qty, 0),
+                    totalFailed:     failedItems.reduce((s, i) => s + (i.failedQty || i.qty || 0), 0),
+                });
+
+                const excelBuffer = generateQCRejectionExcel({
+                    purchaseOrderId: purchaseOrderId.toString(),
+                    purchaseQCId:    purchaseQC._id.toString(),
+                    vendorName:      purchaseOrder.vendor.vendorName,
+                    qcDate:          new Date(),
                     failedItems,
                 });
 
@@ -217,6 +274,12 @@ export const createPurchaseQC = async (req, res) => {
                         to:      vendor.email,
                         subject: `QC Rejection Notice — Purchase Order ${purchaseOrderId}`,
                         html,
+                        attachments: [
+                            {
+                                name:    `QC-Rejection-${purchaseOrderId}.xlsx`,
+                                content: excelBuffer.toString("base64"),
+                            },
+                        ],
                     }).catch(err => console.error("QC rejection email error:", err.message));
                 }
 

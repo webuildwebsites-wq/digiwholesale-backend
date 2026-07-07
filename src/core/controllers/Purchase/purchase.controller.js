@@ -5,6 +5,7 @@ import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../config/Email/emailService.js";
 import VendorPurchaseOrderTemplate from "../../../Utils/Mail/VendorPurchaseOrderTemplate.js";
+import VendorOrderUpdatedTemplate from "../../../Utils/Mail/VendorOrderUpdatedTemplate.js";
 import { generatePurchaseOrderExcel } from "../../../Utils/excel/generatePurchaseOrderExcel.js";
 
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
@@ -374,6 +375,31 @@ export const updateVendorPurchaseItems = async (req, res) => {
         });
 
         await purchaseOrder.save();
+
+        const vendor = await Vendor.findById(purchaseOrder.vendor.vendorId).lean();
+        if (vendor?.email) {
+            const html = VendorOrderUpdatedTemplate({
+                vendorName:      purchaseOrder.vendor.vendorName,
+                purchaseOrderId: purchaseOrder._id.toString(),
+                orderDate:       new Date(purchaseOrder.createdAt).toLocaleDateString("en-IN"),
+                updatedAt:       new Date().toLocaleDateString("en-IN"),
+                orders:          purchaseOrder.orders,
+            });
+
+            const excelBuffer = generatePurchaseOrderExcel(purchaseOrder.toObject());
+
+            sendEmail({
+                to:      vendor.email,
+                subject: `Purchase Order Updated — ${purchaseOrder._id}`,
+                html,
+                attachments: [
+                    {
+                        name:    `PurchaseOrder-Updated-${purchaseOrder._id}.xlsx`,
+                        content: excelBuffer.toString("base64"),
+                    },
+                ],
+            }).catch(err => console.error("Vendor update email error:", err.message));
+        }
 
         return sendSuccessResponse(res, 200, { purchaseOrder }, "Purchase order updated successfully");
 
