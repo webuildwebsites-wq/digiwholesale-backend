@@ -360,3 +360,92 @@ export const getPurchaseQCById = async (req, res) => {
         return sendErrorResponse(res, 500, "GET_QC_ERROR", error.message);
     }
 };
+
+export const getQCFailedItemsReport = async (req, res) => {
+    try {
+        const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const skip  = (page - 1) * limit;
+
+        const { vendorId, purchaseOrderId, fromDate, toDate } = req.query;
+
+        const matchStage = {
+            "items.qcResult": { $in: ["FAILED", "PARTIAL"] },
+        };
+
+        if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
+            matchStage.vendorId = new mongoose.Types.ObjectId(vendorId);
+        }
+        if (purchaseOrderId && mongoose.Types.ObjectId.isValid(purchaseOrderId)) {
+            matchStage.purchaseOrderId = new mongoose.Types.ObjectId(purchaseOrderId);
+        }
+        if (fromDate || toDate) {
+            matchStage.createdAt = {};
+            if (fromDate) matchStage.createdAt.$gte = new Date(fromDate);
+            if (toDate) {
+                const end = new Date(toDate);
+                end.setHours(23, 59, 59, 999);
+                matchStage.createdAt.$lte = end;
+            }
+        }
+
+        const [result, totalDocs] = await Promise.all([
+            PurchaseQC.aggregate([
+                { $match: matchStage },
+                { $sort: { createdAt: -1 } },
+                { $skip: skip },
+                { $limit: limit },
+                {
+                    $project: {
+                        _id:             1,
+                        purchaseOrderId: 1,
+                        vendorId:        1,
+                        vendorName:      1,
+                        qcDate:          1,
+                        overallResult:   1,
+                        createdAt:       1,
+                        failedItems: {
+                            $filter: {
+                                input: "$items",
+                                as:    "item",
+                                cond:  { $in: ["$$item.qcResult", ["FAILED", "PARTIAL"]] },
+                            },
+                        },
+                        totalFailedQty: {
+                            $sum: {
+                                $map: {
+                                    input: {
+                                        $filter: {
+                                            input: "$items",
+                                            as:    "item",
+                                            cond:  { $in: ["$$item.qcResult", ["FAILED", "PARTIAL"]] },
+                                        },
+                                    },
+                                    as: "fi",
+                                    in: "$$fi.failedQty",
+                                },
+                            },
+                        },
+                    },
+                },
+            ]),
+            PurchaseQC.countDocuments(matchStage),
+        ]);
+
+        const totalPages = Math.ceil(totalDocs / limit);
+
+        return sendSuccessResponse(res, 200, {
+            report: result,
+            pagination: {
+                currentPage:  page,
+                totalPages,
+                totalRecords: totalDocs,
+                hasNext: page < totalPages,
+                hasPrev: page > 1,
+            },
+        }, "QC failed items report retrieved successfully");
+
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_QC_REPORT_ERROR", error.message);
+    }
+};
