@@ -295,10 +295,74 @@ export const getAllPurchaseItems = async (req, res) => {
             VendorPurchase.countDocuments(filter),
         ]);
 
+        const enrichedOrders = purchaseOrders.map(po => {
+            const allOrders = po.orders || [];
+
+            const enrichedOrdersList = allOrders.map(order => {
+                const items      = order.items || [];
+                const totalItems = items.length;
+
+                const inwardDone = items.filter(i => i.inwardStatus !== "PENDING").length;
+                const qcDone     = items.filter(i => i.qcStatus     !== "PENDING").length;
+                const qcPassed   = items.filter(i => i.qcStatus === "PASSED").length;
+                const qcFailed   = items.filter(i => i.qcStatus === "FAILED").length;
+                const qcPartial  = items.filter(i => i.qcStatus === "PARTIAL").length;
+
+                return {
+                    ...order,
+                    orderSummary: {
+                        totalItems,
+                        inwardDone,
+                        inwardPending: totalItems - inwardDone,
+                        qcDone,
+                        qcPending:     totalItems - qcDone,
+                        qcPassed,
+                        qcFailed,
+                        qcPartial,
+                        allReceived:   totalItems > 0 && items.every(i => i.inwardStatus === "RECEIVED"),
+                        allQCDone:     totalItems > 0 && items.every(i => i.qcStatus !== "PENDING"),
+                    },
+                };
+            });
+
+            const allItems      = allOrders.flatMap(o => o.items || []);
+            const total_items   = allItems.length;
+            const inwardDone    = allItems.filter(i => i.inwardStatus !== "PENDING").length;
+            const qcDoneCount   = allItems.filter(i => i.qcStatus     !== "PENDING").length;
+            const qcPassed      = allItems.filter(i => i.qcStatus === "PASSED").length;
+            const qcFailed      = allItems.filter(i => i.qcStatus === "FAILED").length;
+
+            const overallStatus = (() => {
+                if (total_items === 0)                                         return "Submitted";
+                if (allItems.every(i => i.qcStatus === "PASSED"))             return "QC Passed";
+                if (allItems.every(i => i.qcStatus === "FAILED"))             return "QC Failed";
+                if (qcDoneCount > 0)                                          return "QC In Progress";
+                if (allItems.every(i => i.inwardStatus === "RECEIVED"))       return "Fully Received";
+                if (inwardDone > 0)                                           return "Partially Received";
+                return "Submitted";
+            })();
+
+            return {
+                ...po,
+                overallStatus,
+                purchaseOrderSummary: {
+                    totalOrders:   allOrders.length,
+                    totalItems:    total_items,
+                    inwardDone,
+                    inwardPending: total_items - inwardDone,
+                    qcDone:        qcDoneCount,
+                    qcPending:     total_items - qcDoneCount,
+                    qcPassed,
+                    qcFailed,
+                },
+                orders: enrichedOrdersList,
+            };
+        });
+
         const totalPages = Math.ceil(total / limit);
 
         return sendSuccessResponse(res, 200, {
-            purchaseOrders,
+            purchaseOrders: enrichedOrders,
             pagination: {
                 currentPage: page,
                 totalPages,
