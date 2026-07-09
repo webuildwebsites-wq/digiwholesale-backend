@@ -756,15 +756,3 @@ export const getQCPassedItems = async (req, res) => {
         return sendErrorResponse(res, 500, "GET_QC_PASSED_ERROR", error.message);
     }
 };
-
-export const getQCFailedItems = async (req, res) => {
-    try {
-        const filter = buildItemsFilter(req, { "orders.items.qcStatus": { $in: ["FAILED", "PARTIAL"] } });
-        const result = await paginateItemsFromPOs(req, filter,
-            item => item.qcStatus === "FAILED" || item.qcStatus === "PARTIAL"
-        );
-        return sendSuccessResponse(res, 200, result, "QC failed items retrieved successfully");
-    } catch (error) {
-        return sendErrorResponse(res, 500, "GET_QC_FAILED_ERROR", error.message);
-    }
-};
