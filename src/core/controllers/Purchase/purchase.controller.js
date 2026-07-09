@@ -638,3 +638,133 @@ export const updateVendorRefId = async (req, res) => {
         return sendErrorResponse(res, 500, "UPDATE_VENDOR_REF_ERROR", error.message || "Something went wrong");
     }
 };
+
+const buildItemsFilter = (req, extraItemFilter = {}) => {
+    const { vendorId, purchaseOrderId, fromDate, toDate, search } = req.query;
+    const filter = {};
+
+    if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
+        filter["vendor.vendorId"] = new mongoose.Types.ObjectId(vendorId);
+    }
+    if (purchaseOrderId && mongoose.Types.ObjectId.isValid(purchaseOrderId)) {
+        filter["_id"] = new mongoose.Types.ObjectId(purchaseOrderId);
+    }
+    if (fromDate || toDate) {
+        filter.createdAt = {};
+        if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+        if (toDate) {
+            const end = new Date(toDate);
+            end.setHours(23, 59, 59, 999);
+            filter.createdAt.$lte = end;
+        }
+    }
+    if (search && search.trim()) {
+        filter.$or = [
+            { "vendor.vendorName":      { $regex: search.trim(), $options: "i" } },
+            { "orders.items.itemName":  { $regex: search.trim(), $options: "i" } },
+            { "orders.orderNumber":     { $regex: search.trim(), $options: "i" } },
+        ];
+    }
+
+    Object.assign(filter, extraItemFilter);
+    return filter;
+};
+
+const paginateItemsFromPOs = async (req, filter, itemFilter) => {
+    const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const skip  = (page - 1) * limit;
+
+    const purchaseOrders = await VendorPurchase.find(filter).sort({ createdAt: -1 }).lean();
+
+    const allItems = [];
+    for (const po of purchaseOrders) {
+        for (const order of po.orders) {
+            for (const item of order.items) {
+                if (itemFilter(item)) {
+                    allItems.push({
+                        purchaseOrderId: po._id,
+                        vendorName:      po.vendor.vendorName,
+                        vendorId:        po.vendor.vendorId,
+                        orderNumber:     order.orderNumber,
+                        cgst:            order.cgst,
+                        sgst:            order.sgst,
+                        ...item,
+                    });
+                }
+            }
+        }
+    }
+
+    const total      = allItems.length;
+    const paginated  = allItems.slice(skip, skip + limit);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+        items: paginated,
+        pagination: {
+            currentPage:  page,
+            totalPages,
+            totalRecords: total,
+            hasNext: page < totalPages,
+            hasPrev: page > 1,
+        },
+    };
+};
+
+export const getAllInwardedItems = async (req, res) => {
+    try {
+        const filter = buildItemsFilter(req, { "orders.items.inwardStatus": { $in: ["RECEIVED", "PARTIAL", "NOT_RECEIVED"] } });
+        const result = await paginateItemsFromPOs(req, filter, item => item.inwardStatus !== "PENDING");
+        return sendSuccessResponse(res, 200, result, "All inwarded items retrieved successfully");
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_INWARDED_ITEMS_ERROR", error.message);
+    }
+};
+
+export const getPendingInwardItems = async (req, res) => {
+    try {
+        const filter = buildItemsFilter(req, { "orders.items.inwardStatus": "PENDING" });
+        const result = await paginateItemsFromPOs(req, filter, item => item.inwardStatus === "PENDING");
+        return sendSuccessResponse(res, 200, result, "Pending inward items retrieved successfully");
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_PENDING_INWARD_ERROR", error.message);
+    }
+};
+
+export const getQCPendingItems = async (req, res) => {
+    try {
+        const filter = buildItemsFilter(req, {
+            "orders.items.inwardStatus": { $in: ["RECEIVED", "PARTIAL"] },
+            "orders.items.qcStatus":     "PENDING",
+        });
+        const result = await paginateItemsFromPOs(req, filter,
+            item => item.inwardStatus !== "PENDING" && item.qcStatus === "PENDING"
+        );
+        return sendSuccessResponse(res, 200, result, "Items pending QC retrieved successfully");
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_QC_PENDING_ERROR", error.message);
+    }
+};
+
+export const getQCPassedItems = async (req, res) => {
+    try {
+        const filter = buildItemsFilter(req, { "orders.items.qcStatus": "PASSED" });
+        const result = await paginateItemsFromPOs(req, filter, item => item.qcStatus === "PASSED");
+        return sendSuccessResponse(res, 200, result, "QC passed items retrieved successfully");
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_QC_PASSED_ERROR", error.message);
+    }
+};
+
+export const getQCFailedItems = async (req, res) => {
+    try {
+        const filter = buildItemsFilter(req, { "orders.items.qcStatus": { $in: ["FAILED", "PARTIAL"] } });
+        const result = await paginateItemsFromPOs(req, filter,
+            item => item.qcStatus === "FAILED" || item.qcStatus === "PARTIAL"
+        );
+        return sendSuccessResponse(res, 200, result, "QC failed items retrieved successfully");
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_QC_FAILED_ERROR", error.message);
+    }
+};

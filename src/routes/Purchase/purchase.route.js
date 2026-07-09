@@ -1,12 +1,17 @@
 import express from "express";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
-import { createVendorPurchaseItems, getAllPurchaseItems, getVendorPurchaseItemsById, deleteVendorPurchaseItems, updateVendorPurchaseItems, getOrdersByVendorId, updateVendorRefId } from "../../core/controllers/Purchase/purchase.controller.js";
+import { createVendorPurchaseItems, getAllPurchaseItems, getVendorPurchaseItemsById, deleteVendorPurchaseItems, updateVendorPurchaseItems, getOrdersByVendorId, updateVendorRefId, getAllInwardedItems, getPendingInwardItems, getQCPendingItems, getQCPassedItems, getQCFailedItems } from "../../core/controllers/Purchase/purchase.controller.js";
 
 const purchaseRouter = express.Router();
 
 purchaseRouter.use(ProtectUser);
 
 purchaseRouter.get("/get-all-purchase-items", getAllPurchaseItems);
+purchaseRouter.get("/items/all-inwarded",     getAllInwardedItems);
+purchaseRouter.get("/items/pending-inward",   getPendingInwardItems);
+purchaseRouter.get("/items/qc-pending",       getQCPendingItems);
+purchaseRouter.get("/items/qc-passed",        getQCPassedItems);
+purchaseRouter.get("/items/qc-failed",        getQCFailedItems);
 
 purchaseRouter.get("/vendor-orders/:vendorId", getOrdersByVendorId);
 
