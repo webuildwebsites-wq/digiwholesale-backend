@@ -336,6 +336,7 @@ export const getAllPurchaseItems = async (req, res) => {
                 if (total_items === 0)                                         return "Submitted";
                 if (allItems.every(i => i.qcStatus === "PASSED"))             return "QC Passed";
                 if (allItems.every(i => i.qcStatus === "FAILED"))             return "QC Failed";
+                if (qcDoneCount === total_items)                              return "QC Completed";
                 if (qcDoneCount > 0)                                          return "QC In Progress";
                 if (allItems.every(i => i.inwardStatus === "RECEIVED"))       return "Fully Received";
                 if (inwardDone > 0)                                           return "Partially Received";
