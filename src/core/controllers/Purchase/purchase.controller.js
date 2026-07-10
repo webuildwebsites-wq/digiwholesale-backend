@@ -641,7 +641,7 @@ export const updateVendorRefId = async (req, res) => {
 };
 
 const buildItemsFilter = (req, extraItemFilter = {}) => {
-    const { vendorId, purchaseOrderId, fromDate, toDate, search } = req.query;
+    const { vendorId, purchaseOrderId, fromDate, toDate, search, isReplacement } = req.query;
     const filter = {};
 
     if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
@@ -649,6 +649,9 @@ const buildItemsFilter = (req, extraItemFilter = {}) => {
     }
     if (purchaseOrderId && mongoose.Types.ObjectId.isValid(purchaseOrderId)) {
         filter["_id"] = new mongoose.Types.ObjectId(purchaseOrderId);
+    }
+    if (isReplacement !== undefined) {
+        filter.isReplacement = isReplacement === "true";
     }
     if (fromDate || toDate) {
         filter.createdAt = {};
@@ -805,11 +808,11 @@ export const createReplacementOrder = async (req, res) => {
 
         const alreadyReplaced = replacementItems.filter(e => {
             const ri = returnItemsMap.get(e.returnItemId.toString());
-            return ri.itemStatus === "Replaced" || ri.itemStatus === "Closed";
+            return ["Replaced", "Closed", "VendorNotified"].includes(ri.itemStatus);
         });
         if (alreadyReplaced.length > 0) {
             return sendErrorResponse(res, 400, "ALREADY_REPLACED",
-                `These items are already replaced or closed: ${alreadyReplaced.map(e => e.returnItemId).join(", ")}`
+                `These items already have a replacement in progress or are closed: ${alreadyReplaced.map(e => e.returnItemId).join(", ")}`
             );
         }
 
