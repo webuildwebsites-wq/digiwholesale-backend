@@ -99,6 +99,6 @@ export const generatePurchaseOrderExcel = (vendorPurchase) => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Purchase Order");
 
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const buf = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
     return buf;
 };

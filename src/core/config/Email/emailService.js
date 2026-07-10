@@ -60,7 +60,9 @@ async function sendEmail({ to, subject, html, attachments = [] }) {
     if (attachments.length > 0) {
       payload.attachment = attachments.map(file => ({
         name:    file.name,
-        content: file.content,
+        content: typeof file.content === "string"
+          ? file.content
+          : Buffer.from(file.content).toString("base64"),
       }));
     }
 

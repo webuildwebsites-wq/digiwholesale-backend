@@ -62,7 +62,7 @@ const generatePDF = async (html) => {
     try {
         await page.setContent(html, { waitUntil: "networkidle0" });
         const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
-        return pdfBuffer;
+        return Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
     } finally {
         await page.close();
     }

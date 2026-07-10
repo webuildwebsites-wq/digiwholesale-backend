@@ -3,12 +3,148 @@ import Customer from "../../../../models/Auth/Customer.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
+import Employee from "../../../../models/Auth/Employee.js";
 import generatePDF from "../../../services/pdfService.js";
 import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../../../Utils/templates/deliveryChallanTemplate.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
 import { handleOrderBillingNotification } from "../../../services/billing/billingNotification.service.js";
+import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
+
+const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumber }) => {
+    try {
+        const lowStockItems = [];
+
+        for (const order of orders) {
+            for (const item of order.items) {
+                const product = productMap[item.productId?.toString()];
+                if (!product) continue;
+
+                const orderedQty   = Number(item.qty || 0);
+                const availableQty = Number(product.qty ?? 0);
+
+                if (availableQty < orderedQty) {
+                    lowStockItems.push({
+                        productName:   product.productName  || product.productCode || "",
+                        productCode:   product.productCode  || "",
+                        category:      product.category     || "",
+                        brand:         product.brand        || "",
+                        unit:          product.unit         || item.unit || "",
+                        orderedQty,
+                        availableQty,
+                        shortfall:     orderedQty - availableQty,
+                        price:         product.price        ?? 0,
+                        mrp:           product.mrp          ?? 0,
+                        gst:           product.gst          ?? 0,
+                        hsnSac:        product.hsnSac       || "",
+                        index:         product.index        ?? "",
+                        coating:       product.coating      || "",
+                        tint:          product.tint         || "",
+                        sph:           product.sph          ?? "",
+                        cyl:           product.cyl          ?? "",
+                        axis:          product.axis         ?? "",
+                        add:           product.add          ?? "",
+                        color:         product.color        || "",
+                        size:          product.size         || "",
+                        shape:         product.shape        || "",
+                        material:      product.material     || "",
+                        dimensions:    product.dimensions   || "",
+                        expiry:        product.expiry       || "",
+                        disposability: product.disposability|| "",
+                    });
+                }
+            }
+        }
+
+        if (lowStockItems.length === 0) return;
+
+        const staff = await Employee.find({
+            EmployeeType: { $in: ["SUPERADMIN", "ADMIN"] },
+            isActive:  true,
+            isDeleted: false,
+            email:     { $exists: true, $ne: "" },
+        }).select("email employeeName").lean();
+
+        if (!staff.length) return;
+
+        const itemRows = lowStockItems.map((item, idx) => `
+            <tr style="background:${idx % 2 === 0 ? "#fff" : "#fef2f2"};">
+                <td style="padding:9px 12px;border:1px solid #fecaca;">${item.productName}</td>
+                <td style="padding:9px 12px;border:1px solid #fecaca;">${item.productCode}</td>
+                <td style="padding:9px 12px;border:1px solid #fecaca;">${item.category}</td>
+                <td style="padding:9px 12px;border:1px solid #fecaca;text-align:center;">${item.orderedQty}</td>
+                <td style="padding:9px 12px;border:1px solid #fecaca;text-align:center;color:#16a34a;font-weight:bold;">${item.availableQty}</td>
+                <td style="padding:9px 12px;border:1px solid #fecaca;text-align:center;color:#dc2626;font-weight:bold;">${item.shortfall}</td>
+            </tr>`).join("");
+
+        const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"/></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:700px;margin:40px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+    <div style="background:#dc2626;padding:20px 28px;color:#fff;">
+      <div style="font-size:20px;font-weight:700;">DigiOptics — Low Stock Alert</div>
+      <div style="font-size:13px;margin-top:4px;opacity:0.9;">Inventory Update Required</div>
+    </div>
+    <div style="padding:18px 28px;background:#fef2f2;border-bottom:2px solid #dc2626;">
+      <p style="margin:0;font-size:14px;color:#555;">
+        A new order from <b>${customerName}</b> (Order: <b>${orderNumber}</b>) has been placed, but the following items have
+        <b style="color:#dc2626;">insufficient stock</b>. Please update the inventory immediately.
+        Full details are attached in the Excel file.
+      </p>
+    </div>
+    <div style="padding:20px 28px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#fee2e2;">
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:left;">Product</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:left;">Code</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:left;">Category</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:center;">Ordered</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:center;">Available</th>
+            <th style="padding:8px 12px;border:1px solid #fecaca;text-align:center;">Shortfall</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div style="margin-top:16px;padding:12px 16px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:13px;color:#7f1d1d;">
+        <b>Action required:</b> Please update inventory to ensure order fulfilment. Full product details are in the attached Excel file.
+      </div>
+    </div>
+    <div style="background:#f5f5f5;text-align:center;padding:14px;font-size:12px;color:#777;border-top:1px solid #e0e0e0;">
+      © ${new Date().getFullYear()} DigiOptics. System generated alert.
+    </div>
+  </div>
+</body>
+</html>`;
+
+        const excelBuffer = generateLowStockExcel({
+            orderNumber,
+            customerName,
+            orderDate: new Date().toLocaleDateString("en-IN"),
+            lowStockItems,
+        });
+
+        const emailPromises = staff.map(s =>
+            sendEmail({
+                to:      s.email,
+                subject: `⚠️ Low Stock Alert — Order ${orderNumber} from ${customerName}`,
+                html,
+                attachments: [{
+                    name:    `LowStock-${orderNumber}.xlsx`,
+                    content: excelBuffer.toString("base64"),
+                }],
+            }).catch(err => console.error(`Low stock alert email error for ${s.email}:`, err.message))
+        );
+
+        await Promise.all(emailPromises);
+        console.log(`Low stock alert sent to ${staff.length} staff for order ${orderNumber}`);
+
+    } catch (err) {
+        console.error("sendLowStockAlerts error:", err.message);
+    }
+};
 
 // const VALID_CATEGORIES        = ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"];
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
@@ -248,10 +384,6 @@ export const createBulkOrder = async (req, res) => {
                     return sendErrorResponse(res, 400, "INVALID_QUANTITY", `Quantity must be greater than 0 for ${product.productName}`);
                 }
 
-                if (product.qty !== undefined && Number(product.qty) < qty) {
-                    return sendErrorResponse(res, 400, "INSUFFICIENT_STOCK", `${product.productName} has only ${product.qty} quantity available`);
-                }
-
                 const rawCategory    = (item.category || product.category || "").toUpperCase();
                 const validationError = validateItemByCategory(item, product);
 
@@ -344,6 +476,13 @@ export const createBulkOrder = async (req, res) => {
         handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
             console.error("Billing notification error:", err.message)
         );
+
+        sendLowStockAlerts({
+            orders:       bulkOrder.orders,
+            productMap,
+            customerName: customer.ownerName || customer.shopName,
+            orderNumber:  bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
+        }).catch(err => console.error("Low stock alert error:", err.message));
 
         return sendSuccessResponse(res, 201, {
             bulkOrder,
