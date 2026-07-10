@@ -31,6 +31,8 @@ import purchaseRouter from './src/routes/Purchase/purchase.route.js';
 import purchaseInwardRouter from './src/routes/Purchase/purchaseInward.routes.js';
 import purchaseQCRouter from './src/routes/Purchase/purchaseQC.routes.js';
 import purchaseReturnRouter from './src/routes/Purchase/purchaseReturn.routes.js';
+import billingRouter from './src/routes/billing.routes.js';
+import { startBillingCron } from './src/core/services/billing/billingCron.js';
 
 dotenv.config();
 
@@ -154,6 +156,7 @@ try {
   app.use("/api/purchase-inward", purchaseInwardRouter);
   app.use("/api/purchase-qc", purchaseQCRouter);
   app.use("/api/purchase-return", purchaseReturnRouter);
+  app.use("/api/billing", billingRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);
@@ -185,5 +188,6 @@ connectDB()
   .then(() => {
     console.log("DB Connected");
     console.log("MongoDB TTL indexes active - Automatic deletion enabled for records older than 30 days");
+    startBillingCron();
   })
   .catch(err => console.error("DB Failed:", err));

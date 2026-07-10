@@ -8,6 +8,7 @@ import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../../../
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
+import { handleOrderBillingNotification } from "../../../services/billing/billingNotification.service.js";
 
 // const VALID_CATEGORIES        = ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"];
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
@@ -338,6 +339,10 @@ export const createBulkOrder = async (req, res) => {
 
         sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
             console.error("Vendor email notification error:", err.message)
+        );
+
+        handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
+            console.error("Billing notification error:", err.message)
         );
 
         return sendSuccessResponse(res, 201, {
