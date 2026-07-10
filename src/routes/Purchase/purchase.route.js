@@ -1,6 +1,6 @@
 import express from "express";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
-import { createVendorPurchaseItems, getAllPurchaseItems, getVendorPurchaseItemsById, deleteVendorPurchaseItems, updateVendorPurchaseItems, getOrdersByVendorId, updateVendorRefId, getAllInwardedItems, getPendingInwardItems, getQCPendingItems, getQCPassedItems } from "../../core/controllers/Purchase/purchase.controller.js";
+import { createVendorPurchaseItems, getAllPurchaseItems, getVendorPurchaseItemsById, deleteVendorPurchaseItems, updateVendorPurchaseItems, getOrdersByVendorId, updateVendorRefId, getAllInwardedItems, getPendingInwardItems, getQCPendingItems, getQCPassedItems, createReplacementOrder } from "../../core/controllers/Purchase/purchase.controller.js";
 
 const purchaseRouter = express.Router();
 
@@ -17,6 +17,7 @@ purchaseRouter.get("/vendor-orders/:vendorId", getOrdersByVendorId);
 purchaseRouter.get("/get-purchase-items-details/:id", getVendorPurchaseItemsById);
 
 purchaseRouter.post("/create-vendor-purchase-items", createVendorPurchaseItems);
+purchaseRouter.post("/create-replacement-order", createReplacementOrder);
 
 purchaseRouter.delete("/delete-vendor-purchase-items/:id", deleteVendorPurchaseItems);
 

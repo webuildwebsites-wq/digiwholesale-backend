@@ -7,6 +7,7 @@ import { sendEmail } from "../../config/Email/emailService.js";
 import VendorPurchaseOrderTemplate from "../../../Utils/Mail/VendorPurchaseOrderTemplate.js";
 import VendorOrderUpdatedTemplate from "../../../Utils/Mail/VendorOrderUpdatedTemplate.js";
 import { generatePurchaseOrderExcel } from "../../../Utils/excel/generatePurchaseOrderExcel.js";
+import PurchaseReturnModel from "../../../models/Purchase/PurchaseReturn.model.js";
 
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
 const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
@@ -754,5 +755,253 @@ export const getQCPassedItems = async (req, res) => {
         return sendSuccessResponse(res, 200, result, "QC passed items retrieved successfully");
     } catch (error) {
         return sendErrorResponse(res, 500, "GET_QC_PASSED_ERROR", error.message);
+    }
+};
+
+export const createReplacementOrder = async (req, res) => {
+    try {
+        const { purchaseReturnId, cgst, sgst, remarks, replacementItems } = req.body;
+
+        if (!purchaseReturnId || !mongoose.Types.ObjectId.isValid(purchaseReturnId)) {
+            return sendErrorResponse(res, 400, "INVALID_ID", "Valid purchaseReturnId is required");
+        }
+        if (!Array.isArray(replacementItems) || replacementItems.length === 0) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "replacementItems array is required");
+        }
+
+        for (const entry of replacementItems) {
+            if (!entry.returnItemId || !mongoose.Types.ObjectId.isValid(entry.returnItemId)) {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Valid returnItemId is required for each replacement entry`);
+            }
+            if (!entry.item || typeof entry.item !== "object") {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `item object is required for returnItemId: ${entry.returnItemId}`);
+            }
+            if (!entry.item.qty || Number(entry.item.qty) <= 0) {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `qty must be greater than 0 for returnItemId: ${entry.returnItemId}`);
+            }
+            if (!entry.item.itemName && !entry.item.productId) {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Either productId or itemName is required for returnItemId: ${entry.returnItemId}`);
+            }
+        }
+
+        const purchaseReturn = await PurchaseReturnModel.findById(purchaseReturnId);
+        if (!purchaseReturn) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase return not found");
+        }
+
+        const originalPO = await VendorPurchase.findById(purchaseReturn.purchaseOrderId);
+        if (!originalPO) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Original purchase order not found");
+        }
+
+        const returnItemsMap = new Map(purchaseReturn.items.map(i => [i.itemId.toString(), i]));
+
+        const invalidIds = replacementItems.filter(e => !returnItemsMap.has(e.returnItemId.toString()));
+        if (invalidIds.length > 0) {
+            return sendErrorResponse(res, 404, "ITEMS_NOT_FOUND",
+                `These returnItemIds are not in this purchase return: ${invalidIds.map(e => e.returnItemId).join(", ")}`
+            );
+        }
+
+        const alreadyReplaced = replacementItems.filter(e => {
+            const ri = returnItemsMap.get(e.returnItemId.toString());
+            return ri.itemStatus === "Replaced" || ri.itemStatus === "Closed";
+        });
+        if (alreadyReplaced.length > 0) {
+            return sendErrorResponse(res, 400, "ALREADY_REPLACED",
+                `These items are already replaced or closed: ${alreadyReplaced.map(e => e.returnItemId).join(", ")}`
+            );
+        }
+
+        const allProductIds = replacementItems
+            .filter(e => e.item.productId)
+            .map(e => e.item.productId.toString());
+
+        let productMap = new Map();
+        if (allProductIds.length > 0) {
+            if (allProductIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+                return sendErrorResponse(res, 400, "INVALID_PRODUCT_ID", "One or more productIds are invalid");
+            }
+            const products = await DigiProduct.find({ _id: { $in: allProductIds } }).lean();
+            const missing  = allProductIds.filter(id => !products.find(p => p._id.toString() === id));
+            if (missing.length > 0) {
+                return sendErrorResponse(res, 404, "PRODUCT_NOT_FOUND", `Products not found: ${missing.join(", ")}`);
+            }
+            productMap = new Map(products.map(p => [p._id.toString(), p]));
+        }
+
+        const builtItems = [];
+        for (const entry of replacementItems) {
+            const { returnItemId, item } = entry;
+            const returnItem = returnItemsMap.get(returnItemId.toString());
+            const qty        = Number(item.qty);
+
+            let builtItem = {
+                inwardStatus:     "PENDING",
+                qcStatus:         "PENDING",
+                receivedQty:      0,
+                vendorRefId:      null,
+                isPriceConfirmed: false,
+            };
+
+            if (item.productId) {
+                const product    = productMap.get(item.productId.toString());
+                const rawCategory = (item.category || product.category || "").toUpperCase();
+
+                const validationError = validatePurchaseItem(item, product);
+                if (validationError) {
+                    return sendErrorResponse(res, 400, "VALIDATION_ERROR",
+                        `${validationError}. Product: ${product.productName} (returnItemId: ${returnItemId})`
+                    );
+                }
+
+                if (item.orderType === "STOCK") delete item.rx;
+
+                builtItem = {
+                    ...builtItem,
+                    productId:      product._id,
+                    isNewProduct:   false,
+                    orderType:      item.orderType || "STOCK",
+                    itemName:       item.itemName  || product.productName,
+                    category:       rawCategory,
+                    code:           item.code      || product.productCode,
+                    brand:          item.brand     || product.brand,
+                    color:          item.color     || product.color,
+                    size:           item.size      || product.size,
+                    shape:          item.shape     || product.shape,
+                    material:       item.material  || product.material,
+                    dimensions:     item.dimensions|| product.dimensions,
+                    unit:           item.unit      || "PIECE",
+                    qty,
+                    price:          item.price     ?? product.price   ?? 0,
+                    mrp:            item.mrp       ?? product.mrp     ?? 0,
+                    gst:            item.gst       ?? product.gst     ?? 0,
+                    hsnSac:         item.hsnSac    || product.hsnSac,
+                    discountPercent:item.discountPercent || 0,
+                    discountAmount: item.discountAmount  || 0,
+                    sph:            item.sph       ?? product.sph,
+                    cyl:            item.cyl       ?? product.cyl,
+                    axis:           item.axis      ?? product.axis,
+                    add:            item.add       ?? product.add,
+                    index:          item.index     ?? product.index,
+                    coating:        item.coating   || product.coating,
+                    tint:           item.tint      || product.tint,
+                    expiry:         item.expiry    || product.expiry,
+                    disposability:  item.disposability || product.disposability,
+                    rx:             item.rx,
+                    _returnItemId:  returnItemId,
+                };
+            } else {
+                builtItem = {
+                    ...builtItem,
+                    productId:      null,
+                    isNewProduct:   true,
+                    orderType:      item.orderType || "STOCK",
+                    itemName:       item.itemName,
+                    category:       (item.category || returnItem.category || "").toUpperCase(),
+                    code:           item.code       || "",
+                    brand:          item.brand      || "",
+                    color:          item.color      || "",
+                    size:           item.size       || "",
+                    shape:          item.shape      || "",
+                    material:       item.material   || "",
+                    dimensions:     item.dimensions || "",
+                    unit:           item.unit       || "PIECE",
+                    qty,
+                    price:          item.price      ?? 0,
+                    mrp:            item.mrp        ?? 0,
+                    gst:            item.gst        ?? 0,
+                    hsnSac:         item.hsnSac     || "",
+                    discountPercent:item.discountPercent || 0,
+                    discountAmount: item.discountAmount  || 0,
+                    sph:            item.sph,
+                    cyl:            item.cyl,
+                    axis:           item.axis,
+                    add:            item.add,
+                    index:          item.index,
+                    coating:        item.coating    || "",
+                    tint:           item.tint       || "",
+                    expiry:         item.expiry     || "",
+                    disposability:  item.disposability || "",
+                    _returnItemId:  returnItemId,
+                };
+            }
+
+            builtItems.push(builtItem);
+        }
+
+        const vendor    = await Vendor.findById(originalPO.vendor.vendorId).lean();
+        const vendorDoc = {
+            vendorId:   originalPO.vendor.vendorId,
+            vendorName: originalPO.vendor.vendorName,
+            email:      originalPO.vendor.email,
+            mobile:     originalPO.vendor.mobile,
+            address:    originalPO.vendor.address,
+            gstNumber:  originalPO.vendor.gstNumber,
+        };
+
+        const replacementPO = await VendorPurchase.create({
+            vendor:                  vendorDoc,
+            isReplacement:           true,
+            replacementFor:          purchaseReturnId,
+            originalPurchaseOrderId: originalPO._id,
+            orders: [{
+                orderNumber: generatePurchaseOrderNumber(),
+                items:       builtItems,
+                cgst:        cgst ? String(cgst) : (originalPO.orders[0]?.cgst || "0"),
+                sgst:        sgst ? String(sgst) : (originalPO.orders[0]?.sgst || "0"),
+                status:      "Submitted",
+                remarks:     remarks || `Replacement for Purchase Return ${purchaseReturnId}`,
+            }],
+            createdBy: req.user._id,
+        });
+
+        for (const entry of replacementItems) {
+            const returnItem = purchaseReturn.items.find(i => i.itemId.toString() === entry.returnItemId.toString());
+            if (returnItem) {
+                returnItem.itemStatus    = "VendorNotified";
+                returnItem.itemUpdatedAt = new Date();
+                returnItem.itemUpdatedBy = req.user._id;
+                returnItem.itemRemarks   = `Replacement PO created: ${replacementPO._id}`;
+            }
+        }
+
+        const allNotified = purchaseReturn.items.every(i =>
+            ["Replaced", "Closed", "VendorNotified"].includes(i.itemStatus)
+        );
+        if (allNotified) purchaseReturn.status = "VendorNotified";
+        await purchaseReturn.save();
+
+        if (vendor?.email) {
+            const html = VendorPurchaseOrderTemplate({
+                vendorName:      vendorDoc.vendorName,
+                purchaseOrderId: replacementPO._id.toString(),
+                orderDate:       new Date(replacementPO.createdAt).toLocaleDateString("en-IN"),
+                orders:          replacementPO.orders,
+            });
+
+            const excelBuffer = generatePurchaseOrderExcel(replacementPO.toObject());
+
+            sendEmail({
+                to:      vendor.email,
+                subject: `Replacement Purchase Order — ${replacementPO._id}`,
+                html,
+                attachments: [{
+                    name:    `ReplacementOrder-${replacementPO._id}.xlsx`,
+                    content: excelBuffer.toString("base64"),
+                }],
+            }).catch(err => console.error("Replacement order email error:", err.message));
+        }
+
+        return sendSuccessResponse(res, 201, {
+            replacementOrder:        replacementPO,
+            itemsReplacing:          replacementItems.length,
+            purchaseReturnId,
+            originalPurchaseOrderId: originalPO._id,
+        }, `Replacement order created for ${replacementItems.length} item(s). Vendor notified.`);
+
+    } catch (error) {
+        console.error("Create Replacement Order Error:", error);
+        return sendErrorResponse(res, 500, "CREATE_REPLACEMENT_ERROR", error.message);
     }
 };

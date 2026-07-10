@@ -108,6 +108,9 @@ const vendorPurchaseSchema = new mongoose.Schema(
         },
         orders:     [vendorPurchaseOrderSchema],
         createdBy:  { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+        isReplacement:  { type: Boolean, default: false },
+        replacementFor: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseReturn", default: null },
+        originalPurchaseOrderId: { type: mongoose.Schema.Types.ObjectId, ref: "VendorPurchase", default: null },
     },
     { timestamps: true }
 );
