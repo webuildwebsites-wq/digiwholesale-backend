@@ -1005,3 +1005,142 @@ export const createReplacementOrder = async (req, res) => {
         return sendErrorResponse(res, 500, "CREATE_REPLACEMENT_ERROR", error.message);
     }
 };
+
+export const getAllReplacementOrders = async (req, res) => {
+    try {
+        const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const skip  = (page - 1) * limit;
+
+        const filter = { isReplacement: true };
+
+        if (req.query.vendorId && mongoose.Types.ObjectId.isValid(req.query.vendorId)) {
+            filter["vendor.vendorId"] = new mongoose.Types.ObjectId(req.query.vendorId);
+        }
+        if (req.query.purchaseReturnId && mongoose.Types.ObjectId.isValid(req.query.purchaseReturnId)) {
+            filter.replacementFor = new mongoose.Types.ObjectId(req.query.purchaseReturnId);
+        }
+        if (req.query.originalPurchaseOrderId && mongoose.Types.ObjectId.isValid(req.query.originalPurchaseOrderId)) {
+            filter.originalPurchaseOrderId = new mongoose.Types.ObjectId(req.query.originalPurchaseOrderId);
+        }
+        if (req.query.search?.trim()) {
+            const regex = { $regex: req.query.search.trim(), $options: "i" };
+            filter.$or = [
+                { "vendor.vendorName":       regex },
+                { "orders.orderNumber":      regex },
+                { "orders.items.itemName":   regex },
+            ];
+        }
+        if (req.query.fromDate || req.query.toDate) {
+            filter.createdAt = {};
+            if (req.query.fromDate) filter.createdAt.$gte = new Date(req.query.fromDate);
+            if (req.query.toDate) {
+                const end = new Date(req.query.toDate);
+                end.setHours(23, 59, 59, 999);
+                filter.createdAt.$lte = end;
+            }
+        }
+
+        const [replacementOrders, total] = await Promise.all([
+            VendorPurchase.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            VendorPurchase.countDocuments(filter),
+        ]);
+
+        const enriched = await Promise.all(
+            replacementOrders.map(async po => {
+                const purchaseReturn = po.replacementFor
+                    ? await PurchaseReturnModel.findById(po.replacementFor).lean()
+                    : null;
+
+                const allItems   = po.orders.flatMap(o => o.items || []);
+                const qcPassed   = allItems.filter(i => i.qcStatus === "PASSED").length;
+                const qcFailed   = allItems.filter(i => i.qcStatus === "FAILED").length;
+                const qcPending  = allItems.filter(i => i.qcStatus === "PENDING").length;
+                const inwardDone = allItems.filter(i => i.inwardStatus !== "PENDING").length;
+
+                const overallStatus = (() => {
+                    if (allItems.length === 0)                                  return "Submitted";
+                    if (allItems.every(i => i.qcStatus === "PASSED"))          return "QC Passed";
+                    if (allItems.every(i => i.qcStatus === "FAILED"))          return "QC Failed";
+                    if (allItems.every(i => i.qcStatus !== "PENDING"))         return "QC Completed";
+                    if (allItems.some(i => i.qcStatus !== "PENDING"))          return "QC In Progress";
+                    if (allItems.every(i => i.inwardStatus === "RECEIVED"))    return "Fully Received";
+                    if (inwardDone > 0)                                        return "Partially Received";
+                    return "Submitted";
+                })();
+
+                return {
+                    ...po,
+                    overallStatus,
+                    replacementSummary: {
+                        totalItems:  allItems.length,
+                        inwardDone,
+                        inwardPending: allItems.length - inwardDone,
+                        qcPassed,
+                        qcFailed,
+                        qcPending,
+                    },
+                    purchaseReturnDetails: purchaseReturn ? {
+                        _id:        purchaseReturn._id,
+                        status:     purchaseReturn.status,
+                        vendorName: purchaseReturn.vendorName,
+                        items:      purchaseReturn.items,
+                    } : null,
+                };
+            })
+        );
+
+        return sendSuccessResponse(res, 200, {
+            replacementOrders: enriched,
+            pagination: {
+                currentPage:  page,
+                totalPages:   Math.ceil(total / limit),
+                totalRecords: total,
+                hasNext: page < Math.ceil(total / limit),
+                hasPrev: page > 1,
+            },
+        }, "Replacement orders retrieved successfully");
+
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_REPLACEMENT_ORDERS_ERROR", error.message);
+    }
+};
+
+export const getReplacementOrderById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
+        }
+
+        const po = await VendorPurchase.findOne({ _id: id, isReplacement: true }).lean();
+        if (!po) return sendErrorResponse(res, 404, "NOT_FOUND", "Replacement order not found");
+
+        const [purchaseReturn, originalPO] = await Promise.all([
+            po.replacementFor
+                ? PurchaseReturnModel.findById(po.replacementFor).lean()
+                : null,
+            po.originalPurchaseOrderId
+                ? VendorPurchase.findById(po.originalPurchaseOrderId).lean()
+                : null,
+        ]);
+
+        return sendSuccessResponse(res, 200, {
+            replacementOrder: po,
+            purchaseReturn:   purchaseReturn || null,
+            originalPurchaseOrder: originalPO ? {
+                _id:         originalPO._id,
+                vendor:      originalPO.vendor,
+                orderNumber: originalPO.orders[0]?.orderNumber,
+                createdAt:   originalPO.createdAt,
+            } : null,
+        }, "Replacement order retrieved successfully");
+
+    } catch (error) {
+        return sendErrorResponse(res, 500, "GET_REPLACEMENT_ORDER_ERROR", error.message);
+    }
+};
