@@ -3,7 +3,7 @@ import Customer from "../../../models/Auth/Customer.js";
 import generatePDF from "../pdfService.js";
 import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../../Utils/templates/deliveryChallanTemplate.js";
 import { sendEmail } from "../../config/Email/emailService.js";
-import { sendWhatsAppOTP } from "../../config/Whatsapp/sendWhatsappOtp.js";
+import { sendWhatsAppOTP, sendWhatsAppMedia } from "../../config/Whatsapp/sendWhatsappOtp.js";
 
 const buildChallanData = (bulkOrder, customer) => ({
     billNumber:     bulkOrder.orders[0]?.orderNumber,
@@ -123,10 +123,15 @@ const sendChallanNotification = async ({ bulkOrder, customer, subject, emailSubj
         }
 
         if (customer.mobileNo1) {
-            sendWhatsAppOTP({
-                phone: `91${customer.mobileNo1}`,
-                otp:   `Dear ${customer.ownerName || customer.shopName}, your Delivery Challan for Order ${orderNumber} has been generated. Please check your email for the attached challan.`,
-            }).catch(err => console.error("Challan WhatsApp error:", err.message));
+            sendWhatsAppMedia({
+                phone:      `91${customer.mobileNo1}`,
+                message:    `Dear ${customer.ownerName || customer.shopName}, please find your Delivery Challan for Order ${orderNumber} attached.`,
+                fileBuffer: pdfBuffer,
+                fileName:   `Challan-${orderNumber}.pdf`,
+                mimeType:   "application/pdf",
+            }).catch(err => console.error("Challan WhatsApp media error:", err.message));
+        } else {
+            console.log(`Challan WhatsApp skipped — no mobileNo1 for customer: ${customer._id}`);
         }
     } catch (err) {
         console.error("sendChallanNotification error:", err.message);
@@ -153,10 +158,15 @@ const sendInvoiceNotification = async ({ bulkOrder, customer }) => {
         }
 
         if (customer.mobileNo1) {
-            sendWhatsAppOTP({
-                phone: `91${customer.mobileNo1}`,
-                otp:   `Dear ${customer.ownerName || customer.shopName}, your Invoice for Order ${orderNumber} has been generated. Please check your email for the attached invoice.`,
-            }).catch(err => console.error("Invoice WhatsApp error:", err.message));
+            sendWhatsAppMedia({
+                phone:      `91${customer.mobileNo1}`,
+                message:    `Dear ${customer.ownerName || customer.shopName}, please find your Invoice for Order ${orderNumber} attached.`,
+                fileBuffer: pdfBuffer,
+                fileName:   `Invoice-${orderNumber}.pdf`,
+                mimeType:   "application/pdf",
+            }).catch(err => console.error("Invoice WhatsApp media error:", err.message));
+        } else {
+            console.log(`Invoice WhatsApp skipped — no mobileNo1 for customer: ${customer._id}`);
         }
     } catch (err) {
         console.error("sendInvoiceNotification error:", err.message);
