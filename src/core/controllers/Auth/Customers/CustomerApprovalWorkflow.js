@@ -133,7 +133,7 @@ export const salesHeadApproveCustomer = async (req, res) => {
 
       sendEmail({
         to: customer.businessEmail,
-        subject: "Your Account Approved - Welcome to VISUAL EYES",
+        subject: "Your Account Approved - Welcome to DigiWholesale",
         html: CredentialsTemplate(
           customer.ownerName,
           customer.businessEmail,
