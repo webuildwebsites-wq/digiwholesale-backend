@@ -16,7 +16,6 @@ const returnItemSchema = new mongoose.Schema(
     orderNumber: { type: String },
     returnType: { type: String },
     category: { type: String },
-    images: { type: [String], default: [] },
   },
   { _id: false }
 );

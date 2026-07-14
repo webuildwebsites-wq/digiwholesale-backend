@@ -14,6 +14,7 @@ export const createReturnRefund = async (req, res) => {
       remark,
       OrderId,
       returnType,
+      images,
     } = req.body;
 
     if (!name)            throw new Error("Customer name is required");
@@ -123,7 +124,6 @@ export const createReturnRefund = async (req, res) => {
       ...i,
       returnType: requestedStatus,
       category: (i.category || "").toUpperCase(),
-      images: Array.isArray(i.images) ? i.images : [],
       orderNumber: bulkOrder.orders.find((o) =>
         o.items.some((it) =>
           it.productId.toString() === (i.productId || "").toString() &&
@@ -131,6 +131,8 @@ export const createReturnRefund = async (req, res) => {
         )
       )?.orderNumber || "",
     }));
+
+    const topLevelImages = Array.isArray(images) ? images : [];
 
     const returnRefund = await ReturnRefund.create({
       name: name.trim().toUpperCase(),
@@ -145,7 +147,7 @@ export const createReturnRefund = async (req, res) => {
       refundMethod,
       loyaltyPoints: Number(loyaltyPoints) || 0,
       giftVoucherUrl,
-      photos,
+      photos: topLevelImages,
       remark,
       createdBy: req.user._id,
       createdByName: req.user.employeeName || req.user.name,
