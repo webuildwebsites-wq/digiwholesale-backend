@@ -675,3 +675,67 @@ export const getBulkOrderInvoice = async (req, res) => {
         return sendErrorResponse(res, 500, "INVOICE_ERROR", error.message || "Something went wrong");
     }
 };
+
+export const updateOrderStatus = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { orderNumber, status, remarks } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
+        }
+
+        const VALID_STATUSES = [
+            "Draft", "Submitted", "Processing",
+            "QC", "ReadyToDispatch", "Dispatched", "Delivered",
+            "Completed", "Cancelled",
+        ];
+
+        const ALLOWED_TRANSITIONS = {
+            "Draft":           ["Submitted", "Cancelled"],
+            "Submitted":       ["Processing", "Cancelled"],
+            "Processing":      ["QC", "Cancelled"],
+            "QC":              ["ReadyToDispatch", "Cancelled"],
+            "ReadyToDispatch": ["Dispatched", "Cancelled"],
+            "Dispatched":      ["Delivered", "Cancelled"],
+            "Delivered":       ["Completed"],
+            "Completed":       [],
+            "Cancelled":       [],
+        };
+
+        if (!status || !VALID_STATUSES.includes(status)) {
+            return sendErrorResponse(res, 400, "INVALID_STATUS", `Status must be one of: ${VALID_STATUSES.join(", ")}`);
+        }
+
+        const bulkOrder = await BulkOrder.findById(orderId);
+        if (!bulkOrder) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
+        }
+
+        const ordersToUpdate = orderNumber
+            ? bulkOrder.orders.filter(o => o.orderNumber === orderNumber)
+            : bulkOrder.orders;
+
+        if (orderNumber && ordersToUpdate.length === 0) {
+            return sendErrorResponse(res, 404, "ORDER_NOT_FOUND", `Order number ${orderNumber} not found in this bulk order`);
+        }
+
+        for (const order of ordersToUpdate) {
+            const allowed = ALLOWED_TRANSITIONS[order.status] || [];
+            if (!allowed.includes(status)) {
+                return sendErrorResponse(
+                    res, 400, "INVALID_TRANSITION",
+                    `Order "${order.orderNumber}" cannot move from "${order.status}" to "${status}". Allowed next: ${allowed.length ? allowed.join(", ") : "none"}`
+                );
+            }
+            order.status = status;
+        }
+
+        await bulkOrder.save();
+
+        return sendSuccessResponse(res, 200, { bulkOrder }, `Order status updated to ${status}`);
+    } catch (error) {
+        console.error("Update Order Status Error:", error);
+        return sendErrorResponse(res, 500, "UPDATE_STATUS_ERROR", error.message || "Something went wrong");
+    }
+};
