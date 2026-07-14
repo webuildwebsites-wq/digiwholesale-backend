@@ -756,9 +756,9 @@ export const updateBulkDraftOrder = async (req, res) => {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Order not found");
         }
 
-        const allDraft = bulkOrder.orders.every(o => o.status === "Draft");
-        if (!allDraft) {
-            return sendErrorResponse(res, 400, "INVALID_STATUS", "Only Draft orders can be updated");
+        const canUpdate = bulkOrder.orders.every(o => ["Draft", "Submitted"].includes(o.status));
+        if (!canUpdate) {
+            return sendErrorResponse(res, 400, "INVALID_STATUS", "Only Draft or Submitted orders can be updated");
         }
 
         if (customerShipToId) {

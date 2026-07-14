@@ -244,8 +244,10 @@ export async function cancelOrderService(orderId, reason) {
 export async function updateDraftOrderService(orderId, data) {
   const order = await BulkOrder.findById(orderId);
   if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
-  if (order.status !== "Draft" && order.status !== "Submitted") {
-    throw { statusCode: 400, code: "INVALID_STATUS", message: "Only Draft or Submitted orders can be updated." };
+
+  const canUpdate = order.orders.every(o => ["Draft", "Submitted"].includes(o.status));
+  if (!canUpdate) {
+    throw { statusCode: 400, code: "INVALID_STATUS", message: "Only Draft or Submitted orders can be updated" };
   }
 
   if (data.fitting !== undefined) data.fitting = sanitizeFitting(data.fitting);
