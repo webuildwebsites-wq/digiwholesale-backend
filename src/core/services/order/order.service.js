@@ -125,16 +125,26 @@ export async function deleteOrderService(orderId) {
 }
 
 export async function listOrdersService({ customerId, status, page = 1, limit = 20, search, fromDate, toDate }) {
-  const VALID_STATUSES = ["PENDING", "CONFIRMED", "PROCESSING", "COMPLETED", "CANCELLED"];
+  const STATUS_MAP = {
+    PENDING:    ["Processing"],
+    CONFIRMED:  ["Confirmed"],
+    PROCESSING: ["Processing"],
+    COMPLETED:  ["Completed"],
+    CANCELLED:  ["Cancelled"],
+    SUBMITTED:  ["Submitted"],
+    DRAFT:      ["Draft"],
+    DELIVERABLE:["Deliverable"],
+  };
   const filter = {};
 
   if (customerId) filter["customer.customerId"] = customerId;
 
   if (status) {
-    if (!VALID_STATUSES.includes(status.toUpperCase())) {
-      throw { statusCode: 400, code: "INVALID_VALUE", message: `Invalid status. Allowed: ${VALID_STATUSES.join(", ")}` };
+    const key = status.toUpperCase();
+    if (!STATUS_MAP[key]) {
+      throw { statusCode: 400, code: "INVALID_VALUE", message: `Invalid status. Allowed: ${Object.keys(STATUS_MAP).join(", ")}` };
     }
-    filter["orders"] = { $elemMatch: { status: status.toUpperCase() } };
+    filter["orders"] = { $elemMatch: { status: { $in: STATUS_MAP[key] } } };
   }
 
   if (search) {
