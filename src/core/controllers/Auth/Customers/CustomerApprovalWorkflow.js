@@ -83,9 +83,10 @@ export const salesHeadApproveCustomer = async (req, res) => {
     const userId = req.user.id;
 
     const isSalesHead = Array.isArray(req.user?.subRoles) && req.user.subRoles.some(r => r.code === 'SALES_HEAD');
+    const isAdminOrAbove = ["SUPERADMIN", "ADMIN"].includes(req.user?.EmployeeType);
 
-    if (req.user?.EmployeeType !== "SUPERADMIN" && !isSalesHead) {
-      return sendErrorResponse(res, 403, "FORBIDDEN", "Only Sales Head can approve customers");
+    if (!isAdminOrAbove && !isSalesHead) {
+      return sendErrorResponse(res, 403, "FORBIDDEN", "Only Sales Head or Admin can approve customers");
     }
 
     if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
