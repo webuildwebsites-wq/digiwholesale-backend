@@ -622,7 +622,7 @@ export async function getRxOrdersService({ page = 1, limit = 20, search, fromDat
 
 export async function getDraftOrdersService({ page = 1, limit = 20, search, customerId, fromDate, toDate }) {
   const filter = {
-    "orders.status": "Draft",
+    "orders": { $elemMatch: { status: "Draft" } },
   };
 
   if (customerId) filter["customer.customerId"] = customerId;

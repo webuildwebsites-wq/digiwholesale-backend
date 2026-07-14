@@ -741,3 +741,100 @@ export const updateOrderStatus = async (req, res) => {
         return sendErrorResponse(res, 500, "UPDATE_STATUS_ERROR", error.message || "Something went wrong");
     }
 };
+
+export const updateBulkDraftOrder = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { orders, customerShipToId, submitNow } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return sendErrorResponse(res, 400, "INVALID_ID", "Invalid order ID");
+        }
+
+        const bulkOrder = await BulkOrder.findById(id);
+        if (!bulkOrder) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Order not found");
+        }
+
+        const allDraft = bulkOrder.orders.every(o => o.status === "Draft");
+        if (!allDraft) {
+            return sendErrorResponse(res, 400, "INVALID_STATUS", "Only Draft orders can be updated");
+        }
+
+        if (customerShipToId) {
+            const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
+            if (customer) {
+                const shipTo = customer.customerShipToDetails?.find(
+                    s => s._id.toString() === customerShipToId.toString()
+                );
+                if (!shipTo) {
+                    return sendErrorResponse(res, 404, "NOT_FOUND", "Ship-to address not found for this customer");
+                }
+                bulkOrder.customer.customerShipToId         = shipTo._id;
+                bulkOrder.customer.customerShipToBranchName = shipTo.branchName;
+            }
+        }
+
+        if (Array.isArray(orders) && orders.length > 0) {
+            const allProductIds = orders
+                .flatMap(o => o.items || [])
+                .filter(item => item.productId)
+                .map(item => item.productId.toString());
+
+            let productMap = {};
+            if (allProductIds.length > 0) {
+                const products = await DigiProduct.find({ _id: { $in: allProductIds } }).lean();
+                productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
+            }
+
+            bulkOrder.orders = orders.map(incomingOrder => {
+                const existing = bulkOrder.orders.find(o => o.orderNumber === incomingOrder.orderNumber);
+                const items = (incomingOrder.items || []).map(item => {
+                    const product = productMap[item.productId?.toString()];
+                    return {
+                        ...(item),
+                        itemName: item.itemName || product?.productName || "",
+                        category: (item.category || product?.category || "").toUpperCase(),
+                        price:    item.price    ?? product?.price   ?? 0,
+                        mrp:      item.mrp      ?? product?.mrp     ?? 0,
+                        gst:      item.gst      ?? product?.gst     ?? 0,
+                        hsnSac:   item.hsnSac   || product?.hsnSac  || "",
+                        qty:      Number(item.qty || 0),
+                    };
+                });
+
+                return {
+                    orderNumber: existing?.orderNumber || incomingOrder.orderNumber || generateOrderNumber(),
+                    items,
+                    cgst:        incomingOrder.cgst !== undefined ? String(incomingOrder.cgst) : (existing?.cgst || "0"),
+                    sgst:        incomingOrder.sgst !== undefined ? String(incomingOrder.sgst) : (existing?.sgst || "0"),
+                    status:      submitNow ? "Submitted" : "Draft",
+                    remarks:     incomingOrder.remarks || existing?.remarks || "",
+                };
+            });
+        } else if (submitNow) {
+            for (const order of bulkOrder.orders) {
+                order.status = "Submitted";
+            }
+        }
+
+        await bulkOrder.save();
+
+        if (submitNow) {
+            const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
+            if (customer) {
+                handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
+                    console.error("Billing notification error:", err.message)
+                );
+            }
+        }
+
+        return sendSuccessResponse(
+            res, 200, { bulkOrder },
+            submitNow ? "Draft order submitted successfully" : "Draft order updated successfully"
+        );
+    } catch (error) {
+        console.error("Update Bulk Draft Order Error:", error);
+        return sendErrorResponse(res, 500, "UPDATE_DRAFT_ERROR", error.message || "Something went wrong");
+    }
+};
