@@ -292,7 +292,7 @@ const validateItemByCategory = (item, product) => {
 
 export const createBulkOrder = async (req, res) => {
     try {
-        const { customerId, customerShipToId, orders } = req.body;
+        const { customerId, customerShipToId, orders, isDraft } = req.body;
 
         if (!customerId) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "customerId is required");
@@ -453,7 +453,7 @@ export const createBulkOrder = async (req, res) => {
             }
 
             if (!order.status) {
-                order.status = "Submitted";
+                order.status = isDraft === true ? "Draft" : "Submitted";
             }
 
             if (order.cgst !== undefined) order.cgst = String(order.cgst);
@@ -473,16 +473,18 @@ export const createBulkOrder = async (req, res) => {
             console.error("Vendor email notification error:", err.message)
         );
 
-        handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
-            console.error("Billing notification error:", err.message)
-        );
+        if (!isDraft) {
+            handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
+                console.error("Billing notification error:", err.message)
+            );
 
-        sendLowStockAlerts({
-            orders:       bulkOrder.orders,
-            productMap,
-            customerName: customer.ownerName || customer.shopName,
-            orderNumber:  bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
-        }).catch(err => console.error("Low stock alert error:", err.message));
+            sendLowStockAlerts({
+                orders:       bulkOrder.orders,
+                productMap,
+                customerName: customer.ownerName || customer.shopName,
+                orderNumber:  bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
+            }).catch(err => console.error("Low stock alert error:", err.message));
+        }
 
         return sendSuccessResponse(res, 201, {
             bulkOrder,
