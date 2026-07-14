@@ -758,7 +758,7 @@ export const updateBulkDraftOrder = async (req, res) => {
 
         const canUpdate = bulkOrder.orders.every(o => ["Draft", "Submitted"].includes(o.status));
         if (!canUpdate) {
-            return sendErrorResponse(res, 400, "INVALID_STATUS", "Only Draft or Submitted orders can be updated");
+            return sendErrorResponse(res, 400, "INVALID_STATUS", "Only Draft or Submitted orders can be updateddd");
         }
 
         if (customerShipToId) {
