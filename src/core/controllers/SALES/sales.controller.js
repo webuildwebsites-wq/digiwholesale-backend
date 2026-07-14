@@ -15,7 +15,7 @@ export const createSale = async (req, res) => {
       subtotal,
       gst,
       gstAmt,
-      gstType,
+      gstType: (gstType ?? "").toUpperCase(),
       totalAmount,
       paymentMode,
       createdBy: req.user._id,
