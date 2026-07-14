@@ -517,7 +517,7 @@ export const customerForgotPassword = async (req, res) => {
 
     const emailResult = await sendEmail({
       to: customer.businessEmail,
-      subject: "Visual Eyes — Password Reset Request",
+      subject: "DigiWholesale — Password Reset Request",
       html: ResetPasswordTemplate(customer.shopName || customer.ownerName, resetUrl, 30),
     });
 

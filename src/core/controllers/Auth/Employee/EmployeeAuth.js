@@ -76,7 +76,7 @@ export const employeeForgotPassword = async (req, res) => {
 
     const emailResult = await sendEmail({
       to: user.email,
-      subject: 'Visual Eyes — Password Reset Request',
+      subject: 'DigiWholesale — Password Reset Request',
       html: ResetPasswordTemplate(user.employeeName, resetUrl, 30),
     });
 

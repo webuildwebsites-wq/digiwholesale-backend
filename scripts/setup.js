@@ -7,7 +7,7 @@ dotenv.config();
 
 const setupProject = async () => {
   try {
-    console.log('Starting VisualEyes ERP Setup...\n');
+    console.log('Starting DigiWholesale ERP Setup...\n');
 
     await mongoose.connect(process.env.MONGODB_URL);
     console.log('Connected to database');
