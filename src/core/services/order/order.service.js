@@ -247,7 +247,7 @@ export async function updateDraftOrderService(orderId, data) {
 
   const canUpdate = order.orders.every(o => ["Draft", "Submitted"].includes(o.status));
   if (!canUpdate) {
-    throw { statusCode: 400, code: "INVALID_STATUS", message: "Only Draft or Submitted orders can be updated" };
+    throw { statusCode: 400, code: "INVALID_STATUS", message: "Only Draft or Submitted orders can be updated Anish" };
   }
 
   if (data.fitting !== undefined) data.fitting = sanitizeFitting(data.fitting);
