@@ -34,12 +34,15 @@ export async function getDashboardAnalyticsService() {
     ]);
 
     const statusMap = {
-        Processing: 0,
-        Submitted:  0,
-        Deliverable:0,
-        Completed:  0,
-        Draft:      0,
-        Cancelled:  0,
+        Draft:           0,
+        Submitted:       0,
+        Processing:      0,
+        QC:              0,
+        ReadyToDispatch: 0,
+        Dispatched:      0,
+        Delivered:       0,
+        Completed:       0,
+        Cancelled:       0,
     };
 
     for (const item of statusCounts) {
@@ -51,16 +54,19 @@ export async function getDashboardAnalyticsService() {
     const totalOrders = Object.values(statusMap).reduce((sum, count) => sum + count, 0);
 
     const orderdata = {
-        active:         statusMap.Submitted + statusMap.Processing,
-        submitted:      statusMap.Submitted,
-        processing:     statusMap.Processing,
+        active:          statusMap.Submitted + statusMap.Processing + statusMap.QC + statusMap.ReadyToDispatch,
+        submitted:       statusMap.Submitted,
+        processing:      statusMap.Processing,
+        qc:              statusMap.QC,
+        readyToDispatch: statusMap.ReadyToDispatch,
+        dispatched:      statusMap.Dispatched,
+        delivered:       statusMap.Delivered,
+        completed:       statusMap.Completed,
+        cancelled:       statusMap.Cancelled,
+        draft:           statusMap.Draft,
         totalOrders,
-        totalEmployees: totalStaff,
-        delivered:      statusMap.Completed,
-        readyToDeliver: statusMap.Deliverable,
-        cancelled:      statusMap.Cancelled,
-        draft:          statusMap.Draft,
-        generatedAt:    now.toISOString(),
+        totalEmployees:  totalStaff,
+        generatedAt:     now.toISOString(),
     };
 
     return {
