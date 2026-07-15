@@ -1,5 +1,6 @@
 // import nodemailer from "nodemailer";
-// import dotenv from 'dotenv';
+// import dotenv from "dotenv";
+
 // dotenv.config();
 
 // export const transporter = nodemailer.createTransport({
@@ -7,32 +8,56 @@
 //   port: 587,
 //   secure: false,
 //   auth: {
-//     user: process.env.VISUAL_EYES_USER_MAIL,
-//     pass: process.env.VISUAL_EYES_TRANSPORTER_USER_PASSWORD,
+//     user: process.env.AUTH_USER_MAIL,
+//     pass: process.env.AUTH_TRANSPORTER_USER_PASSWORD,
 //   },
-//   connectionTimeout: 10000,
-//   greetingTimeout: 10000,
-//   socketTimeout: 10000,
-//   tls: {
-//     rejectUnauthorized: false,
-//     minVersion: 'TLSv1.2'
-//   }
 // });
 
-// async function sendEmail(to, subject, text, html) {
+// async function sendEmail({
+//   to,
+//   subject,
+//   text = "",
+//   html = "",
+//   attachments = [],
+// }) {
 //   try {
+//     console.log("🚀 sendEmail triggered:", to);
+
+//     // Convert Brevo attachment format -> Nodemailer attachment format
+//     const formattedAttachments = attachments.map((file) => ({
+//       filename: file.filename || file.name || "attachment.pdf",
+//       content:
+//         typeof file.content === "string"
+//           ? Buffer.from(file.content, "base64")
+//           : file.content,
+//       contentType:
+//         file.contentType ||
+//         file.mimeType ||
+//         "application/pdf",
+//       encoding: typeof file.content === "string" ? "base64" : undefined,
+//     }));
+
 //     const info = await transporter.sendMail({
-//       from: process.env.VISUAL_EYES_USER_MAIL,
+//       from: `"DigiBySr" <${process.env.AUTH_USER_MAIL}>`,
 //       to,
 //       subject,
 //       text,
 //       html,
+//       attachments: formattedAttachments,
 //     });
+
 //     console.log("Email sent successfully:", info.messageId);
-//     return { success: true, messageId: info.messageId };
+
+//     return {
+//       success: true,
+//       messageId: info.messageId,
+//     };
 //   } catch (error) {
-//     console.error("Error sending email:", error.message);
-//     return { success: false, error: error.message };
+//     console.error("Error sending email:", error);
+//     return {
+//       success: false,
+//       error: error.message,
+//     };
 //   }
 // }
 
