@@ -175,8 +175,7 @@ const sendInvoiceNotification = async ({ bulkOrder, customer }) => {
 
 export const handleOrderBillingNotification = async ({ bulkOrder, customer }) => {
     try {
-        const billingMode  = customer.billingMode;
-        const billingCycle = customer.billingCycle;
+        const billingMode = customer.billingMode;
 
         if (billingMode === "Direct") {
             await sendInvoiceNotification({ bulkOrder, customer });
@@ -184,11 +183,7 @@ export const handleOrderBillingNotification = async ({ bulkOrder, customer }) =>
         }
 
         if (billingMode === "DC") {
-            await sendChallanNotification({
-                bulkOrder,
-                customer,
-                emailSubject: `Delivery Challan — ${bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString()}`,
-            });
+            console.log(`[Billing] DC mode — challan will be sent on billing cycle (7/15/end of month) for customer: ${customer._id}`);
             return;
         }
 
