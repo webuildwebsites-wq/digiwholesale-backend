@@ -2,6 +2,7 @@ import { sendErrorResponse, sendSuccessResponse } from "../../../../Utils/respon
 import Customer from "../../../../models/Auth/Customer.js";
 import dotenv from "dotenv";
 import CustomerDraft from "../../../../models/Auth/CustomerDraft.js";
+import mongoose from "mongoose";
 dotenv.config();
 
 export const getCustomerProfile = async (req, res) => {
@@ -81,7 +82,8 @@ export const getAllCustomers = async (req, res) => {
 
     const {
       businessType,
-      status="active",
+      customerID,
+      status = "active",
       createdByDepartment,
       zone,
       specificBrand,
@@ -90,6 +92,8 @@ export const getAllCustomers = async (req, res) => {
       toDate,
       search
     } = req.query;
+
+    const customerIDTerm = Array.isArray(customerID) ? customerID[0] : customerID;
 
     const searchTerm = Array.isArray(search) ? search[0] : search;
     const businessTypeTerm = Array.isArray(businessType) ? businessType[0] : businessType;
@@ -104,10 +108,23 @@ export const getAllCustomers = async (req, res) => {
 
     let query = {};
 
-    const isSalesHead = Array.isArray(req.user?.subRoles) && req.user.subRoles.some(r => r.code === 'SALES_HEAD');
+    const isSalesHead = Array.isArray(req.user?.subRoles) && req.user.subRoles.some(r => r.code === "SALES_HEAD");
 
-    if (userDepartment === 'SALES' && userEmployeeType === 'EMPLOYEE' && !isSalesHead) {
+    if (userDepartment === "SALES" &&  userEmployeeType === "EMPLOYEE" &&  !isSalesHead) {
       query.createdBy = req.user.id;
+    }
+
+    if (customerIDTerm) {
+      if (!mongoose.Types.ObjectId.isValid(customerIDTerm)) {
+        return sendErrorResponse(
+          res,
+          400,
+          "INVALID_CUSTOMER_ID",
+          "Invalid customer ID"
+        );
+      }
+
+      query._id = new mongoose.Types.ObjectId(customerIDTerm);
     }
 
     if (searchTerm) {
@@ -117,26 +134,26 @@ export const getAllCustomers = async (req, res) => {
         searchConditions.push({ serialNumber: Number(searchTerm) });
       }
 
-      searchConditions.push({ ownerName: { $regex: searchTerm, $options: 'i' } });
-      searchConditions.push({ customerCode: { $regex: searchTerm, $options: 'i' } });
-      searchConditions.push({ shopName: { $regex: searchTerm, $options: 'i' } });
-      searchConditions.push({ mobileNo1: { $regex: searchTerm, $options: 'i' } });
-      searchConditions.push({ mobileNo2: { $regex: searchTerm, $options: 'i' } });
-      searchConditions.push({ businessEmail: { $regex: searchTerm, $options: 'i' } });
-      searchConditions.push({ 'salesPerson.name': { $regex: searchTerm, $options: 'i' } });
+      searchConditions.push({ ownerName: { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ customerCode: { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ shopName: { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ mobileNo1: { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ mobileNo2: { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ businessEmail: { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({"salesPerson.name": { $regex: searchTerm, $options: "i" } });
 
       query.$or = searchConditions;
     }
 
     if (businessTypeTerm) {
-      query['BusinessType.refId'] = businessTypeTerm;
+      query["BusinessType.refId"] = businessTypeTerm;
     }
 
     if (statusTerm) {
-      if (statusTerm.toLowerCase() === 'active') {
-        query['status.isActive'] = true;
-      } else if (statusTerm.toLowerCase() === 'inactive') {
-        query['status.isActive'] = false;
+      if (statusTerm.toLowerCase() === "active") {
+        query["status.isActive"] = true;
+      } else if (statusTerm.toLowerCase() === "inactive") {
+        query["status.isActive"] = false;
       }
     }
 
@@ -145,46 +162,65 @@ export const getAllCustomers = async (req, res) => {
     }
 
     if (zoneTerm) {
-      query['zone.refId'] = zoneTerm;
+      query["zone.refId"] = zoneTerm;
     }
 
     if (specificBrandTerm) {
-      query['brandCategories.brandId'] = specificBrandTerm;
+      query["brandCategories.brandId"] = specificBrandTerm;
     }
 
     if (specificCategoryTerm) {
-      query['brandCategories.categories.categoryId'] = specificCategoryTerm;
+      query["brandCategories.categories.categoryId"] = specificCategoryTerm;
     }
 
     let startDate, endDate;
+
     if (fromDate) {
       startDate = new Date(fromDate);
+
       if (isNaN(startDate.valueOf())) {
-        return sendErrorResponse(res, 400, 'INVALID_DATE', 'fromDate is not a valid date');
+        return sendErrorResponse(
+          res,
+          400,
+          "INVALID_DATE",
+          "fromDate is not a valid date"
+        );
       }
+
       startDate.setHours(0, 0, 0, 0);
     }
+
     if (toDate) {
       endDate = new Date(toDate);
+
       if (isNaN(endDate.valueOf())) {
-        return sendErrorResponse(res, 400, 'INVALID_DATE', 'toDate is not a valid date');
+        return sendErrorResponse(
+          res,
+          400,
+          "INVALID_DATE",
+          "toDate is not a valid date"
+        );
       }
+
       endDate.setHours(23, 59, 59, 999);
     }
 
     if (startDate || endDate) {
       query.createdAt = {};
+
       if (startDate) query.createdAt.$gte = startDate;
       if (endDate) query.createdAt.$lte = endDate;
     }
+
     console.log("querys : ", query);
+
     const [customers, total] = await Promise.all([
-      Customer
-        .find(query)
+      Customer.find(query)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
+
       Customer.countDocuments(query)
     ]);
 
@@ -198,11 +234,21 @@ export const getAllCustomers = async (req, res) => {
       hasPrev: page > 1
     };
 
-    return sendSuccessResponse(res, 200, { customers, pagination }, 'Customers retrieved successfully');
-
+    return sendSuccessResponse(
+      res,
+      200,
+      { customers, pagination },
+      "Customers retrieved successfully"
+    );
   } catch (error) {
-    console.error('Get filtered customers error:', error);
-    return sendErrorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to retrieve customers');
+    console.error("Get filtered customers error:", error);
+
+    return sendErrorResponse(
+      res,
+      500,
+      "INTERNAL_ERROR",
+      "Failed to retrieve customers"
+    );
   }
 };
 
