@@ -34,6 +34,7 @@ export const runBillingCycleCron = async () => {
                 (cycle === "7_days" && today === 7) ||
                 (cycle === "15_days" && today === 15) ||
                 (cycle === "end_of_month" && isLastDay);
+                // (cycle === "end_of_month" && today === 16);
 
             if (!shouldSend) continue;
 
