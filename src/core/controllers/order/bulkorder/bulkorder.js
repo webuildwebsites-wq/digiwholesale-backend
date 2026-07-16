@@ -516,13 +516,19 @@ export const getBulkOrderChallan = async (req, res) => {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
         }
 
+        const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+
         if (bulkOrder.challanUrl) {
-            return res.redirect(302, bulkOrder.challanUrl);
+            const { default: axios } = await import("axios");
+            const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer" });
+            const buffer   = Buffer.from(response.data);
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+            res.setHeader("Content-Length", buffer.length);
+            return res.end(buffer);
         }
 
         const { url, buffer } = await generateAndStoreChallan(orderId);
-        const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
-
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Length", buffer.length);
@@ -546,13 +552,19 @@ export const getBulkOrderInvoice = async (req, res) => {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
         }
 
+        const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+
         if (bulkOrder.invoiceUrl) {
-            return res.redirect(302, bulkOrder.invoiceUrl);
+            const { default: axios } = await import("axios");
+            const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer" });
+            const buffer   = Buffer.from(response.data);
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+            res.setHeader("Content-Length", buffer.length);
+            return res.end(buffer);
         }
 
         const { url, buffer } = await generateAndStoreInvoice(orderId);
-        const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
-
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Length", buffer.length);
