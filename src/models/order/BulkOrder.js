@@ -223,6 +223,11 @@ const bulkOrderSchema = new mongoose.Schema(
                 message: "At least one order is required",
             },
         },
+
+        invoiceUrl:    { type: String, default: null },
+        challanUrl:    { type: String, default: null },
+        invoiceGenAt:  { type: Date,   default: null },
+        challanGenAt:  { type: Date,   default: null },
     },
     { timestamps: true }
 );
