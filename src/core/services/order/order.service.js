@@ -189,40 +189,37 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     .limit(parseInt(limit))
     .lean();
 
+  const customerIds = [...new Set(orders.map(o => o.customer?.customerId?.toString()).filter(Boolean))];
+  const customers   = await Customer.find({ _id: { $in: customerIds } })
+    .select("_id billingMode billingCycle")
+    .lean();
+  const customerMap = new Map(customers.map(c => [c._id.toString(), c]));
 
-  // without decimal
-  //     const ordersWithTotalPrice = orders.map((bulkOrder) => ({
-  //   ...bulkOrder,
-  //   orders: bulkOrder.orders.map((order) => ({
-  //     ...order,
-  //     totalOrderPrice: order.items.reduce((sum, item) => {
-  //       const price = Number(item.price || 0);
-  //       const gstPercent = Number(item.gst || 0);
+  const ordersWithTotalPrice = orders.map((bulkOrder) => {
+    const custId   = bulkOrder.customer?.customerId?.toString();
+    const custData = custId ? customerMap.get(custId) : null;
 
-  //       const priceWithGst = price + (price * gstPercent) / 100;
-
-  //       return sum + priceWithGst;
-  //     }, 0),
-  //   })),
-  // }));
-
-  // For 2 decimal Number :
-  const ordersWithTotalPrice = orders.map((bulkOrder) => ({
-    ...bulkOrder,
-    orders: bulkOrder.orders.map((order) => ({
-      ...order,
-      totalOrderPrice: Number(
-        order.items
-          .reduce((sum, item) => {
-            const price = Number(item.price || 0);
-            const gstPercent = Number(item.gst || 0);
-
-            return sum + price + (price * gstPercent) / 100;
-          }, 0)
-          .toFixed(2),
-      ),
-    })),
-  }));
+    return {
+      ...bulkOrder,
+      customer: {
+        ...bulkOrder.customer,
+        billingMode:  custData?.billingMode  || null,
+        billingCycle: custData?.billingCycle || null,
+      },
+      orders: bulkOrder.orders.map((order) => ({
+        ...order,
+        totalOrderPrice: Number(
+          order.items
+            .reduce((sum, item) => {
+              const price = Number(item.price || 0);
+              const gstPercent = Number(item.gst || 0);
+              return sum + price + (price * gstPercent) / 100;
+            }, 0)
+            .toFixed(2),
+        ),
+      })),
+    };
+  });
 
   return {
     orders : ordersWithTotalPrice,
