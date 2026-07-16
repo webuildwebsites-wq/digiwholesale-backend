@@ -21,37 +21,37 @@ const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumbe
                 const product = productMap[item.productId?.toString()];
                 if (!product) continue;
 
-                const orderedQty   = Number(item.qty || 0);
+                const orderedQty = Number(item.qty || 0);
                 const availableQty = Number(product.qty ?? 0);
 
                 if (availableQty < orderedQty) {
                     lowStockItems.push({
-                        productName:   product.productName  || product.productCode || "",
-                        productCode:   product.productCode  || "",
-                        category:      product.category     || "",
-                        brand:         product.brand        || "",
-                        unit:          product.unit         || item.unit || "",
+                        productName: product.productName || product.productCode || "",
+                        productCode: product.productCode || "",
+                        category: product.category || "",
+                        brand: product.brand || "",
+                        unit: product.unit || item.unit || "",
                         orderedQty,
                         availableQty,
-                        shortfall:     orderedQty - availableQty,
-                        price:         product.price        ?? 0,
-                        mrp:           product.mrp          ?? 0,
-                        gst:           product.gst          ?? 0,
-                        hsnSac:        product.hsnSac       || "",
-                        index:         product.index        ?? "",
-                        coating:       product.coating      || "",
-                        tint:          product.tint         || "",
-                        sph:           product.sph          ?? "",
-                        cyl:           product.cyl          ?? "",
-                        axis:          product.axis         ?? "",
-                        add:           product.add          ?? "",
-                        color:         product.color        || "",
-                        size:          product.size         || "",
-                        shape:         product.shape        || "",
-                        material:      product.material     || "",
-                        dimensions:    product.dimensions   || "",
-                        expiry:        product.expiry       || "",
-                        disposability: product.disposability|| "",
+                        shortfall: orderedQty - availableQty,
+                        price: product.price ?? 0,
+                        mrp: product.mrp ?? 0,
+                        gst: product.gst ?? 0,
+                        hsnSac: product.hsnSac || "",
+                        index: product.index ?? "",
+                        coating: product.coating || "",
+                        tint: product.tint || "",
+                        sph: product.sph ?? "",
+                        cyl: product.cyl ?? "",
+                        axis: product.axis ?? "",
+                        add: product.add ?? "",
+                        color: product.color || "",
+                        size: product.size || "",
+                        shape: product.shape || "",
+                        material: product.material || "",
+                        dimensions: product.dimensions || "",
+                        expiry: product.expiry || "",
+                        disposability: product.disposability || "",
                     });
                 }
             }
@@ -61,9 +61,9 @@ const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumbe
 
         const staff = await Employee.find({
             EmployeeType: { $in: ["SUPERADMIN", "ADMIN"] },
-            isActive:  true,
+            isActive: true,
             isDeleted: false,
-            email:     { $exists: true, $ne: "" },
+            email: { $exists: true, $ne: "" },
         }).select("email employeeName").lean();
 
         if (!staff.length) return;
@@ -128,11 +128,11 @@ const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumbe
 
         const emailPromises = staff.map(s =>
             sendEmail({
-                to:      s.email,
+                to: s.email,
                 subject: `⚠️ Low Stock Alert — Order ${orderNumber} from ${customerName}`,
                 html,
                 attachments: [{
-                    name:    `LowStock-${orderNumber}.xlsx`,
+                    name: `LowStock-${orderNumber}.xlsx`,
                     content: excelBuffer.toString("base64"),
                 }],
             }).catch(err => console.error(`Low stock alert email error for ${s.email}:`, err.message))
@@ -148,7 +148,7 @@ const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumbe
 
 // const VALID_CATEGORIES        = ["FRAME", "SUNGLASS", "LENS", "CONTACT_LENS"];
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
-const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
+const LENS_CATEGORIES = ["LENS", "CONTACT_LENS"];
 
 const generateOrderNumber = () => `BO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -196,7 +196,7 @@ const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
                 orderNumber,
                 orderDate,
                 customer: {
-                    name:  customer.ownerName || customer.shopName,
+                    name: customer.ownerName || customer.shopName,
                     phone: customer.mobileNo1 || "",
                 },
                 shipTo,
@@ -205,7 +205,7 @@ const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
 
             emailPromises.push(
                 sendEmail({
-                    to:      vendorEmail,
+                    to: vendorEmail,
                     subject: `RX Order ${orderNumber} — DigiOptics`,
                     html,
                 }).catch(err => console.error(`Failed to send email to vendor ${vendorId}:`, err.message))
@@ -324,8 +324,8 @@ export const createBulkOrder = async (req, res) => {
             return sendErrorResponse(res, 403, "CUSTOMER_BLACKLISTED", "Customer is blacklisted");
         }
 
-        let shipToBranchName  = null;
-        let resolvedShipToId  = null;
+        let shipToBranchName = null;
+        let resolvedShipToId = null;
 
         if (customerShipToId) {
             const shipTo = customer.customerShipToDetails?.find(
@@ -363,8 +363,8 @@ export const createBulkOrder = async (req, res) => {
         products.forEach((p) => { productMap[p._id.toString()] = p; });
 
         const uniqueProductIds = [...new Set(allProductIds)];
-        const foundIds         = products.map((p) => p._id.toString());
-        const missingProducts  = uniqueProductIds.filter((id) => !foundIds.includes(id));
+        const foundIds = products.map((p) => p._id.toString());
+        const missingProducts = uniqueProductIds.filter((id) => !foundIds.includes(id));
 
         if (missingProducts.length > 0) {
             return sendErrorResponse(res, 404, "PRODUCT_NOT_FOUND", `Products not found: ${missingProducts.join(", ")}`);
@@ -384,7 +384,7 @@ export const createBulkOrder = async (req, res) => {
                     return sendErrorResponse(res, 400, "INVALID_QUANTITY", `Quantity must be greater than 0 for ${product.productName}`);
                 }
 
-                const rawCategory    = (item.category || product.category || "").toUpperCase();
+                const rawCategory = (item.category || product.category || "").toUpperCase();
                 const validationError = validateItemByCategory(item, product);
 
                 if (validationError) {
@@ -397,53 +397,53 @@ export const createBulkOrder = async (req, res) => {
 
                 item.itemName = item.itemName || product.productName;
                 item.category = rawCategory;
-                item.price    = item.price  ?? product.price ?? 0;
-                item.mrp      = item.mrp    ?? product.mrp   ?? 0;
-                item.gst      = item.gst    ?? product.gst   ?? 0;
-                item.hsnSac   = item.hsnSac || product.hsnSac;
-                item.qty      = qty;
+                item.price = item.price ?? product.price ?? 0;
+                item.mrp = item.mrp ?? product.mrp ?? 0;
+                item.gst = item.gst ?? product.gst ?? 0;
+                item.hsnSac = item.hsnSac || product.hsnSac;
+                item.qty = qty;
 
                 if (FRAME_SUNGLASS_CATEGORIES.includes(rawCategory)) {
-                    item.code        = item.code        || product.productCode;
-                    item.brand       = item.brand       || product.brand;
-                    item.color       = item.color       || product.color;
-                    item.size        = item.size        || product.size;
-                    item.type        = item.type        || product.type;
-                    item.shape       = item.shape       || product.shape;
-                    item.material    = item.material    || product.material;
-                    item.dimensions  = item.dimensions  || product.dimensions;
+                    item.code = item.code || product.productCode;
+                    item.brand = item.brand || product.brand;
+                    item.color = item.color || product.color;
+                    item.size = item.size || product.size;
+                    item.type = item.type || product.type;
+                    item.shape = item.shape || product.shape;
+                    item.material = item.material || product.material;
+                    item.dimensions = item.dimensions || product.dimensions;
                 }
 
                 if (LENS_CATEGORIES.includes(rawCategory)) {
                     if (item.orderType === "RX") {
-                        item.index   = item.index   ?? product.index;
+                        item.index = item.index ?? product.index;
                         item.coating = item.coating || product.coating;
                     } else {
-                        item.sph     = item.sph     ?? product.sph;
-                        item.cyl     = item.cyl     ?? product.cyl;
-                        item.axis    = item.axis    ?? product.axis;
-                        item.add     = item.add     ?? product.add;
-                        item.index   = item.index   ?? product.index;
-                        item.tint    = item.tint    || product.tint;
+                        item.sph = item.sph ?? product.sph;
+                        item.cyl = item.cyl ?? product.cyl;
+                        item.axis = item.axis ?? product.axis;
+                        item.add = item.add ?? product.add;
+                        item.index = item.index ?? product.index;
+                        item.tint = item.tint || product.tint;
                         item.coating = item.coating || product.coating;
                     }
                 }
 
                 if (rawCategory === "CONTACT_LENS") {
-                    item.color         = item.color         || product.color;
-                    item.expiry        = item.expiry        || product.expiry;
+                    item.color = item.color || product.color;
+                    item.expiry = item.expiry || product.expiry;
                     item.disposability = item.disposability || product.disposability;
                 }
 
                 if (item.orderType === "RX" && item.rx) {
                     const cleanId = (id) => (id && mongoose.Types.ObjectId.isValid(id) ? id : undefined);
-                    if (item.rx.vendor) item.rx.vendor.id   = cleanId(item.rx.vendor.id);
-                    if (item.rx.lab)    item.rx.lab.id      = cleanId(item.rx.lab.id);
-                    if (item.rx.coating)   item.rx.coating.id   = cleanId(item.rx.coating.id);
+                    if (item.rx.vendor) item.rx.vendor.id = cleanId(item.rx.vendor.id);
+                    if (item.rx.lab) item.rx.lab.id = cleanId(item.rx.lab.id);
+                    if (item.rx.coating) item.rx.coating.id = cleanId(item.rx.coating.id);
                     if (item.rx.treatment) item.rx.treatment.id = cleanId(item.rx.treatment.id);
-                    if (item.rx.tint)      item.rx.tint.id      = cleanId(item.rx.tint.id);
-                    if (item.rx.brand)     item.rx.brand.id     = cleanId(item.rx.brand.id);
-                    if (item.rx.category)  item.rx.category.id  = cleanId(item.rx.category.id);
+                    if (item.rx.tint) item.rx.tint.id = cleanId(item.rx.tint.id);
+                    if (item.rx.brand) item.rx.brand.id = cleanId(item.rx.brand.id);
+                    if (item.rx.category) item.rx.category.id = cleanId(item.rx.category.id);
                     if (item.rx.productName) item.rx.productName.id = cleanId(item.rx.productName.id);
                 }
             }
@@ -461,9 +461,9 @@ export const createBulkOrder = async (req, res) => {
         }
 
         const customerDoc = {
-            customerId:               customer._id,
-            customerName:             customer.ownerName || customer.shopName,
-            customerShipToId:         resolvedShipToId,
+            customerId: customer._id,
+            customerName: customer.ownerName || customer.shopName,
+            customerShipToId: resolvedShipToId,
             customerShipToBranchName: shipToBranchName,
         };
 
@@ -479,10 +479,10 @@ export const createBulkOrder = async (req, res) => {
             );
 
             sendLowStockAlerts({
-                orders:       bulkOrder.orders,
+                orders: bulkOrder.orders,
                 productMap,
                 customerName: customer.ownerName || customer.shopName,
-                orderNumber:  bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
+                orderNumber: bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
             }).catch(err => console.error("Low stock alert error:", err.message));
         }
 
@@ -512,22 +512,22 @@ export const getBulkOrderChallan = async (req, res) => {
         const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
 
         const challanHTML = generateDeliveryChallanHTML({
-            billNumber:      bulkOrder.orders[0]?.orderNumber,
-            orderDate:       bulkOrder.createdAt,
-            deliveryDate:    bulkOrder.createdAt,
-            companyName:     process.env.COMPANY_NAME    || "DigiOptics",
-            companyAddress:  process.env.COMPANY_ADDRESS || "Delhi",
-            companyEmail:    process.env.COMPANY_EMAIL   || "sid@digibysr.com",
-            companyPhone:    process.env.COMPANY_PHONE   || "+91 9650560526",
-            companyGstin:    process.env.COMPANY_GSTIN   || "GST9876543210",
-            customerName:    bulkOrder.customer.customerName,
+            billNumber: bulkOrder.orders[0]?.orderNumber,
+            orderDate: bulkOrder.createdAt,
+            deliveryDate: bulkOrder.createdAt,
+            companyName: process.env.COMPANY_NAME || "DigiOptics",
+            companyAddress: process.env.COMPANY_ADDRESS || "Delhi",
+            companyEmail: process.env.COMPANY_EMAIL || "sid@digibysr.com",
+            companyPhone: process.env.COMPANY_PHONE || "+91 9650560526",
+            companyGstin: process.env.COMPANY_GSTIN || "GST9876543210",
+            customerName: bulkOrder.customer.customerName,
             customerAddress: bulkOrder.customer.customerShipToBranchName || customer?.billToAddress?.address || "",
-            customerPhone:   customer?.mobileNo1 || "",
-            orders:          bulkOrder.orders,
+            customerPhone: customer?.mobileNo1 || "",
+            orders: bulkOrder.orders,
         });
 
         const pdfBuffer = await generatePDF(challanHTML);
-        const fileName  = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+        const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
 
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
@@ -581,21 +581,21 @@ export const getBulkOrderInvoice = async (req, res) => {
 
         const allItems = bulkOrder.orders.flatMap((order) =>
             order.items.map((item) => {
-                const price    = item.price || 0;
-                const qty      = item.qty || 0;
-                const value    = price * qty;
+                const price = item.price || 0;
+                const qty = item.qty || 0;
+                const value = price * qty;
                 const discount = item.discountPercent || 0;
                 const netValue = discount ? value * (1 - discount / 100) : value;
 
                 return {
-                    orderNo:             order.orderNumber || "",
-                    dcNo:                "",
-                    orderDate:           new Date(order.createdAt || bulkOrder.createdAt).toLocaleDateString("en-IN"),
-                    referenceNo:         item.code || "",
+                    orderNo: order.orderNumber || "",
+                    dcNo: "",
+                    orderDate: new Date(order.createdAt || bulkOrder.createdAt).toLocaleDateString("en-IN"),
+                    referenceNo: item.code || "",
                     materialDescription: buildMaterialDescription(item),
-                    hsn:                 item.hsnSac || "",
-                    quantity:            qty,
-                    unitRate:            price,
+                    hsn: item.hsnSac || "",
+                    quantity: qty,
+                    unitRate: price,
                     value,
                     discount,
                     netValue,
@@ -603,70 +603,89 @@ export const getBulkOrderInvoice = async (req, res) => {
             })
         );
 
-        const totalQty      = allItems.reduce((sum, i) => sum + Number(i.quantity), 0);
-        const grossAmount   = allItems.reduce((sum, i) => sum + Number(i.value), 0);
-        const discountAmount = allItems.reduce((sum, i) => sum + (Number(i.value) - Number(i.netValue)), 0);
+        // const totalQty      = allItems.reduce((sum, i) => sum + Number(i.quantity), 0);
+        // const grossAmount   = allItems.reduce((sum, i) => sum + Number(i.value), 0);
+        // const discountAmount = allItems.reduce((sum, i) => sum + (Number(i.value) - Number(i.netValue)), 0);
+        // const taxableAmount = grossAmount - discountAmount;
+
+        const totals = allItems.reduce( (acc, item) => {
+                acc.qty += Number(item.quantity);
+                acc.gross += Number(item.value);
+                acc.discount +=
+                    Number(item.value) -
+                    Number(item.netValue);
+                return acc;
+            }, {
+                qty: 0,
+                gross: 0,
+                discount: 0,
+            });
+
+        const totalQty = totals.qty;
+        const grossAmount = totals.gross;
+        const discountAmount = totals.discount;
         const taxableAmount = grossAmount - discountAmount;
-        const cgstAmount    = bulkOrder.orders.reduce((sum, o) => sum + (parseFloat(o.cgst) || 0), 0);
-        const sgstAmount    = bulkOrder.orders.reduce((sum, o) => sum + (parseFloat(o.sgst) || 0), 0);
-        const grandTotal    = taxableAmount + cgstAmount + sgstAmount;
+
+        const cgstAmount = bulkOrder.orders.reduce((sum, o) => sum + (parseFloat(o.cgst) || 0), 0);
+        const sgstAmount = bulkOrder.orders.reduce((sum, o) => sum + (parseFloat(o.sgst) || 0), 0);
+        const grandTotal = taxableAmount + cgstAmount + sgstAmount;
 
         const billTo = customer?.billToAddress || {};
 
         const shipToAddress = bulkOrder.customer.customerShipToId
             ? customer?.customerShipToDetails?.find(
                 (s) => s._id.toString() === bulkOrder.customer.customerShipToId.toString()
-              )
+            )
             : null;
         const shipTo = shipToAddress || billTo;
 
         const invoiceHTML = generatedorderInvoice({
-            invoiceNo:    bulkOrder.orders[0]?.orderNumber || orderId,
-            invoiceDate:  new Date(bulkOrder.createdAt).toLocaleDateString("en-IN"),
-            irnNo:        "",
+            invoiceNo: bulkOrder.orders[0]?.orderNumber || orderId,
+            invoiceDate: new Date(bulkOrder.createdAt).toLocaleDateString("en-IN"),
+            irnNo: "",
             placeOfSupply: billTo.state || "",
             company: {
-                name:         process.env.COMPANY_NAME    || "DigiOptics",
+                name: process.env.COMPANY_NAME || "DigiOptics",
                 addressLine1: process.env.COMPANY_ADDRESS || "Delhi",
                 addressLine2: "",
-                city:         "",
-                gstin:        process.env.COMPANY_GSTIN   || "GST9876543210",
-                stateCode:    "",
+                city: "",
+                gstin: process.env.COMPANY_GSTIN || "GST9876543210",
+                stateCode: "",
             },
             billTo: {
-                name:         bulkOrder.customer.customerName,
-                branchName:   billTo.branchName            || "",
-                contactName:  billTo.customerContactName   || "",
-                contactNumber:billTo.customerContactNumber || "",
-                address:      billTo.address               || "",
-                state:        billTo.state                 || "",
-                city:         billTo.city                  || "",
-                pincode:      billTo.zipCode               || "",
-                gstin:        customer?.gstNumber          || "",
+                name: bulkOrder.customer.customerName,
+                branchName: billTo.branchName || "",
+                contactName: billTo.customerContactName || "",
+                contactNumber: billTo.customerContactNumber || "",
+                address: billTo.address || "",
+                state: billTo.state || "",
+                city: billTo.city || "",
+                pincode: billTo.zipCode || "",
+                gstin: customer?.gstNumber || "",
             },
             shipTo: {
-                name:         bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName,
-                branchName:   shipTo.branchName            || "",
-                contactName:  shipTo.customerContactName   || "",
-                contactNumber:shipTo.customerContactNumber || "",
-                address:      shipTo.address               || "",
-                state:        shipTo.state                 || "",
-                city:         shipTo.city                  || "",
-                pincode:      shipTo.zipCode               || "",
+                name: bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName,
+                branchName: shipTo.branchName || "",
+                contactName: shipTo.customerContactName || "",
+                contactNumber: shipTo.customerContactNumber || "",
+                address: shipTo.address || "",
+                state: shipTo.state || "",
+                city: shipTo.city || "",
+                pincode: shipTo.zipCode || "",
             },
-            items:          allItems,
+            items: allItems,
             totalQty,
-            grossAmount:    grossAmount.toFixed(2),
+            grossAmount: grossAmount.toFixed(2),
             discountAmount: discountAmount.toFixed(2),
-            taxableAmount:  taxableAmount.toFixed(2),
+            taxableAmount: taxableAmount.toFixed(2),
             cgstAmount,
             sgstAmount,
-            igstAmount:     0,
-            grandTotal:     grandTotal.toFixed(2),
+            igstAmount: 0,
+            grandTotal: grandTotal.toFixed(2),
         });
 
         const pdfBuffer = await generatePDF(invoiceHTML);
-        const fileName  = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+        const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
 
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
@@ -694,15 +713,15 @@ export const updateOrderStatus = async (req, res) => {
         ];
 
         const ALLOWED_TRANSITIONS = {
-            "Draft":           ["Submitted", "Cancelled"],
-            "Submitted":       ["Processing", "Cancelled"],
-            "Processing":      ["QC", "Cancelled"],
-            "QC":              ["ReadyToDispatch", "Cancelled"],
+            "Draft": ["Submitted", "Cancelled"],
+            "Submitted": ["Processing", "Cancelled"],
+            "Processing": ["QC", "Cancelled"],
+            "QC": ["ReadyToDispatch", "Cancelled"],
             "ReadyToDispatch": ["Dispatched", "Cancelled"],
-            "Dispatched":      ["Delivered", "Cancelled"],
-            "Delivered":       ["Completed"],
-            "Completed":       [],
-            "Cancelled":       [],
+            "Dispatched": ["Delivered", "Cancelled"],
+            "Delivered": ["Completed"],
+            "Completed": [],
+            "Cancelled": [],
         };
 
         if (!status || !VALID_STATUSES.includes(status)) {
@@ -770,7 +789,7 @@ export const updateBulkDraftOrder = async (req, res) => {
                 if (!shipTo) {
                     return sendErrorResponse(res, 404, "NOT_FOUND", "Ship-to address not found for this customer");
                 }
-                bulkOrder.customer.customerShipToId         = shipTo._id;
+                bulkOrder.customer.customerShipToId = shipTo._id;
                 bulkOrder.customer.customerShipToBranchName = shipTo.branchName;
             }
         }
@@ -795,21 +814,21 @@ export const updateBulkDraftOrder = async (req, res) => {
                         ...(item),
                         itemName: item.itemName || product?.productName || "",
                         category: (item.category || product?.category || "").toUpperCase(),
-                        price:    item.price    ?? product?.price   ?? 0,
-                        mrp:      item.mrp      ?? product?.mrp     ?? 0,
-                        gst:      item.gst      ?? product?.gst     ?? 0,
-                        hsnSac:   item.hsnSac   || product?.hsnSac  || "",
-                        qty:      Number(item.qty || 0),
+                        price: item.price ?? product?.price ?? 0,
+                        mrp: item.mrp ?? product?.mrp ?? 0,
+                        gst: item.gst ?? product?.gst ?? 0,
+                        hsnSac: item.hsnSac || product?.hsnSac || "",
+                        qty: Number(item.qty || 0),
                     };
                 });
 
                 return {
                     orderNumber: existing?.orderNumber || incomingOrder.orderNumber || generateOrderNumber(),
                     items,
-                    cgst:        incomingOrder.cgst !== undefined ? String(incomingOrder.cgst) : (existing?.cgst || "0"),
-                    sgst:        incomingOrder.sgst !== undefined ? String(incomingOrder.sgst) : (existing?.sgst || "0"),
-                    status:      submitNow ? "Submitted" : "Draft",
-                    remarks:     incomingOrder.remarks || existing?.remarks || "",
+                    cgst: incomingOrder.cgst !== undefined ? String(incomingOrder.cgst) : (existing?.cgst || "0"),
+                    sgst: incomingOrder.sgst !== undefined ? String(incomingOrder.sgst) : (existing?.sgst || "0"),
+                    status: submitNow ? "Submitted" : "Draft",
+                    remarks: incomingOrder.remarks || existing?.remarks || "",
                 };
             });
         } else if (submitNow) {
