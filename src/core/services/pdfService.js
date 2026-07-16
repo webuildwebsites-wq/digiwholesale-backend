@@ -1,109 +1,71 @@
 import puppeteer from "puppeteer-core";
 import { existsSync } from "fs";
 
-let browser;
-let page;
+let browserInstance = null;
 
 const getLinuxExecutablePath = () => {
     const candidates = [
         process.env.CHROME_PATH,
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
         "/usr/bin/chromium-browser",
         "/usr/bin/chromium",
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
     ].filter(Boolean);
 
-    for (const path of candidates) {
-        if (existsSync(path)) return path;
+    for (const p of candidates) {
+        if (existsSync(p)) return p;
     }
-
     return null;
 };
 
 const getBrowser = async () => {
-
-    if (browser?.connected) return browser;
-
-    let executablePath;
+    if (browserInstance && browserInstance.connected) return browserInstance;
 
     if (process.platform === "linux") {
+        const systemChrome = getLinuxExecutablePath();
 
-        executablePath = getLinuxExecutablePath();
-
-        if (!executablePath) {
-            throw new Error("Chrome/Chromium not found.");
+        if (systemChrome) {
+            browserInstance = await puppeteer.launch({
+                headless:       true,
+                executablePath: systemChrome,
+                args:           ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+            });
+        } else {
+            const chromium = await import("@sparticuz/chromium");
+            browserInstance = await puppeteer.launch({
+                args:           [...chromium.default.args, "--no-sandbox", "--disable-setuid-sandbox"],
+                executablePath: await chromium.default.executablePath(),
+                headless:       chromium.default.headless,
+            });
         }
-
     } else if (process.platform === "darwin") {
-
-        executablePath =
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-
+        browserInstance = await puppeteer.launch({
+            headless:       true,
+            executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        });
     } else {
-
-        executablePath =
-            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-
+        browserInstance = await puppeteer.launch({
+            headless:       true,
+            executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        });
     }
 
-    browser = await puppeteer.launch({
-        executablePath,
-        headless: true,
-        args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--disable-extensions",
-            "--disable-background-networking",
-            "--disable-default-apps",
-            "--disable-sync",
-            "--metrics-recording-only",
-            "--mute-audio",
-        ],
-    });
+    browserInstance.on("disconnected", () => { browserInstance = null; });
 
-    browser.on("disconnected", () => {
-        browser = null;
-        page = null;
-    });
-
-    return browser;
-};
-
-const getPage = async () => {
-
-    if (page && !page.isClosed()) {
-        return page;
-    }
-
-    const browser = await getBrowser();
-
-    page = await browser.newPage();
-
-    await page.setViewport({
-        width: 1200,
-        height: 1700,
-    });
-
-    return page;
+    return browserInstance;
 };
 
 const generatePDF = async (html) => {
+    const browser = await getBrowser();
+    const page    = await browser.newPage();
 
-    const page = await getPage();
-
-    await page.setContent(html, {
-        waitUntil: "domcontentloaded",
-    });
-
-    const pdf = await page.pdf({
-        format: "A4",
-        printBackground: true,
-        preferCSSPageSize: true,
-    });
-
-    return Buffer.from(pdf);
+    try {
+        await page.setContent(html, { waitUntil: "networkidle0" });
+        const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+        return Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+    } finally {
+        await page.close();
+    }
 };
 
 export default generatePDF;
