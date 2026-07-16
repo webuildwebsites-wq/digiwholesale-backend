@@ -2,7 +2,6 @@ import Customer from "../../../models/Auth/Customer.js";
 import { sendDCBillingCycleChallan } from "./billingNotification.service.js";
 
 const getDayOfMonth = () => new Date().getDate();
-const getDayOfWeek  = () => new Date().getDay();
 
 export const runBillingCycleCron = async () => {
     try {
@@ -20,10 +19,11 @@ export const runBillingCycleCron = async () => {
             return;
         }
 
-        const today       = getDayOfMonth();
-        const dayOfWeek   = getDayOfWeek();
-        const isMonday    = dayOfWeek === 1;
-        const isLastDay   = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() === today;
+        const today = getDayOfMonth();
+
+        const lastDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+
+        const isLastDay = today === lastDayOfMonth;
 
         const promises = [];
 
@@ -31,25 +31,33 @@ export const runBillingCycleCron = async () => {
             const cycle = customer.billingCycle;
 
             const shouldSend =
-                (cycle === "7_days"      && isMonday)  ||
-                (cycle === "15_days"     && (today === 1 || today === 16)) ||
-                (cycle === "end_of_month"&& isLastDay);
+                (cycle === "7_days" && today === 7) ||
+                (cycle === "15_days" && today === 15) ||
+                (cycle === "end_of_month" && isLastDay);
 
-            if (shouldSend) {
-                console.log(`[BillingCron] Sending challan for customer: ${customer.shopName} (cycle: ${cycle})`);
-                promises.push(
-                    sendDCBillingCycleChallan(customer._id.toString())
-                        .catch(err => console.error(`[BillingCron] Error for customer ${customer._id}:`, err.message))
-                );
-            }
+            if (!shouldSend) continue;
+
+            console.log(
+                `[BillingCron] Sending challan for customer: ${customer.shopName} (cycle: ${cycle})`
+            );
+
+            promises.push(
+                sendDCBillingCycleChallan(customer._id.toString()).catch((err) =>
+                    console.error(
+                        `[BillingCron] Error for customer ${customer._id}:`,
+                        err.message
+                    )
+                )
+            );
         }
 
-        if (promises.length === 0) {
+        if (!promises.length) {
             console.log("[BillingCron] No customers due for challan today");
             return;
         }
 
         await Promise.all(promises);
+
         console.log(`[BillingCron] Completed. Sent challans to ${promises.length} customer(s)`);
 
     } catch (err) {
@@ -58,11 +66,13 @@ export const runBillingCycleCron = async () => {
 };
 
 export const startBillingCron = () => {
-    const INTERVAL_MS = 60 * 60 * 1000;
+    const INTERVAL_MS = 60 * 60 * 1000; 
 
     runBillingCycleCron();
 
     setInterval(runBillingCycleCron, INTERVAL_MS);
 
-    console.log("[BillingCron] Scheduled — runs every hour, triggers based on billing cycle");
+    console.log(
+        "[BillingCron] Scheduled — runs every hour, triggers on 7th, 15th & end of month"
+    );
 };
