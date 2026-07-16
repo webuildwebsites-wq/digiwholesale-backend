@@ -147,11 +147,27 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     filter["orders"] = { $elemMatch: { status: { $in: STATUS_MAP[key] } } };
   }
 
-  if (search) {
+  if (search && search.trim()) {
+    const searchRegex = { $regex: search.trim(), $options: "i" };
+
+    const matchedCustomers = await Customer.find({
+      $or: [
+        { shopName:      searchRegex },
+        { ownerName:     searchRegex },
+        { businessEmail: searchRegex },
+        { mobileNo1:     searchRegex },
+        { mobileNo2:     searchRegex },
+        { customerCode:  searchRegex },
+      ],
+    }).select("_id").lean();
+
+    const customerIds = matchedCustomers.map(c => c._id);
+
     filter.$or = [
-      { "customer.customerName": { $regex: search, $options: "i" } },
-      { "orders.orderNumber": { $regex: search, $options: "i" } },
-      { "orders.items.itemName": { $regex: search, $options: "i" } },
+      { "customer.customerName": searchRegex },
+      { "orders.orderNumber":    searchRegex },
+      { "orders.items.itemName": searchRegex },
+      ...(customerIds.length > 0 ? [{ "customer.customerId": { $in: customerIds } }] : []),
     ];
   }
 
