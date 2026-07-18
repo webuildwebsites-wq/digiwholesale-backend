@@ -8,6 +8,7 @@ import VendorPurchaseOrderTemplate from "../../../Utils/Mail/VendorPurchaseOrder
 import VendorOrderUpdatedTemplate from "../../../Utils/Mail/VendorOrderUpdatedTemplate.js";
 import { generatePurchaseOrderExcel } from "../../../Utils/excel/generatePurchaseOrderExcel.js";
 import PurchaseReturnModel from "../../../models/Purchase/PurchaseReturn.model.js";
+import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
 
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
 const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
@@ -742,10 +743,51 @@ export const getQCPendingItems = async (req, res) => {
             "orders.items.inwardStatus": { $in: ["RECEIVED", "PARTIAL"] },
             "orders.items.qcStatus":     "PENDING",
         });
-        const result = await paginateItemsFromPOs(req, filter,
-            item => item.inwardStatus !== "PENDING" && item.qcStatus === "PENDING"
-        );
-        return sendSuccessResponse(res, 200, result, "Items pending QC retrieved successfully");
+
+        const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const skip  = (page - 1) * limit;
+
+        const purchaseOrders = await VendorPurchase.find(filter).sort({ createdAt: -1 }).lean();
+
+        const allItems = [];
+        for (const po of purchaseOrders) {
+            const inwardRecord = await PurchaseInward.findOne({ purchaseOrderId: po._id })
+                .sort({ createdAt: -1 })
+                .lean();
+
+            for (const order of po.orders) {
+                for (const item of order.items) {
+                    if (item.inwardStatus !== "PENDING" && item.qcStatus === "PENDING") {
+                        allItems.push({
+                            purchaseOrderId:  po._id,
+                            purchaseInwardId: inwardRecord?._id || null,
+                            vendorName:       po.vendor.vendorName,
+                            vendorId:         po.vendor.vendorId,
+                            orderNumber:      order.orderNumber,
+                            cgst:             order.cgst,
+                            sgst:             order.sgst,
+                            ...item,
+                        });
+                    }
+                }
+            }
+        }
+
+        const total      = allItems.length;
+        const paginated  = allItems.slice(skip, skip + limit);
+        const totalPages = Math.ceil(total / limit);
+
+        return sendSuccessResponse(res, 200, {
+            items: paginated,
+            pagination: {
+                currentPage:  page,
+                totalPages,
+                totalRecords: total,
+                hasNext: page < totalPages,
+                hasPrev: page > 1,
+            },
+        }, "Items pending QC retrieved successfully");
     } catch (error) {
         return sendErrorResponse(res, 500, "GET_QC_PENDING_ERROR", error.message);
     }

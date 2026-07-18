@@ -116,14 +116,8 @@ export const getAllCustomers = async (req, res) => {
 
     if (customerIDTerm) {
       if (!mongoose.Types.ObjectId.isValid(customerIDTerm)) {
-        return sendErrorResponse(
-          res,
-          400,
-          "INVALID_CUSTOMER_ID",
-          "Invalid customer ID"
-        );
+        return sendErrorResponse(res, 400, "INVALID_CUSTOMER_ID", "Invalid customer ID");
       }
-
       query._id = new mongoose.Types.ObjectId(customerIDTerm);
     }
 
@@ -134,13 +128,17 @@ export const getAllCustomers = async (req, res) => {
         searchConditions.push({ serialNumber: Number(searchTerm) });
       }
 
-      searchConditions.push({ ownerName: { $regex: searchTerm, $options: "i" } });
-      searchConditions.push({ customerCode: { $regex: searchTerm, $options: "i" } });
-      searchConditions.push({ shopName: { $regex: searchTerm, $options: "i" } });
-      searchConditions.push({ mobileNo1: { $regex: searchTerm, $options: "i" } });
-      searchConditions.push({ mobileNo2: { $regex: searchTerm, $options: "i" } });
+      if (mongoose.Types.ObjectId.isValid(searchTerm)) {
+        searchConditions.push({ _id: new mongoose.Types.ObjectId(searchTerm) });
+      }
+
+      searchConditions.push({ ownerName:     { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ customerCode:  { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ shopName:      { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ mobileNo1:     { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ mobileNo2:     { $regex: searchTerm, $options: "i" } });
       searchConditions.push({ businessEmail: { $regex: searchTerm, $options: "i" } });
-      searchConditions.push({"salesPerson.name": { $regex: searchTerm, $options: "i" } });
+      searchConditions.push({ "salesPerson.name": { $regex: searchTerm, $options: "i" } });
 
       query.$or = searchConditions;
     }
