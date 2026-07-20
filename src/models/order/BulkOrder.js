@@ -104,6 +104,8 @@ const BulkOrderItemSchema = new mongoose.Schema(
         expiry: String,
         disposability: String,
 
+        photos: { type: [String], default: [] },
+
         rx: {
             vendor: {
                 id: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },

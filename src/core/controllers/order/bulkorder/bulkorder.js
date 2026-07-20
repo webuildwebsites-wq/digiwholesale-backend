@@ -4,8 +4,6 @@ import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
 import Employee from "../../../../models/Auth/Employee.js";
-import generatePDF from "../../../services/pdfService.js";
-import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../../../Utils/templates/deliveryChallanTemplate.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
@@ -403,6 +401,7 @@ export const createBulkOrder = async (req, res) => {
                 item.gst      = item.gst    ?? product.gst   ?? 0;
                 item.hsnSac   = item.hsnSac || product.hsnSac;
                 item.qty      = qty;
+                item.photos   = Array.isArray(item.photos) ? item.photos : [];
 
                 if (FRAME_SUNGLASS_CATEGORIES.includes(rawCategory)) {
                     item.code        = item.code        || product.productCode;
