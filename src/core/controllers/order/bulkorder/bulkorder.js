@@ -765,7 +765,18 @@ export const updateOrderStatus = async (req, res) => {
                     `Order "${order.orderNumber}" cannot move from "${order.status}" to "${status}". Allowed next: ${allowed.length ? allowed.join(", ") : "none"}`
                 );
             }
-            order.status = status;
+
+            order.statusHistory.push({
+                from:          order.status,
+                to:            status,
+                remarks:       remarks || "",
+                changedBy:     req.user._id,
+                changedByName: req.user.employeeName || req.user.name || "",
+                changedAt:     new Date(),
+            });
+
+            order.status  = status;
+            order.remarks = remarks || order.remarks || null;
         }
 
         await bulkOrder.save();

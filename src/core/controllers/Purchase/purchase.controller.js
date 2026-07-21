@@ -848,15 +848,15 @@ export const createReplacementOrder = async (req, res) => {
             );
         }
 
-        // const alreadyReplaced = replacementItems.filter(e => {
-        //     const ri = returnItemsMap.get(e.returnItemId.toString());
-        //     return ["Replaced", "Closed", "VendorNotified"].includes(ri.itemStatus);
-        // });
-        // if (alreadyReplaced.length > 0) {
-        //     return sendErrorResponse(res, 400, "ALREADY_REPLACED",
-        //         `These items already have a replacement in progress or are closed: ${alreadyReplaced.map(e => e.returnItemId).join(", ")}`
-        //     );
-        // }
+        const alreadyReplaced = replacementItems.filter(e => {
+            const ri = returnItemsMap.get(e.returnItemId.toString());
+            return ["Replaced", "Closed", "VendorNotified"].includes(ri.itemStatus);
+        });
+        if (alreadyReplaced.length > 0) {
+            return sendErrorResponse(res, 400, "ALREADY_REPLACED",
+                `These items already have a replacement in progress or are closed: ${alreadyReplaced.map(e => e.returnItemId).join(", ")}`
+            );
+        }
 
         const allProductIds = replacementItems
             .filter(e => e.item.productId)

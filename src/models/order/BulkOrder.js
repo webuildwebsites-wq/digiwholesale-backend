@@ -193,6 +193,22 @@ const BulkOrderOrderSchema = new mongoose.Schema(
             ],
             default: "Submitted",
         },
+
+        remarks: { type: String, default: null },
+
+        statusHistory: {
+            type: [
+                {
+                    from:          String,
+                    to:            String,
+                    remarks:       String,
+                    changedBy:     { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+                    changedByName: String,
+                    changedAt:     { type: Date, default: Date.now },
+                },
+            ],
+            default: [],
+        },
     },
     { _id: false }
 );
