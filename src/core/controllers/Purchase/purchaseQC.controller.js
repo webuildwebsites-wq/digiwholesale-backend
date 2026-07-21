@@ -160,15 +160,17 @@ export const createPurchaseQC = async (req, res) => {
         const passedItems = [];
 
         for (const entry of items) {
-            const { itemId, passedQty, failedQty, failureReason, remarks: itemRemark } = entry;
+            const { itemId, passedQty, failedQty, failureReason, remarks: itemRemark, photos } = entry;
 
-            const found      = allPurchaseItems.find(({ item }) => item._id.toString() === itemId.toString());
+            const found           = allPurchaseItems.find(({ item }) => item._id.toString() === itemId.toString());
             const { order, item } = found;
-            const passed     = Number(passedQty || 0);
-            const failed     = Number(failedQty || 0);
-            const total      = passed + failed;
-
-            const qcResult = failed === 0 ? "PASSED" : passed === 0 ? "FAILED" : "PARTIAL";
+            const passed          = Number(passedQty || 0);
+            const failed          = Number(failedQty || 0);
+            const total           = passed + failed;
+            const qcResult        = failed === 0 ? "PASSED" : passed === 0 ? "FAILED" : "PARTIAL";
+            const itemPhotos      = (qcResult === "FAILED" || qcResult === "PARTIAL") && Array.isArray(photos)
+                ? photos
+                : [];
 
             item.qcStatus = qcResult;
 
@@ -185,6 +187,7 @@ export const createPurchaseQC = async (req, res) => {
                 qcResult,
                 failureReason: failureReason || "",
                 remarks:       itemRemark     || "",
+                photos:        itemPhotos,
             });
 
             if (passed > 0 && item.productId) {
@@ -205,6 +208,7 @@ export const createPurchaseQC = async (req, res) => {
                     failureReason: failureReason || "",
                     remarks:       itemRemark    || "",
                     condition:     "QUALITY_ISSUE",
+                    photos:        itemPhotos,
                 });
             }
         }
@@ -218,14 +222,15 @@ export const createPurchaseQC = async (req, res) => {
         const purchaseQC = await PurchaseQC.create({
             purchaseOrderId,
             purchaseInwardId,
-            vendorId:   purchaseOrder.vendor.vendorId,
-            vendorName: purchaseOrder.vendor.vendorName,
-            qcDate:     new Date(),
-            items:      qcItems,
+            vendorId:      purchaseOrder.vendor.vendorId,
+            vendorName:    purchaseOrder.vendor.vendorName,
+            qcDate:        new Date(),
+            items:         qcItems,
             overallResult,
             notifyVendor,
             remarks,
-            createdBy: req.user._id,
+            createdBy:     req.user._id,
+            createdByName: req.user.employeeName || req.user.name || null,
         });
 
         if (passedItems.length > 0) {
@@ -327,7 +332,9 @@ export const getAllPurchaseQCs = async (req, res) => {
         if (req.query.overallResult) filter.overallResult = req.query.overallResult;
 
         const [qcs, total] = await Promise.all([
-            PurchaseQC.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+            PurchaseQC.find(filter)
+                .populate("createdBy", "employeeName username")
+                .sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
             PurchaseQC.countDocuments(filter),
         ]);
 
@@ -353,7 +360,9 @@ export const getPurchaseQCById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
-        const qc = await PurchaseQC.findById(id).lean();
+        const qc = await PurchaseQC.findById(id)
+            .populate("createdBy", "employeeName username email")
+            .lean();
         if (!qc) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase QC not found");
         return sendSuccessResponse(res, 200, { qc });
     } catch (error) {

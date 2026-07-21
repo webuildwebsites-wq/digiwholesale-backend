@@ -14,6 +14,7 @@ const qcItemSchema = new mongoose.Schema(
         qcResult:       { type: String, enum: ["PASSED", "FAILED", "PARTIAL"], required: true },
         failureReason:  String,
         remarks:        String,
+        photos:         { type: [String], default: [] },
     },
     { _id: false }
 );
@@ -30,6 +31,7 @@ const purchaseQCSchema = new mongoose.Schema(
         notifyVendor:     { type: Boolean, default: true },
         remarks:          String,
         createdBy:        { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+        createdByName:    { type: String, default: null },
     },
     { timestamps: true }
 );
