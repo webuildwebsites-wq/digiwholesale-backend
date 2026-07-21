@@ -848,15 +848,15 @@ export const createReplacementOrder = async (req, res) => {
             );
         }
 
-        const alreadyReplaced = replacementItems.filter(e => {
-            const ri = returnItemsMap.get(e.returnItemId.toString());
-            return ["Replaced", "Closed", "VendorNotified"].includes(ri.itemStatus);
-        });
-        if (alreadyReplaced.length > 0) {
-            return sendErrorResponse(res, 400, "ALREADY_REPLACED",
-                `These items already have a replacement in progress or are closed: ${alreadyReplaced.map(e => e.returnItemId).join(", ")}`
-            );
-        }
+        // const alreadyReplaced = replacementItems.filter(e => {
+        //     const ri = returnItemsMap.get(e.returnItemId.toString());
+        //     return ["Replaced", "Closed", "VendorNotified"].includes(ri.itemStatus);
+        // });
+        // if (alreadyReplaced.length > 0) {
+        //     return sendErrorResponse(res, 400, "ALREADY_REPLACED",
+        //         `These items already have a replacement in progress or are closed: ${alreadyReplaced.map(e => e.returnItemId).join(", ")}`
+        //     );
+        // }
 
         const allProductIds = replacementItems
             .filter(e => e.item.productId)
@@ -975,6 +975,34 @@ export const createReplacementOrder = async (req, res) => {
             builtItems.push(builtItem);
         }
 
+        const allOriginalItems = originalPO.orders.flatMap(o => o.items);
+
+        const priceDifferences = [];
+        let   totalPriceDiff   = 0;
+
+        for (const entry of replacementItems) {
+            const returnItem   = returnItemsMap.get(entry.returnItemId.toString());
+            const originalItem = allOriginalItems.find(i => i._id.toString() === entry.returnItemId.toString());
+
+            const originalPrice    = Number(originalItem?.price ?? returnItem?.amount ?? 0);
+            const replacementPrice = Number(entry.item?.price ?? 0);
+            const qty              = Number(entry.item?.qty ?? returnItem?.qty ?? 1);
+            const itemDiff         = (replacementPrice - originalPrice) * qty;
+
+            totalPriceDiff += itemDiff;
+
+            priceDifferences.push({
+                returnItemId:     entry.returnItemId,
+                itemName:         returnItem?.itemName || "",
+                qty,
+                originalPrice,
+                replacementPrice,
+                priceDiffPerUnit: Number((replacementPrice - originalPrice).toFixed(2)),
+                totalItemDiff:    Number(itemDiff.toFixed(2)),
+                direction:        itemDiff > 0 ? "HIGHER" : itemDiff < 0 ? "LOWER" : "SAME",
+            });
+        }
+
         const vendor    = await Vendor.findById(originalPO.vendor.vendorId).lean();
         const vendorDoc = {
             vendorId:   originalPO.vendor.vendorId,
@@ -1043,6 +1071,16 @@ export const createReplacementOrder = async (req, res) => {
             itemsReplacing:          replacementItems.length,
             purchaseReturnId,
             originalPurchaseOrderId: originalPO._id,
+            priceDifferences,
+            totalPriceDifference: {
+                amount:    Number(totalPriceDiff.toFixed(2)),
+                direction: totalPriceDiff > 0 ? "HIGHER" : totalPriceDiff < 0 ? "LOWER" : "SAME",
+                label:     totalPriceDiff > 0
+                    ? `Replacement is ₹${Math.abs(totalPriceDiff).toFixed(2)} more expensive`
+                    : totalPriceDiff < 0
+                        ? `Replacement is ₹${Math.abs(totalPriceDiff).toFixed(2)} cheaper`
+                        : "Same price as original",
+            },
         }, `Replacement order created for ${replacementItems.length} item(s). Vendor notified.`);
 
     } catch (error) {
