@@ -796,8 +796,80 @@ export const getQCPendingItems = async (req, res) => {
 export const getQCPassedItems = async (req, res) => {
     try {
         const filter = buildItemsFilter(req, { "orders.items.qcStatus": "PASSED" });
-        const result = await paginateItemsFromPOs(req, filter, item => item.qcStatus === "PASSED");
-        return sendSuccessResponse(res, 200, result, "QC passed items retrieved successfully");
+
+        const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const skip  = (page - 1) * limit;
+
+        const PurchaseQC = (await import("../../../models/Purchase/PurchaseQC.model.js")).default;
+
+        const purchaseOrders = await VendorPurchase.find(filter).sort({ createdAt: -1 }).lean();
+
+        const purchaseOrderIds = purchaseOrders.map(po => po._id);
+        const qcRecords = await PurchaseQC.find({ purchaseOrderId: { $in: purchaseOrderIds } })
+            .select("purchaseOrderId items createdBy createdByName qcDate")
+            .populate("createdBy", "employeeName username")
+            .lean();
+
+        const qcMap = new Map();
+        for (const qc of qcRecords) {
+            const poId = qc.purchaseOrderId.toString();
+            if (!qcMap.has(poId)) qcMap.set(poId, []);
+            qcMap.get(poId).push(qc);
+        }
+
+        const allItems = [];
+        for (const po of purchaseOrders) {
+            const poQCRecords = qcMap.get(po._id.toString()) || [];
+
+            for (const order of po.orders) {
+                for (const item of order.items) {
+                    if (item.qcStatus !== "PASSED") continue;
+
+                    let qcDoneBy     = null;
+                    let qcDoneByName = null;
+                    let qcDate       = null;
+
+                    for (const qc of poQCRecords) {
+                        const qcItem = qc.items?.find(qi => qi.itemId?.toString() === item._id?.toString());
+                        if (qcItem && qcItem.qcResult === "PASSED") {
+                            qcDoneBy     = qc.createdBy;
+                            qcDoneByName = qc.createdByName || qc.createdBy?.employeeName || null;
+                            qcDate       = qc.qcDate;
+                            break;
+                        }
+                    }
+
+                    allItems.push({
+                        purchaseOrderId: po._id,
+                        vendorName:      po.vendor.vendorName,
+                        vendorId:        po.vendor.vendorId,
+                        orderNumber:     order.orderNumber,
+                        cgst:            order.cgst,
+                        sgst:            order.sgst,
+                        qcDoneBy,
+                        qcDoneByName,
+                        qcDate,
+                        ...item,
+                    });
+                }
+            }
+        }
+
+        const total      = allItems.length;
+        const paginated  = allItems.slice(skip, skip + limit);
+        const totalPages = Math.ceil(total / limit);
+
+        return sendSuccessResponse(res, 200, {
+            items: paginated,
+            pagination: {
+                currentPage:  page,
+                totalPages,
+                totalRecords: total,
+                hasNext: page < totalPages,
+                hasPrev: page > 1,
+            },
+        }, "QC passed items retrieved successfully");
     } catch (error) {
         return sendErrorResponse(res, 500, "GET_QC_PASSED_ERROR", error.message);
     }
