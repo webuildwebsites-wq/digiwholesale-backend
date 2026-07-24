@@ -102,9 +102,13 @@ const customerSchema = new mongoose.Schema(
         ref: 'Location',
       }
     },
-    hasFlatFitting: {
-      type: Boolean,
-      default: false,
+    brands: {
+      type: [{
+        brandId:   { type: mongoose.Schema.Types.ObjectId, ref: "Brand" },
+        brandName: { type: String, trim: true },
+      }],
+      default: [],
+      _id: false,
     },
 
     flatFittingData: {

@@ -80,6 +80,7 @@ export const customerBasicRegistration = async (req, res) => {
       zone,
       zoneRefId,
       brandCategories,
+      brands,
       businessEmail,
       shopName,
       ownerName,
@@ -393,17 +394,11 @@ export const customerBasicRegistration = async (req, res) => {
         })) : [],
 
       customerCode: generatedCustomerCode,
-      brandCategories: brandCategories
-        ? brandCategories
-          .filter(brand => brand.brandId && brand.brandName && brand.brandId !== "" && brand.brandName !== "")
-          .map(brand => ({
-            brandId: brand.brandId,
-            brandName: brand.brandName,
-            categories: brand.categories
-              ? brand.categories.filter(cat => cat.categoryId && cat.categoryName && cat.categoryId !== "" && cat.categoryName !== "")
-              : []
-          }))
-        : undefined,
+      brands: Array.isArray(brands)
+        ? brands
+            .filter(b => b && b.brandId && b.brandName)
+            .map(b => ({ brandId: b.brandId, brandName: b.brandName }))
+        : [],
 
       zone: zone && zoneRefId ? {
         name: zone,
