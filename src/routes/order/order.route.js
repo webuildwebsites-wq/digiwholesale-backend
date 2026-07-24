@@ -1,10 +1,12 @@
 import express from "express";
 import { getOrder, listOrders, updateDraftOrder, cancelOrder, deleteOrder, getProductNames, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductCoatings, suggestionsOrders, getRxOrders, getDraftOrders } from "../../core/controllers/order/order.controller.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
-import { createBulkOrder, getBulkOrderChallan, getBulkOrderInvoice, updateOrderStatus, updateBulkDraftOrder } from "../../core/controllers/order/bulkorder/bulkorder.js";
+import { createBulkOrder, getBulkOrderChallan, getBulkOrderInvoice, updateOrderStatus, updateBulkDraftOrder, getPublicOrderStatus } from "../../core/controllers/order/bulkorder/bulkorder.js";
 import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
 
 const orderRouter = express.Router();
+
+orderRouter.get("/status/public", getPublicOrderStatus);
 
 orderRouter.use(ProtectUser);
 

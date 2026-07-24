@@ -891,3 +891,57 @@ export const updateBulkDraftOrder = async (req, res) => {
         return sendErrorResponse(res, 500, "UPDATE_DRAFT_ERROR", error.message || "Something went wrong");
     }
 };
+
+export const getPublicOrderStatus = async (req, res) => {
+    try {
+        const { orderId } = req.query;
+
+        if (!orderId) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "orderId is required");
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
+        }
+
+        const bulkOrder = await BulkOrder.findById(orderId).lean();
+
+        if (!bulkOrder) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Order not found");
+        }
+
+        const publicData = {
+            orderId:       bulkOrder._id,
+            customerName:  bulkOrder.customer.customerName,
+            createdAt:     bulkOrder.createdAt,
+            orders: bulkOrder.orders.map(order => ({
+                orderNumber:           order.orderNumber,
+                status:                order.status,
+                estimatedDeliveryDate: order.estimatedDeliveryDate || null,
+                remarks:               order.remarks || null,
+                totalItems:            order.items.length,
+                statusHistory: (order.statusHistory || []).map(h => ({
+                    from:          h.from,
+                    to:            h.to,
+                    remarks:       h.remarks || null,
+                    changedByName: h.changedByName || null,
+                    changedAt:     h.changedAt,
+                })),
+                items: order.items.map(item => ({
+                    itemName:   item.itemName,
+                    category:   item.category,
+                    qty:        item.qty,
+                    unit:       item.unit,
+                    orderType:  item.orderType,
+                    itemStatus: item.itemStatus,
+                })),
+            })),
+        };
+
+        return sendSuccessResponse(res, 200, { order: publicData }, "Order status retrieved successfully");
+
+    } catch (error) {
+        console.error("Get Public Order Status Error:", error);
+        return sendErrorResponse(res, 500, "PUBLIC_ORDER_ERROR", error.message || "Something went wrong");
+    }
+};
