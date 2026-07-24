@@ -177,6 +177,7 @@ const BulkOrderOrderSchema = new mongoose.Schema(
 
         cgst: String,
         sgst: String,
+        estimatedDeliveryDate: { type: Date, default: null },
 
         status: {
             type: String,

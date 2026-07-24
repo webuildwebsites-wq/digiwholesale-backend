@@ -458,6 +458,9 @@ export const createBulkOrder = async (req, res) => {
 
             if (order.cgst !== undefined) order.cgst = String(order.cgst);
             if (order.sgst !== undefined) order.sgst = String(order.sgst);
+            if (order.estimatedDeliveryDate) {
+                order.estimatedDeliveryDate = new Date(order.estimatedDeliveryDate);
+            }
         }
 
         const customerDoc = {
