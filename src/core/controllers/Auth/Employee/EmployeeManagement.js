@@ -147,8 +147,9 @@ export const createEmployee = async (req, res) => {
         }
 
         if (employeeType.toUpperCase() === 'ADMIN') {
-          const existingAdmin = await employeeSchema.findOne({
+      const existingAdmin = await employeeSchema.findOne({
             EmployeeType: 'ADMIN',
+            tenantId: req.user.tenantId,
             'Department.refId': departmentRefId,
             isActive: true
           });
@@ -281,7 +282,8 @@ export const createEmployee = async (req, res) => {
       const supervisorQuery = {
         EmployeeType: 'SUPERVISOR',
         'Department.name': department.toUpperCase(),
-        isActive: true
+        isActive: true,
+        tenantId: req.user.tenantId,
       };
 
       if (isSalesDepartment && zone) {
@@ -295,7 +297,8 @@ export const createEmployee = async (req, res) => {
       const teamLeadQuery = {
         EmployeeType: 'TEAMLEAD',
         'Department.name': department.toUpperCase(),
-        isActive: true
+        isActive: true,
+        tenantId: req.user.tenantId,
       };
 
       if (isSalesDepartment && zone) {
@@ -313,7 +316,8 @@ export const createEmployee = async (req, res) => {
       const supervisorQuery = {
         EmployeeType: 'SUPERVISOR',
         'Department.name': department.toUpperCase(),
-        isActive: true
+        isActive: true,
+        tenantId: req.user.tenantId,
       };
 
       if (isSalesDepartment && zone) {
@@ -326,6 +330,7 @@ export const createEmployee = async (req, res) => {
     }
 
     const existingUser = await employeeSchema.findOne({
+      tenantId: req.user.tenantId,
       $or: [{ email }, { username }]
     });
 
@@ -367,6 +372,7 @@ export const createEmployee = async (req, res) => {
       employeeProfileImg,
       pageAccess:        Array.isArray(pageAccess)        ? pageAccess        : [],
       accessPermissions: Array.isArray(accessPermissions) ? accessPermissions : [],
+      tenantId:          req.user.tenantId || null,
     };
 
     if (employeeType.toUpperCase() !== 'SUPERADMIN') {
@@ -541,7 +547,8 @@ export const createDraftEmployee = async (req, res) => {
       const supervisorQuery = {
         EmployeeType: 'SUPERVISOR',
         'Department.name': department.toUpperCase(),
-        isActive: true
+        isActive: true,
+        tenantId: req.user.tenantId,
       };
 
       if (isSalesDepartment && zone) {
@@ -555,7 +562,8 @@ export const createDraftEmployee = async (req, res) => {
       const teamLeadQuery = {
         EmployeeType: 'TEAMLEAD',
         'Department.name': department.toUpperCase(),
-        isActive: true
+        isActive: true,
+        tenantId: req.user.tenantId,
       };
 
       if (isSalesDepartment && zone) {
@@ -583,6 +591,7 @@ export const createDraftEmployee = async (req, res) => {
       }
 
       const existingDraft = await employeeDraftSchema.findOne({
+        tenantId: req.user.tenantId,
         $or: query
       });
 
@@ -720,6 +729,7 @@ export const getAllEmployees = async (req, res) => {
     const statusTerm = Array.isArray(status) ? status[0] : status;
 
     let query = {};
+    query.tenantId = req.user.tenantId;
     if (req.user.EmployeeType !== 'SUPERADMIN') {
       if (req.user.Department) {
         query['Department.name'] = req.user.Department;
@@ -1108,6 +1118,7 @@ export const getAllDraftEmployee = async (req, res) => {
     } = req.query;
 
     let query = {};
+    query.tenantId = req.user.tenantId;
 
     if (department) {
       query['Department.name'] = department.toUpperCase();
@@ -1188,7 +1199,7 @@ export const getMyDraftEmployee = async (req, res) => {
     const skip = (page - 1) * limit;
     const userId = req.user.id;
 
-    const query = { createdBy: userId };
+    const query = { createdBy: userId, tenantId: req.user.tenantId };
 
     const [users, total] = await Promise.all([
       employeeDraftSchema
@@ -1357,7 +1368,7 @@ export const getDeletedEmployees = async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const skip = (page - 1) * limit;
 
-    const query = { isDeleted: true };
+    const query = { isDeleted: true, tenantId: req.user.tenantId };
 
     const [deletedEmployees, total] = await Promise.all([
       employeeSchema.find(query)

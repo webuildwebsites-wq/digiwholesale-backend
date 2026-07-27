@@ -107,6 +107,7 @@ export const getAllCustomers = async (req, res) => {
     const userEmployeeType = req.user?.EmployeeType;
 
     let query = {};
+    query.tenantId = req.user.tenantId;
 
     const isSalesHead = Array.isArray(req.user?.subRoles) && req.user.subRoles.some(r => r.code === "SALES_HEAD");
 
@@ -257,6 +258,7 @@ export const getPendingTermsCustomers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = {
+      tenantId: req.user.tenantId,
       "approvalWorkflow.salesHeadApprovalStatus": "APPROVED",
       "termsAndConditionsAccepted": false,
       "isBlacklisted": false,
@@ -300,6 +302,7 @@ export const getCorrectionRequiredCustomers = async (req, res) => {
     const userEmployeeType = req.user?.EmployeeType;
 
     let query = {
+      tenantId: req.user.tenantId,
       "approvalWorkflow.financeApprovalStatus": 'MODIFICATION_REQUIRED'
     };
 

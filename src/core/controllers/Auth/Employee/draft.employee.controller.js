@@ -12,7 +12,7 @@ export const updateDraftEmployee = async (req, res) => {
     const userId = req.user.id;
     const userEmployeeType = req.user?.EmployeeType;
 
-    const draftEmployee = await employeeDraftSchema.findById(draftId);
+    const draftEmployee = await employeeDraftSchema.findOne({ _id: draftId, tenantId: req.user.tenantId });
 
     if (!draftEmployee) {
       return sendErrorResponse(res, 404, 'NOT_FOUND', 'Draft employee not found');
@@ -42,8 +42,8 @@ export const updateDraftEmployee = async (req, res) => {
         checkQuery.$or = orConditions;
         
         const [existingEmployee, existingDraft] = await Promise.all([
-          Employee.findOne(checkQuery),
-          employeeDraftSchema.findOne(checkQuery)
+          Employee.findOne({ ...checkQuery, tenantId: req.user.tenantId }),
+          employeeDraftSchema.findOne({ ...checkQuery, tenantId: req.user.tenantId })
         ]);
 
         if (existingEmployee || existingDraft) {
@@ -130,8 +130,8 @@ export const updateDraftEmployee = async (req, res) => {
       if (updateData.emergencyContact) updateFields['profile.emergencyContact'] = updateData.emergencyContact;
     }
 
-    const updatedDraft = await employeeDraftSchema.findByIdAndUpdate(
-      draftId,
+    const updatedDraft = await employeeDraftSchema.findOneAndUpdate(
+      { _id: draftId, tenantId: req.user.tenantId },
       { $set: updateFields },
       { returnDocument: 'after', runValidators: true }
     ).select('-password');
@@ -159,7 +159,7 @@ export const deactivateEmployeeDraft = async (req, res) => {
     const userEmployeeType = req.user?.EmployeeType;
     const departmentName = req.user?.Department?.name || req.user?.Department;
 
-    const draftEmployee = await employeeDraftSchema.findById(draftId);
+    const draftEmployee = await employeeDraftSchema.findOne({ _id: draftId, tenantId: req.user.tenantId });
 
     if (!draftEmployee || !draftEmployee.isActive || draftEmployee.isDeleted) {
       return sendErrorResponse(res, 404, 'NOT_FOUND', 'Draft employee not found or already deactivated');
@@ -243,7 +243,7 @@ export const getDeletedEmployeeDrafts = async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const skip = (page - 1) * limit;
 
-    let query = { isDeleted: true };
+    let query = { isDeleted: true, tenantId: req.user.tenantId };
     if (!isSuperAdmin) {
       query.createdBy = userId;
     }

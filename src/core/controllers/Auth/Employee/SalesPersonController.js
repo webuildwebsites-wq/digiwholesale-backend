@@ -6,7 +6,8 @@ export const getAllSalesPersons = async (req, res) => {
     const { isActive, employeeType, zone, page = 1, limit = 100 } = req.query;
     
     const filter = {
-      'Department.name': 'SALES'
+      'Department.name': 'SALES',
+      tenantId: req.user.tenantId,
     };
 
     if (isActive !== undefined) {
@@ -55,7 +56,8 @@ export const getSalesPersonById = async (req, res) => {
     const salesPerson = await employeeSchema.findOne({ 
         _id: id, 
         'Department.name': 'SALES',
-        EmployeeType: { $in: ['EMPLOYEE', 'SUPERVISOR'] }
+        EmployeeType: { $in: ['EMPLOYEE', 'SUPERVISOR'] },
+        tenantId: req.user.tenantId,
       }).select('username employeeName email phone Department EmployeeType zone lab isActive profile');
 
     if (!salesPerson) {

@@ -4,7 +4,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../../../Utils/respon
 export const getConfigsByType = async (req, res) => {
   try {
     const { configType } = req.params;
-    const config = await SystemConfig.findOne({ configType });
+    const config = await SystemConfig.findOne({ configType, tenantId: req.user.tenantId });
     if (!config) {
       return sendErrorResponse(res, 404, 'CONFIG_NOT_FOUND', 'Configuration not found');
     }
@@ -16,7 +16,7 @@ export const getConfigsByType = async (req, res) => {
 
 export const getAllConfigs = async (req, res) => {
   try {
-      const configs = await SystemConfig.find().lean();
+      const configs = await SystemConfig.find({ tenantId: req.user.tenantId }).lean();
     return sendSuccessResponse(res, 200, configs, 'All configurations retrieved successfully');
   } catch (error) {
     return sendErrorResponse(res, 500, 'INTERNAL_ERROR', error.message);
@@ -39,7 +39,8 @@ export const createConfig = async (req, res) => {
       config = await SystemConfig.create({
         configType,
         values: [formattedValue],
-        createdBy: req.user.id
+        createdBy: req.user.id,
+        tenantId: req.user.tenantId,
       });
 
       return sendSuccessResponse(res, 201, config, 'Configuration created successfully');
@@ -66,7 +67,7 @@ export const updateConfigValue = async (req, res) => {
   try {
     const { configType } = req.params;
     const { oldValue, newValue } = req.body;
-    const config = await SystemConfig.findOne({ configType });
+    const config = await SystemConfig.findOne({ configType, tenantId: req.user.tenantId });
 
     if (!config) {
       return sendErrorResponse(res, 404, 'CONFIG_NOT_FOUND', 'Configuration not found');
@@ -101,7 +102,7 @@ export const permanentDeleteConfig = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const config = await SystemConfig.findByIdAndDelete(id);
+    const config = await SystemConfig.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
     if (!config) {
       return sendErrorResponse(res, 404, 'CONFIG_NOT_FOUND', 'Configuration not found');
     }

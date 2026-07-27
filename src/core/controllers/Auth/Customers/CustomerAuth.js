@@ -247,13 +247,13 @@ export const customerBasicRegistration = async (req, res) => {
     //     "brandCategories array with at least one brand is required for FINANCE department",
     //   );
     // }
-
     if (businessTypeRefId && !isValidObjectId(businessTypeRefId)) {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", `BusinessTypeRefId must be a valid ObjectId (24 hex characters)`);
     }
 
     const existingCustomer = await Customer.findOne({
       businessEmail: businessEmail.toLowerCase(),
+      tenantId: req.user.tenantId,
     });
 
     if (existingCustomer) {
@@ -422,6 +422,7 @@ export const customerBasicRegistration = async (req, res) => {
       createdBy: req.user.id,
       createdByName: req.user.employeeName,
       createdByDepartment: userDepartment,
+      tenantId: req.user.tenantId,
 
       // Business Details
       yearOfEstablishment: yearOfEstablishment || undefined,
@@ -590,7 +591,7 @@ export const updateCustomerProfile = async (req, res) => {
     const customerId = req.params.customerId;
     const updateData = req.body;
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
     console.log("customer : ", customer);
 
     if (!customer) {
@@ -861,6 +862,7 @@ export const updateCustomerProfile = async (req, res) => {
     if (updateData.businessEmail) {
       const existingCustomer = await Customer.findOne({
         businessEmail: updateData.businessEmail.toLowerCase(),
+        tenantId: req.user.tenantId,
         _id: { $ne: customerId },
       });
       if (existingCustomer) {
@@ -1259,6 +1261,7 @@ export const resubmitCorrectedCustomer = async (req, res) => {
     if (updateData.businessEmail) {
       const existingCustomer = await Customer.findOne({
         businessEmail: updateData.businessEmail.toLowerCase(),
+        tenantId: req.user.tenantId,
         _id: { $ne: customerId },
       });
       if (existingCustomer) {

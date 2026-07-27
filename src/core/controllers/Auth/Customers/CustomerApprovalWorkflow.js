@@ -24,7 +24,7 @@ export const financeApproveCustomer = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "action must be either 'APPROVE' or 'REQUEST_MODIFICATION'");
     }
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
     if (!customer) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Customer not found");
     }
@@ -97,7 +97,7 @@ export const salesHeadApproveCustomer = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "action must be 'APPROVE', 'REJECT', or 'REQUEST_MODIFICATION'");
     }
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
     if (!customer) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Customer not found");
     }
@@ -235,7 +235,7 @@ export const financeResubmitToSalesHead = async (req, res) => {
       return sendErrorResponse(res, 400, "INVALID_ID", "Invalid customer ID");
     }
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
     if (!customer) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Customer not found");
     }
@@ -317,6 +317,8 @@ export const getPendingCustomersByStage = async (req, res) => {
     } else {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "stage must be one of: finance, salesHead, salesCorrection, financeCorrection");
     }
+
+    query.tenantId = req.user.tenantId;
 
     const [customers, total] = await Promise.all([
       Customer.find(query)

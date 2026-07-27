@@ -80,6 +80,7 @@ export const customerDraftRegistration = async (req, res) => {
     if (normalizedEmail) {
       const existingDraft = await customerDraftSchema.findOne({ 
         businessEmail: normalizedEmail,
+        tenantId: req.user.tenantId,
         isDeleted: false 
       });
 
@@ -88,7 +89,8 @@ export const customerDraftRegistration = async (req, res) => {
       }
 
       const existingCustomer = await Customer.findOne({ 
-        businessEmail: normalizedEmail 
+        businessEmail: normalizedEmail,
+        tenantId: req.user.tenantId,
       });
 
       if (existingCustomer) {
@@ -196,6 +198,7 @@ export const customerDraftRegistration = async (req, res) => {
       designation: "Customer",
       createdBy: req.user.id,
       createdByDepartment: userDepartment,
+      tenantId: req.user.tenantId,
       status: {
         isActive: true,
         isSuspended: false,
@@ -299,7 +302,7 @@ export const getAllDraftCustomers = async (req, res) => {
       toDate 
     } = req.query;
 
-    let query = { isDeleted: false };
+    let query = { isDeleted: false, tenantId: req.user.tenantId };
 
     if (shopName) {
       query.shopName = { $regex: shopName, $options: 'i' };
@@ -390,7 +393,7 @@ export const getMyDraftCustomers = async (req, res) => {
       toDate 
     } = req.query;
 
-    let query = { createdBy: userId, isDeleted: false };
+    let query = { createdBy: userId, isDeleted: false, tenantId: req.user.tenantId };
 
     if (shopName) {
       query.shopName = { $regex: shopName, $options: 'i' };
@@ -480,7 +483,7 @@ export const updateDraftCustomer = async (req, res) => {
     const userEmployeeType = req.user?.EmployeeType;
     const userDepartment = userEmployeeType === 'SUPERADMIN' ? 'SUPERADMIN' : req.user?.Department?.name || req.user?.Department;
 
-    const draftCustomer = await customerDraftSchema.findById(draftId);
+    const draftCustomer = await customerDraftSchema.findOne({ _id: draftId, tenantId: req.user.tenantId });
 
     if (!draftCustomer) {
       return sendErrorResponse(res, 404, 'NOT_FOUND', 'Draft customer not found');
@@ -688,8 +691,8 @@ export const updateDraftCustomer = async (req, res) => {
       }
     }
 
-    const updatedDraft = await customerDraftSchema.findByIdAndUpdate(
-      draftId,
+    const updatedDraft = await customerDraftSchema.findOneAndUpdate(
+      { _id: draftId, tenantId: req.user.tenantId },
       { $set: updateFields },
       { returnDocument: 'after', runValidators: true }
     ).select('-password');
@@ -726,7 +729,7 @@ export const deactivateCustomer = async (req, res) => {
       return sendErrorResponse(res, 403, 'FORBIDDEN', 'You do not have permission to delete this customer');
     }
 
-    const user = await Customer.findOne({ _id: customerId, 'Status.isActive': true, isDeleted: false });
+    const user = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId, 'Status.isActive': true, isDeleted: false });
     if (!user) {
       return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'Customer not found or already deactivated');
     }
@@ -764,7 +767,7 @@ export const deactivateDraftCustomer = async (req, res) => {
 
     const isFinanceDepartment = userDepartment === 'FINANCE' || userEmployeeType === 'SUPERADMIN';
 
-    const draftCustomer = await customerDraftSchema.findOne({ _id: draftId, 'status.isActive': true, isDeleted: false });
+    const draftCustomer = await customerDraftSchema.findOne({ _id: draftId, tenantId: req.user.tenantId, 'status.isActive': true, isDeleted: false });
     if (!draftCustomer) {
       return sendErrorResponse(res, 404, 'DRAFT_NOT_FOUND', 'Draft customer not found or already deactivated');
     }
@@ -816,7 +819,7 @@ export const restoreCustomer = async (req, res) => {
       return sendErrorResponse(res, 403, 'FORBIDDEN', 'You do not have permission to restore customers');
     }
 
-    const user = await Customer.findOne({ _id: customerId, isDeleted: true });
+    const user = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId, isDeleted: true });
     if (!user) {
       return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'Customer not found in recycle bin');
     }
@@ -860,7 +863,7 @@ export const restoreDraftCustomer = async (req, res) => {
 
     const isFinanceDepartment = userDepartment === 'FINANCE' || userEmployeeType === 'SUPERADMIN';
 
-    const draftCustomer = await customerDraftSchema.findOne({ _id: draftId, isDeleted: true });
+    const draftCustomer = await customerDraftSchema.findOne({ _id: draftId, tenantId: req.user.tenantId, isDeleted: true });
     if (!draftCustomer) {
       return sendErrorResponse(res, 404, 'DRAFT_NOT_FOUND', 'Draft customer not found in recycle bin');
     }
@@ -912,7 +915,7 @@ export const getDeletedCustomers = async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const skip = (page - 1) * limit;
 
-    const query = { isDeleted: true };
+    const query = { isDeleted: true, tenantId: req.user.tenantId };
 
     const [deletedCustomers, total] = await Promise.all([
       Customer.find(query)
@@ -964,7 +967,7 @@ export const getDeletedDraftCustomers = async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const skip = (page - 1) * limit;
 
-    let query = { isDeleted: true };
+    let query = { isDeleted: true, tenantId: req.user.tenantId };
     if (!isFinanceDepartment) {
       query.createdBy = req.user.id;
     }
