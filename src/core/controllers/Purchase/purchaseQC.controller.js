@@ -113,8 +113,8 @@ export const createPurchaseQC = async (req, res) => {
         }
 
         const [purchaseOrder, inward] = await Promise.all([
-            VendorPurchase.findById(purchaseOrderId),
-            PurchaseInward.findById(purchaseInwardId),
+            VendorPurchase.findOne({ _id: purchaseOrderId, tenantId: req.user.tenantId }),
+            PurchaseInward.findOne({ _id: purchaseInwardId, tenantId: req.user.tenantId }),
         ]);
 
         if (!purchaseOrder) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
@@ -231,6 +231,7 @@ export const createPurchaseQC = async (req, res) => {
             remarks,
             createdBy:     req.user._id,
             createdByName: req.user.employeeName || req.user.name || null,
+            tenantId:      req.user.tenantId,
         });
 
         if (passedItems.length > 0) {
@@ -330,6 +331,7 @@ export const getAllPurchaseQCs = async (req, res) => {
             filter.vendorId = new mongoose.Types.ObjectId(req.query.vendorId);
         }
         if (req.query.overallResult) filter.overallResult = req.query.overallResult;
+        filter.tenantId = req.user.tenantId;
 
         const [qcs, total] = await Promise.all([
             PurchaseQC.find(filter)
@@ -360,7 +362,7 @@ export const getPurchaseQCById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
-        const qc = await PurchaseQC.findById(id)
+        const qc = await PurchaseQC.findOne({ _id: id, tenantId: req.user.tenantId })
             .populate("createdBy", "employeeName username email")
             .lean();
         if (!qc) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase QC not found");

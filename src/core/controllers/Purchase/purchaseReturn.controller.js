@@ -27,6 +27,8 @@ export const getAllPurchaseReturns = async (req, res) => {
         }
         if (req.query.status) filter.status = req.query.status;
 
+        filter.tenantId = req.user.tenantId;
+
         const [returns, total] = await Promise.all([
             PurchaseReturn.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
             PurchaseReturn.countDocuments(filter),
@@ -54,7 +56,7 @@ export const getPurchaseReturnById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
-        const returnDoc = await PurchaseReturn.findById(id).lean();
+        const returnDoc = await PurchaseReturn.findOne({ _id: id, tenantId: req.user.tenantId }).lean();
         if (!returnDoc) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase return not found");
         return sendSuccessResponse(res, 200, { return: returnDoc });
     } catch (error) {
@@ -80,7 +82,7 @@ export const updateItemStatus = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", `status must be one of: ${allowed.join(", ")}`);
         }
 
-        const returnDoc = await PurchaseReturn.findById(id);
+        const returnDoc = await PurchaseReturn.findOne({ _id: id, tenantId: req.user.tenantId });
         if (!returnDoc) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase return not found");
 
         const item = returnDoc.items.find(i => i.itemId.toString() === itemId.toString());

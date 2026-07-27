@@ -14,7 +14,7 @@ export const createPurchaseInward = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "items array is required");
         }
 
-        const purchaseOrder = await VendorPurchase.findById(purchaseOrderId);
+        const purchaseOrder = await VendorPurchase.findOne({ _id: purchaseOrderId, tenantId: req.user.tenantId });
         if (!purchaseOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
         }
@@ -109,6 +109,7 @@ export const createPurchaseInward = async (req, res) => {
             remarks,
             status:     "Confirmed",
             createdBy:  req.user._id,
+            tenantId:   req.user.tenantId,
         });
 
         return sendSuccessResponse(res, 201, {
@@ -135,6 +136,7 @@ export const getAllPurchaseInwards = async (req, res) => {
         if (req.query.vendorId && mongoose.Types.ObjectId.isValid(req.query.vendorId)) {
             filter.vendorId = new mongoose.Types.ObjectId(req.query.vendorId);
         }
+        filter.tenantId = req.user.tenantId;
 
         const [inwards, total] = await Promise.all([
             PurchaseInward.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -164,7 +166,7 @@ export const getPurchaseInwardById = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
 
-        const inward = await PurchaseInward.findById(id).lean();
+        const inward = await PurchaseInward.findOne({ _id: id, tenantId: req.user.tenantId }).lean();
         if (!inward) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase inward not found");
 
         const purchaseOrder = await VendorPurchase.findById(inward.purchaseOrderId).lean();

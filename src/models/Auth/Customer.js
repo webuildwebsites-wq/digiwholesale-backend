@@ -34,6 +34,13 @@ const customerSchema = new mongoose.Schema(
       trim: true,
       maxlength: 100,
     },
+    tenantId: {
+      type:      String,
+      trim:      true,
+      uppercase: true,
+      default:   null,
+      index:     true,
+    },
     ownerName: {
       type: String,
       required: true,

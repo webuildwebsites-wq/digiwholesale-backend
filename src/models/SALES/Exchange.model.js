@@ -64,6 +64,7 @@ const exchangeSchema = new mongoose.Schema(
     remark:        { type: String },
     createdBy:     { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
     createdByName: { type: String },
+    tenantId:      { type: String, trim: true, uppercase: true, default: null, index: true },
   },
   { timestamps: true }
 );

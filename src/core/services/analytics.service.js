@@ -2,34 +2,30 @@ import Customer from "../../models/Auth/Customer.js";
 import employeeSchema from "../../models/Auth/Employee.js";
 import BulkOrder from "../../models/order/BulkOrder.js";
 
-export async function getDashboardAnalyticsService() {
+export async function getDashboardAnalyticsService(tenantId) {
     const now = new Date();
+    const tenantFilter = tenantId ? { tenantId } : {};
 
     const [activeCustomers, totalStaff, recentOrders, statusCounts] = await Promise.all([
         Customer.countDocuments({
+            ...tenantFilter,
             "status.isActive": true,
             "status.isSuspended": false,
             isDeleted: false,
         }),
-
         employeeSchema.countDocuments({
+            ...tenantFilter,
             isActive: true,
             isDeleted: false,
         }),
-
-        BulkOrder.find({})
+        BulkOrder.find(tenantFilter)
             .sort({ createdAt: -1 })
             .limit(5)
             .lean(),
-
         BulkOrder.aggregate([
+            { $match: { ...tenantFilter } },
             { $unwind: "$orders" },
-            {
-                $group: {
-                    _id: "$orders.status",
-                    count: { $sum: 1 },
-                },
-            },
+            { $group: { _id: "$orders.status", count: { $sum: 1 } } },
         ]),
     ]);
 

@@ -45,6 +45,13 @@ const employee = new mongoose.Schema({
     uppercase: true,
     required: true
   },
+  tenantId: {
+    type:    String,
+    trim:    true,
+    uppercase: true,
+    default: null,
+    index:   true,
+  },
   email: {
     type: String,
     required: [true, 'Email is required'],

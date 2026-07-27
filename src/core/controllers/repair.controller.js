@@ -5,13 +5,6 @@ import Repair from "../../models/Repair.model.js";
 import {  } from "../../Utils/uploads/image.upload.bucket.js";
 import { uploadToGCSRepair } from "../../Utils/uploads/upload.bucket.js";
 
-
-/* =====================================================
-   CREATE REPAIR
-===================================================== */
-
-
-
 export const createRepair = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -38,9 +31,6 @@ export const createRepair = async (req, res) => {
             deliveryDate = new Date(deliveryDate);
         }
 
-        /* =============================
-           IMAGE UPLOAD (before txn ideally)
-        ============================== */
         let images = [];
 
         if (req.files && req.files.length > 0) {
@@ -49,16 +39,10 @@ export const createRepair = async (req, res) => {
             images = uploadedImages.map(img => img.publicUrl || img);
         }
 
-        /* =============================
-           FIND OR CREATE CUSTOMER
-        ============================== */
         const cname = name.trim().toUpperCase();
         const cmobile = mobile.trim();
 
 
-        /* =============================
-           CREATE REPAIR
-        ============================== */
         const repairRes = await Repair.create(
             [
                 {
@@ -73,6 +57,7 @@ export const createRepair = async (req, res) => {
                     price,
                     images,
                     remark,
+                    tenantId: req.user.tenantId,
 
                 },
             ],
@@ -104,10 +89,6 @@ export const createRepair = async (req, res) => {
 };
 
 
-/* =====================================================
-   FILTER REPAIRS
-===================================================== */
-
 export const filterRepairs = async (req, res) => {
     try {
 
@@ -120,10 +101,7 @@ export const filterRepairs = async (req, res) => {
             });
         }
 
-        let query = {};
-
-
-        /* ---------- DATE FILTER ---------- */
+        let query = { tenantId: req.user.tenantId };
 
         if (startDate && endDate) {
 
@@ -136,9 +114,6 @@ export const filterRepairs = async (req, res) => {
                 $lte: end,
             };
         }
-
-
-        /* ---------- KEYWORD FILTER ---------- */
 
         if (keyword) {
 
@@ -183,12 +158,6 @@ export const filterRepairs = async (req, res) => {
     }
 };
 
-
-
-/* =====================================================
-   GET REPAIRS (PAGINATION)
-===================================================== */
-
 export const getRepairs = async (req, res) => {
     try {
 
@@ -197,12 +166,12 @@ export const getRepairs = async (req, res) => {
         const skip = (page - 1) * limit;
 
 
-        const repairs = await Repair.find()
+        const repairs = await Repair.find({ tenantId: req.user.tenantId })
             .sort({ repairDate: -1 })
             .skip(skip)
             .limit(limit);
 
-        const totalRepairs = await Repair.countDocuments();
+        const totalRepairs = await Repair.countDocuments({ tenantId: req.user.tenantId });
 
         res.status(200).json({
             success: true,
@@ -226,16 +195,11 @@ export const getRepairs = async (req, res) => {
 };
 
 
-
-/* =====================================================
-   GET SINGLE REPAIR
-===================================================== */
-
 export const getSingleRepair = async (req, res) => {
     try {
         const { _id } = req.params;
 
-        const repair = await Repair.findById(_id);
+        const repair = await Repair.findOne({ _id, tenantId: req.user.tenantId });
 
         if (!repair) {
             return res.status(404).json({
@@ -258,17 +222,12 @@ export const getSingleRepair = async (req, res) => {
 };
 
 
-
-/* =====================================================
-   UPDATE REPAIR
-===================================================== */
-
 export const updateRepair = async (req, res) => {
     try {
         const { _id } = req.params;
 
-        const repair = await Repair.findByIdAndUpdate(
-            _id,
+        const repair = await Repair.findOneAndUpdate(
+            { _id, tenantId: req.user.tenantId },
             req.body,
             { new: true, runValidators: true }
         );
@@ -295,11 +254,6 @@ export const updateRepair = async (req, res) => {
 };
 
 
-
-/* =====================================================
-   UPDATE REPAIR STATUS
-===================================================== */
-
 export const updateRepairStatus = async (req, res) => {
     try {
 
@@ -315,6 +269,7 @@ export const updateRepairStatus = async (req, res) => {
 
         const repair = await Repair.findOne({
             _id,
+            tenantId: req.user.tenantId,
         });
 
         if (!repair) {
@@ -348,11 +303,6 @@ export const updateRepairStatus = async (req, res) => {
     }
 };
 
-
-
-/* =====================================================
-   DELETE REPAIR
-===================================================== */
 export const deleteRepair = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -361,16 +311,13 @@ export const deleteRepair = async (req, res) => {
         const { _id } = req.params;
 
         const repair = await Repair.findOne(
-            { _id }
+            { _id, tenantId: req.user.tenantId }
         ).session(session);
 
         if (!repair) {
             throw new Error("Repair not found");
         }
 
-        /* =============================
-           Delete Repair
-        ============================== */
         await repair.deleteOne({ session });
 
 

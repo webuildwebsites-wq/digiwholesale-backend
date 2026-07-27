@@ -1,4 +1,3 @@
-// vendor order invoice
 export const generateVendorOrderInvoiceHTML = (data) => {
   const {
     invoiceNo,

@@ -118,16 +118,9 @@ const productSchema = new mongoose.Schema(
       default: 0,
     },
 
-    qty: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "employee",
-    },
+    qty: { type: Number, default: 0, min: 0 },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+    tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
   },
   { timestamps: true }
 );

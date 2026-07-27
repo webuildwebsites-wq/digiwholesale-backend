@@ -50,6 +50,8 @@ const vendorSchema = new mongoose.Schema(
       trim: true,
     },
 
+    tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
+
   },
   { timestamps: true }
 );

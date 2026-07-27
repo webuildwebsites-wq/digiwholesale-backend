@@ -22,22 +22,15 @@ export const createVendorOrder = async (req, res) => {
     }
 
 
-    const vendor = await Vendor.findOne({ _id: vendorId }).session(session);
+    const vendor = await Vendor.findOne({ _id: vendorId, tenantId: req.user.tenantId }).session(session);
     if (!vendor) {
       throw new Error("Vendor not found");
     }
 
 
-    /* =============================
-       Get Order Number
-    ============================== */
-
     let subTotal = 0;
     let gstTotal = 0;
 
-    /* =============================
-       Create Order
-    ============================== */
     const orderRes = await VendorOrder.create(
       [
         {
@@ -49,6 +42,7 @@ export const createVendorOrder = async (req, res) => {
           gstTotal: 0,
           grandTotal: 0,
           notes: notes || "",
+          tenantId: req.user.tenantId,
         },
       ],
       { session }
@@ -89,16 +83,8 @@ export const createVendorOrder = async (req, res) => {
 
     await order.save({ session });
 
-    /* =============================
-       Commit BEFORE external calls
-    ============================== */
     await session.commitTransaction();
     session.endSession();
-
-
-    /* =============================
-       External Work (NO transaction)
-    ============================== */
 
 
     const invoiceData = {
@@ -141,9 +127,6 @@ export const createVendorOrder = async (req, res) => {
 
     const fileName = `vendor-order/${order.orderNumber}-${Date.now()}.pdf`;
     const pdfUrl = await uploadToGCSPDF(pdfBuffer, fileName);
-    // const pdfUrl = "";  // replace with bucket url ^
-
-
 
     await VendorOrder.updateOne(
       { _id: order._id },
@@ -153,34 +136,14 @@ export const createVendorOrder = async (req, res) => {
       }
     );
 
-
-
-    const urlValue = pdfUrl.replace("https://storage.googleapis.com/", "");
-
-    const formattedMobile = vendor.mobile.startsWith("91")
-      ? vendor.mobile
-      : "91" + vendor.mobile;
-
-    // await sendVendorOrderInvoiceWhatsAppMessage({
-    //   store,
-    //   recipientNumber: formattedMobile,
-    //   orderNumber: order.orderNumber,
-    //   fileUrl: urlValue,
-    //   vendorName: vendor.name,
-    //   pdfUrl
-    // });
-
-    // send invoice on email
-    if (process.env.emailApi) {
       await sendVendorOrderInvoiceEmail(
-        vendor.email,                 // recipient email
+        vendor.email,       
         vendor.name,
-        pdfBuffer,                     // PDF buffer
+        pdfBuffer,           
         order.orderNumber,
         store.emailApi,
         store.storeName
       );
-    }
 
     return res.status(201).json({
       success: true,
@@ -202,7 +165,6 @@ export const createVendorOrder = async (req, res) => {
   }
 };
 
-// Vendor purchase order invoice send email
 async function sendVendorOrderInvoiceEmail(recipientEmail, vendorName, pdfBuffer, invoiceNumber, apiUrl, storeName) {
   try {
     if (!recipientEmail) throw new Error("Recipient email is required");
@@ -275,7 +237,6 @@ async function sendVendorOrderInvoiceEmail(recipientEmail, vendorName, pdfBuffer
       </div>
     `;
 
-    // Prepare payload for the Google Apps Script API
     const payload = {
       to: recipientEmail,
       subject: subject,
@@ -286,7 +247,6 @@ async function sendVendorOrderInvoiceEmail(recipientEmail, vendorName, pdfBuffer
       mimeType: "application/pdf",
     };
 
-    // Send POST request to GAS email API
     const response = await axios.post(apiUrl, payload, {
       headers: { "Content-Type": "application/json" },
     });
@@ -300,11 +260,6 @@ async function sendVendorOrderInvoiceEmail(recipientEmail, vendorName, pdfBuffer
   }
 }
 
-
-// ─────────────────────────────────────────────────────────────────
-//  GET /api/vendor-order/suggestion?q=<name or mobile>
-//  Returns up to 5 matching vendor
-// ─────────────────────────────────────────────────────────────────
 export const suggestionVendorOrder = async (req, res) => {
   try {
 
@@ -318,6 +273,7 @@ export const suggestionVendorOrder = async (req, res) => {
     }
 
     const vendororder = await VendorOrder.find({
+      tenantId: req.user.tenantId,
       $or: [
         { name: { $regex: q, $options: "i" } },
         { mobile: { $regex: q, $options: "i" } },
@@ -344,7 +300,6 @@ export const suggestionVendorOrder = async (req, res) => {
   }
 };
 
-// update vendor order status
 export const updateVendorOrderStatus = async (req, res) => {
   try {
     const { _id } = req.params;
@@ -359,8 +314,8 @@ export const updateVendorOrderStatus = async (req, res) => {
       });
     }
 
-    const order = await VendorOrder.findByIdAndUpdate(
-      _id,
+    const order = await VendorOrder.findOneAndUpdate(
+      { _id, tenantId: req.user.tenantId },
       { status },
       { new: true, runValidators: true }
     );
@@ -385,12 +340,11 @@ export const updateVendorOrderStatus = async (req, res) => {
   }
 };
 
-// get single vendor order and their product by id
 export const getVendorOrderById = async (req, res) => {
   try {
     const { _id } = req.params;
 
-    const order = await VendorOrder.findById(_id);
+    const order = await VendorOrder.findOne({ _id, tenantId: req.user.tenantId });
 
     if (!order) {
       return res.status(404).json({
@@ -417,18 +371,18 @@ export const getVendorOrderById = async (req, res) => {
   }
 };
 
-// get all vendors order - load more
 export const getVendorOrders = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;     // current page
-    const limit = parseInt(req.query.limit) || 20;  // items per load
+    const page = parseInt(req.query.page) || 1;  
+    const limit = parseInt(req.query.limit) || 20;  
     const skip = (page - 1) * limit;
 
     const filter = {
+      tenantId: req.user.tenantId,
     };
 
     const orders = await VendorOrder.find(filter)
-      .sort({ createdAt: -1 }) // latest first
+      .sort({ createdAt: -1 }) 
       .skip(skip)
       .limit(limit);
 
@@ -452,7 +406,7 @@ export const getVendorOrders = async (req, res) => {
   }
 };
 
-// delete vendor order by id
+
 export const deleteVendorOrder = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -461,20 +415,17 @@ export const deleteVendorOrder = async (req, res) => {
 
     const { _id } = req.params;
 
-    const order = await VendorOrder.findById(_id).session(session);
+    const order = await VendorOrder.findOne({ _id, tenantId: req.user.tenantId }).session(session);
 
     if (!order) {
       throw new Error("Vendor order not found");
     }
 
-    // Prevent deletion if already processed
     if (["RECEIVED", "COMPLETED"].includes(order.status)) {
       throw new Error("Received or Completed orders cannot be deleted");
     }
 
-    /* =============================
-       Delete Order Items
-    ============================== */
+
     await VendorOrderItem.deleteMany(
       {
         vendorOrderId: order._id,
@@ -482,9 +433,7 @@ export const deleteVendorOrder = async (req, res) => {
       { session }
     );
 
-    /* =============================
-       Delete Order
-    ============================== */
+
     await order.deleteOne({ session });
 
     await session.commitTransaction();
@@ -511,7 +460,6 @@ export const deleteVendorOrder = async (req, res) => {
 };
 
 
-// vendor order return damage/missing
 export const updateVendorOrderIssues = async (req, res) => {
   try {
     const { _id } = req.params;
@@ -524,11 +472,8 @@ export const updateVendorOrderIssues = async (req, res) => {
       });
     }
 
-    /* ===============================
-       GET ORDER
-    ================================ */
 
-    const order = await VendorOrder.findById(_id);
+    const order = await VendorOrder.findOne({ _id, tenantId: req.user.tenantId });
 
     if (!order) {
       return res.status(404).json({
@@ -551,9 +496,6 @@ export const updateVendorOrderIssues = async (req, res) => {
       });
     }
 
-    /* ===============================
-       GET VENDOR
-    ================================ */
 
     const vendor = await Vendor.findById(order.vendorId);
 
@@ -563,10 +505,6 @@ export const updateVendorOrderIssues = async (req, res) => {
         message: "Vendor not found",
       });
     }
-
-    /* ===============================
-       GET ORDER ITEMS
-    ================================ */
 
     const itemIds = items.map((item) => item.itemId);
 
@@ -580,10 +518,6 @@ export const updateVendorOrderIssues = async (req, res) => {
     orderItems.forEach((item) => {
       orderItemMap.set(item._id.toString(), item);
     });
-
-    /* ===============================
-       PROCESS ISSUES
-    ================================ */
 
     const bulkOps = [];
 
@@ -624,10 +558,6 @@ export const updateVendorOrderIssues = async (req, res) => {
         });
       }
 
-      /* ===============================
-         RETURN ITEM CALCULATION
-      ================================ */
-
       if (totalReturnQty > 0) {
 
         hasIssues = true;
@@ -654,10 +584,6 @@ export const updateVendorOrderIssues = async (req, res) => {
         });
       }
 
-      /* ===============================
-         BULK UPDATE
-      ================================ */
-
       bulkOps.push({
         updateOne: {
           filter: {
@@ -674,17 +600,9 @@ export const updateVendorOrderIssues = async (req, res) => {
       });
     }
 
-    /* ===============================
-       UPDATE ITEMS
-    ================================ */
-
     if (bulkOps.length > 0) {
       await VendorOrderItem.bulkWrite(bulkOps);
     }
-
-    /* ===============================
-       NO ISSUES
-    ================================ */
 
     if (!hasIssues) {
       return res.status(200).json({
@@ -692,11 +610,6 @@ export const updateVendorOrderIssues = async (req, res) => {
         message: "No issues found to generate return invoice",
       });
     }
-
-    /* ===============================
-       GENERATE RETURN INVOICE
-    ================================ */
-
 
     const invoiceData = {
       invoiceNo: order.orderNumber,
@@ -730,50 +643,15 @@ export const updateVendorOrderIssues = async (req, res) => {
 
     pdfBuffer = Buffer.from(pdfBuffer);
 
-    const fileName = `order-return/${order.orderNumber}-${Date.now()}.pdf`;
-
-    // const pdfUrl = await uploadToGCSPDF(pdfBuffer, fileName);
-
     const pdfUrl = "";
 
-    /* ===============================
-       SAVE RETURN INVOICE
-    ================================ */
 
     order.returnInvoiceUrl = pdfUrl;
     order.status = "RETURN";
 
     await order.save();
 
-    /* ===============================
-       WHATSAPP
-    ================================ */
 
-    const formattedMobile = vendor.mobile.startsWith("91")
-      ? vendor.mobile
-      : "91" + vendor.mobile;
-
-    const urlValue = pdfUrl
-      ? pdfUrl.replace(
-        "https://storage.googleapis.com/",
-        ""
-      )
-      : "";
-
-    // await sendVendorOrderReturnInvoiceWhatsAppMessage({
-    //   store,
-    //   recipientNumber: formattedMobile,
-    //   orderNumber: order.orderNumber,
-    //   fileUrl: urlValue,
-    //   vendorName: vendor.name,
-    //   pdfUrl,
-    // });
-
-    /* ===============================
-       EMAIL
-    ================================ */
-
-    if (process.env.emailApi) {
       await sendVendorOrderReturnInvoiceEmail(
         vendor.email,
         vendor.name,
@@ -782,7 +660,6 @@ export const updateVendorOrderIssues = async (req, res) => {
         "store@test.com",
         "DigiOptics"
       );
-    }
 
     return res.status(200).json({
       success: true,
@@ -877,7 +754,6 @@ async function sendVendorOrderReturnInvoiceEmail(recipientEmail, vendorName, pdf
       </div>
     `;
 
-    // Prepare payload for the Google Apps Script API
     const payload = {
       to: recipientEmail,
       subject: subject,
@@ -888,7 +764,6 @@ async function sendVendorOrderReturnInvoiceEmail(recipientEmail, vendorName, pdf
       mimeType: "application/pdf",
     };
 
-    // Send POST request to GAS email API
     const response = await axios.post(apiUrl, payload, {
       headers: { "Content-Type": "application/json" },
     });
@@ -903,15 +778,9 @@ async function sendVendorOrderReturnInvoiceEmail(recipientEmail, vendorName, pdf
 }
 
 
-// get vendors orders data by date range or by keyword
 export const filterVendorsOrders = async (req, res) => {
   try {
     const { startDate, endDate, keyword } = req.body;
-
-
-    /* =========================================
-       VALIDATION
-    ========================================= */
 
     if (!startDate && !keyword) {
       return res.status(400).json({
@@ -921,11 +790,9 @@ export const filterVendorsOrders = async (req, res) => {
     }
 
     let query = {
+      tenantId: req.user.tenantId,
     };
 
-    /* =========================================
-       DATE RANGE FILTER
-    ========================================= */
 
     if (startDate && endDate) {
       const start = new Date(startDate);
@@ -937,11 +804,6 @@ export const filterVendorsOrders = async (req, res) => {
         $lte: end,
       };
     }
-
-    /* =========================================
-       KEYWORD FILTER
-    ========================================= */
-
     if (keyword) {
       const regex = new RegExp(keyword, "i");
 
@@ -952,10 +814,6 @@ export const filterVendorsOrders = async (req, res) => {
         { orderNumber: regex },
       ];
     }
-
-    /* =========================================
-       FETCH DATA
-    ========================================= */
 
     const ordersData = await VendorOrder.find(query).sort({ createdAt: -1 });
 

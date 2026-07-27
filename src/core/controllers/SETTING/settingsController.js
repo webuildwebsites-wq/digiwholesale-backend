@@ -3,7 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/
 
 export const getSettingsByStore = async (req, res) => {
   try {
-    const settings = await Settings.findOne({});
+    const settings = await Settings.findOne({ tenantId: req.user.tenantId });
 
     if (!settings) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Settings data not found");
@@ -20,7 +20,7 @@ export const getSettingsByStore = async (req, res) => {
 export const updateSettings = async (req, res) => {
   try {
     const settings = await Settings.findOneAndUpdate(
-      {},
+      { tenantId: req.user.tenantId },
       { $set: req.body },
       { new: true, runValidators: true }
     );

@@ -109,14 +109,18 @@ function sanitizeFitting(fitting) {
   return fitting;
 }
 
-export async function getOrderService(orderId) {
-  const order = await BulkOrder.findById(orderId);
+export async function getOrderService(orderId, tenantId) {
+  const filter = { _id: orderId };
+  if (tenantId) filter.tenantId = tenantId;
+  const order = await BulkOrder.findOne(filter);
   if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
   return order;
 }
 
-export async function deleteOrderService(orderId) {
-  const order = await Order.findById(orderId);
+export async function deleteOrderService(orderId, tenantId) {
+  const filter = { _id: orderId };
+  if (tenantId) filter.tenantId = tenantId;
+  const order = await Order.findOne(filter);
   if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
   if (!["Draft", "Cancelled"].includes(order.status)) {
     throw { statusCode: 400, code: "INVALID_STATUS", message: `Cannot delete an order with status "${order.status}". Only Draft or Cancelled orders can be deleted.` };
@@ -124,7 +128,7 @@ export async function deleteOrderService(orderId) {
   await Order.findByIdAndDelete(orderId);
 }
 
-export async function listOrdersService({ customerId, status, page = 1, limit = 20, search, fromDate, toDate }) {
+export async function listOrdersService({ customerId, status, page = 1, limit = 20, search, fromDate, toDate, tenantId }) {
   const STATUS_MAP = {
     PENDING:    ["Processing"],
     CONFIRMED:  ["Confirmed"],
@@ -136,7 +140,7 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     DELIVERABLE:["Deliverable"],
   };
   const filter = {};
-
+  if (tenantId) filter.tenantId = tenantId;
   if (customerId) filter["customer.customerId"] = customerId;
 
   if (status) {
@@ -151,6 +155,7 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     const searchRegex = { $regex: search.trim(), $options: "i" };
 
     const matchedCustomers = await Customer.find({
+      ...(tenantId ? { tenantId } : {}),
       $or: [
         { shopName:      searchRegex },
         { ownerName:     searchRegex },
@@ -190,7 +195,7 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     .lean();
 
   const customerIds = [...new Set(orders.map(o => o.customer?.customerId?.toString()).filter(Boolean))];
-  const customers   = await Customer.find({ _id: { $in: customerIds } })
+  const customers   = await Customer.find({ _id: { $in: customerIds }, ...(filter.tenantId ? { tenantId: filter.tenantId } : {}) })
     .select("_id billingMode billingCycle")
     .lean();
   const customerMap = new Map(customers.map(c => [c._id.toString(), c]));
@@ -232,8 +237,10 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
   };
 }
 
-export async function cancelOrderService(orderId, reason) {
-  const bulkOrder = await BulkOrder.findById(orderId);
+export async function cancelOrderService(orderId, reason, tenantId) {
+  const filter = { _id: orderId };
+  if (tenantId) filter.tenantId = tenantId;
+  const bulkOrder = await BulkOrder.findOne(filter);
   if (!bulkOrder) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
 
   const cancellable = ["PENDING", "CONFIRMED"];
@@ -529,8 +536,9 @@ export async function getProductIndexesService() {
   ]);
 }
 
-export async function suggestionsOrdersService({ search, limit = 10 }) {
+export async function suggestionsOrdersService({ search, limit = 10, tenantId }) {
   const filter = {};
+  if (tenantId) filter.tenantId = tenantId;
 
   if (search && search.trim()) {
     const regex = { $regex: search.trim(), $options: "i" };
@@ -569,10 +577,11 @@ export async function suggestionsOrdersService({ search, limit = 10 }) {
   return ordersWithTotalPrice;
 }
 
-export async function getRxOrdersService({ page = 1, limit = 20, search, fromDate, toDate, vendorId, customerId }) {
+export async function getRxOrdersService({ page = 1, limit = 20, search, fromDate, toDate, vendorId, customerId, tenantId }) {
   const filter = {
     "orders.items.orderType": "RX",
   };
+  if (tenantId) filter.tenantId = tenantId;
 
   if (customerId) filter["customer.customerId"] = customerId;
 
@@ -635,10 +644,11 @@ export async function getRxOrdersService({ page = 1, limit = 20, search, fromDat
   };
 }
 
-export async function getDraftOrdersService({ page = 1, limit = 20, search, customerId, fromDate, toDate }) {
+export async function getDraftOrdersService({ page = 1, limit = 20, search, customerId, fromDate, toDate, tenantId }) {
   const filter = {
     "orders": { $elemMatch: { status: "Draft" } },
   };
+  if (tenantId) filter.tenantId = tenantId;
 
   if (customerId) filter["customer.customerId"] = customerId;
 

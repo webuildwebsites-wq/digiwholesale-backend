@@ -151,6 +151,7 @@ export const createReturnRefund = async (req, res) => {
       remark,
       createdBy: req.user._id,
       createdByName: req.user.employeeName || req.user.name,
+      tenantId: req.user.tenantId,
     });
 
     return sendSuccessResponse(res, 201, { returnRefund }, "Return & Refund request created successfully");
@@ -168,7 +169,7 @@ export const getAllReturnRefunds = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip  = (page - 1) * limit;
 
-    const filter = {  };
+    const filter = { tenantId: req.user.tenantId };
     if (req.query.status) filter.status = req.query.status;
 
     const [returnRefunds, total] = await Promise.all([
@@ -340,7 +341,7 @@ export const filterReturnRefunds = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Date range, keyword, or status is required");
     }
 
-    let query = {  };
+    let query = { tenantId: req.user.tenantId };
 
     if (startDate && endDate) {
       const start = new Date(startDate);

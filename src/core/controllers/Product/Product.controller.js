@@ -33,7 +33,7 @@ export const createProduct = async (req, res) => {
     const productCodes = products.map((p) => p.productCode.trim());
 
     const existingProducts = await DigiProduct.find({
-    //   storeId,
+      tenantId: req.user.tenantId,
       productCode: { $in: productCodes },
     });
 
@@ -70,8 +70,6 @@ export const createProduct = async (req, res) => {
 
     // Prepare documents
     const productDocs = products.map((p) => ({
-    //   storeId,
-    //   storeNumber,
       productCode: p.productCode.trim(),
       category: p.category.trim().toUpperCase(),
       productName: p.productName.trim().toUpperCase(),
@@ -84,11 +82,9 @@ export const createProduct = async (req, res) => {
       cyl: p.cyl?.trim() || "",
       index: p.index?.trim() || "",
       axis: p.axis?.trim() || "",
-
       addition: p.addition?.trim() || "",
       material: p.material?.trim() || "",
       dimensions: p.dimensions?.trim() || "",
-
       coating: p.coating?.trim() || "",
       expiry: p.expiry || "",
       price: Number(p.price),
@@ -97,7 +93,7 @@ export const createProduct = async (req, res) => {
       mrp: Number(p.mrp),
       qty: Number(p.qty),
       image: p.image || "",
-      // createdBy: userId,
+      tenantId: req.user.tenantId,
     }));
 
     const savedProducts = await DigiProduct.insertMany(productDocs);
@@ -130,8 +126,7 @@ export const suggestionProduct = async (req, res) => {
     }
 
     const products = await DigiProduct.find({
-      // storeId,
-      // storeNumber,
+      tenantId: req.user.tenantId,
       $or: [
         { productCode: { $regex: q, $options: "i" } },
         { productName: { $regex: q, $options: "i" } },
@@ -171,12 +166,11 @@ export const getProducts = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const [products, total] = await Promise.all([
-      DigiProduct.find()
+      DigiProduct.find({ tenantId: req.user.tenantId })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
-
-      DigiProduct.countDocuments({ }),
+      DigiProduct.countDocuments({ tenantId: req.user.tenantId }),
     ]);
 
     const hasMore = page * limit < total;
@@ -213,6 +207,7 @@ export const getProductsByCategory = async (req, res) => {
     }
 
     const data = await DigiProduct.find({
+      tenantId: req.user.tenantId,
       category,
     }).sort({ createdAt: -1 });
 
@@ -237,6 +232,7 @@ export const getProductById = async (req, res) => {
 
     const product = await DigiProduct.findOne({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!product) {
@@ -267,6 +263,7 @@ export const updateProduct = async (req, res) => {
 
     const product = await DigiProduct.findOne({
       productCode: p.productCode,
+      tenantId: req.user.tenantId,
     });
 
     if (!product) {
@@ -331,6 +328,7 @@ export const deleteProduct = async (req, res) => {
 
     const product = await DigiProduct.findOneAndDelete({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!product) {
@@ -390,6 +388,7 @@ export const addInventory = async (req, res) => {
     const productCodes = items.map(i => i.productCode);
 
     const products = await DigiProduct.find({
+      tenantId: req.user.tenantId,
       productCode: { $in: productCodes },
     });
 
@@ -482,6 +481,7 @@ export const getInventoryByProductId = async (req, res) => {
     }
 
     const inventory = await DigiProduct.find({
+      tenantId: req.user.tenantId,
      _id : productId,
     });
 
@@ -519,6 +519,7 @@ export const getInventoryByProductCode = async (req, res) => {
     }
 
     const inventory = await DigiProduct.find({
+      tenantId: req.user.tenantId,
       productCode,
     });
 
@@ -548,6 +549,7 @@ export const getDigiProductNames = async (req, res) => {
     const { search = "" } = req.query;
 
     const filter = {
+      tenantId: req.user.tenantId,
       productName: { $nin: [null, ""] },
     };
 
@@ -589,7 +591,7 @@ export const filterProducts = async (req, res) => {
       });
     }
 
-    let query = {};
+    let query = { tenantId: req.user.tenantId };
 
     if (startDate && endDate) {
       const start = new Date(startDate);
@@ -667,6 +669,7 @@ export const bulkUploadProducts = async (req, res) => {
     }
 
     const existing = await DigiProduct.find({
+      tenantId: req.user.tenantId,
       productCode: { $in: allCodes },
     }).session(session);
 
@@ -699,6 +702,7 @@ export const bulkUploadProducts = async (req, res) => {
       qty:          Number(p.qty)    || 0,
       image:        p.image          || "",
       createdBy:    userId,
+      tenantId:     req.user.tenantId,
     }));
 
     const saved = await DigiProduct.insertMany(docs, { session });

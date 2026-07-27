@@ -12,7 +12,7 @@ function handleError(res, err) {
 
 export const getDashboardAnalytics = async (req, res) => {
   try {
-    const data = await getDashboardAnalyticsService();
+    const data = await getDashboardAnalyticsService(req.user.tenantId);
     return sendSuccessResponse(res, 200, data, "Dashboard analytics retrieved successfully");
   } catch (err) {
     return handleError(res, err);

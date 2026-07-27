@@ -185,6 +185,7 @@ export const createExchange = async (req, res) => {
       newBulkOrderId,
       createdBy:         req.user._id,
       createdByName:     req.user.employeeName || req.user.name,
+      tenantId:          req.user.tenantId,
     });
 
     return sendSuccessResponse(res, 201, { exchange }, "Exchange request created successfully");
@@ -254,6 +255,7 @@ export const getAllExchanges = async (req, res) => {
 
     const filter = {};
     if (req.query.status) filter.status = req.query.status;
+    filter.tenantId = req.user.tenantId;
 
     const [exchanges, total] = await Promise.all([
       Exchange.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
@@ -395,7 +397,7 @@ export const filterExchanges = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Date range, keyword, or status is required");
     }
 
-    let query = {};
+    let query = { tenantId: req.user.tenantId };
 
     if (startDate && endDate) {
       const start = new Date(startDate);

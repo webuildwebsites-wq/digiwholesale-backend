@@ -88,7 +88,7 @@ export const createVendorPurchaseItems = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "orders array is required and must not be empty");
         }
 
-        const vendor = await Vendor.findById(vendorId);
+        const vendor = await Vendor.findOne({ _id: vendorId, tenantId: req.user.tenantId });
         if (!vendor) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Vendor not found");
         }
@@ -224,6 +224,7 @@ export const createVendorPurchaseItems = async (req, res) => {
             vendor:    vendorDoc,
             orders,
             createdBy: req.user._id,
+            tenantId:  req.user.tenantId,
         });
 
         if (vendor.email) {
@@ -259,22 +260,27 @@ export const createVendorPurchaseItems = async (req, res) => {
 
 export const getAllPurchaseItems = async (req, res) => {
     try {
-        const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
         const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-        const skip  = (page - 1) * limit;
+        const skip = (page - 1) * limit;
 
         const { search, vendorId, status, fromDate, toDate } = req.query;
 
-        const filter = {};
+        const filter = {
+            tenantId: req.user.tenantId,
+        };
 
-        if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
+        if (vendorId) {
             filter["vendor.vendorId"] = new mongoose.Types.ObjectId(vendorId);
         }
 
-        if (status) filter["orders.status"] = status;
+        if (status) {
+            filter["orders.status"] = status;
+        }
 
         if (search && search.trim()) {
             const regex = { $regex: search.trim(), $options: "i" };
+
             filter.$or = [
                 { "vendor.vendorName": regex },
                 { "orders.orderNumber": regex },
@@ -284,7 +290,11 @@ export const getAllPurchaseItems = async (req, res) => {
 
         if (fromDate || toDate) {
             filter.createdAt = {};
-            if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+
+            if (fromDate) {
+                filter.createdAt.$gte = new Date(fromDate);
+            }
+
             if (toDate) {
                 const end = new Date(toDate);
                 end.setHours(23, 59, 59, 999);
@@ -293,22 +303,26 @@ export const getAllPurchaseItems = async (req, res) => {
         }
 
         const [purchaseOrders, total] = await Promise.all([
-            VendorPurchase.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+            VendorPurchase.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
             VendorPurchase.countDocuments(filter),
         ]);
 
-        const enrichedOrders = purchaseOrders.map(po => {
+        const enrichedOrders = purchaseOrders.map((po) => {
             const allOrders = po.orders || [];
 
-            const enrichedOrdersList = allOrders.map(order => {
-                const items      = order.items || [];
+            const enrichedOrdersList = allOrders.map((order) => {
+                const items = order.items || [];
                 const totalItems = items.length;
 
-                const inwardDone = items.filter(i => i.inwardStatus !== "PENDING").length;
-                const qcDone     = items.filter(i => i.qcStatus     !== "PENDING").length;
-                const qcPassed   = items.filter(i => i.qcStatus === "PASSED").length;
-                const qcFailed   = items.filter(i => i.qcStatus === "FAILED").length;
-                const qcPartial  = items.filter(i => i.qcStatus === "PARTIAL").length;
+                const inwardDone = items.filter((i) => i.inwardStatus !== "PENDING").length;
+                const qcDone = items.filter((i) => i.qcStatus !== "PENDING").length;
+                const qcPassed = items.filter((i) => i.qcStatus === "PASSED").length;
+                const qcFailed = items.filter((i) => i.qcStatus === "FAILED").length;
+                const qcPartial = items.filter((i) => i.qcStatus === "PARTIAL").length;
 
                 return {
                     ...order,
@@ -317,31 +331,31 @@ export const getAllPurchaseItems = async (req, res) => {
                         inwardDone,
                         inwardPending: totalItems - inwardDone,
                         qcDone,
-                        qcPending:     totalItems - qcDone,
+                        qcPending: totalItems - qcDone,
                         qcPassed,
                         qcFailed,
                         qcPartial,
-                        allReceived:   totalItems > 0 && items.every(i => i.inwardStatus === "RECEIVED"),
-                        allQCDone:     totalItems > 0 && items.every(i => i.qcStatus !== "PENDING"),
+                        allReceived: totalItems > 0 && items.every((i) => i.inwardStatus === "RECEIVED"),
+                        allQCDone: totalItems > 0 && items.every((i) => i.qcStatus !== "PENDING"),
                     },
                 };
             });
 
-            const allItems      = allOrders.flatMap(o => o.items || []);
-            const total_items   = allItems.length;
-            const inwardDone    = allItems.filter(i => i.inwardStatus !== "PENDING").length;
-            const qcDoneCount   = allItems.filter(i => i.qcStatus     !== "PENDING").length;
-            const qcPassed      = allItems.filter(i => i.qcStatus === "PASSED").length;
-            const qcFailed      = allItems.filter(i => i.qcStatus === "FAILED").length;
+            const allItems = allOrders.flatMap((o) => o.items || []);
+            const total_items = allItems.length;
+            const inwardDone = allItems.filter((i) => i.inwardStatus !== "PENDING").length;
+            const qcDoneCount = allItems.filter((i) => i.qcStatus !== "PENDING").length;
+            const qcPassed = allItems.filter((i) => i.qcStatus === "PASSED").length;
+            const qcFailed = allItems.filter((i) => i.qcStatus === "FAILED").length;
 
             const overallStatus = (() => {
-                if (total_items === 0)                                         return "Submitted";
-                if (allItems.every(i => i.qcStatus === "PASSED"))             return "QC Passed";
-                if (allItems.every(i => i.qcStatus === "FAILED"))             return "QC Failed";
-                if (qcDoneCount === total_items)                              return "QC Completed";
-                if (qcDoneCount > 0)                                          return "QC In Progress";
-                if (allItems.every(i => i.inwardStatus === "RECEIVED"))       return "Fully Received";
-                if (inwardDone > 0)                                           return "Partially Received";
+                if (total_items === 0) return "Submitted";
+                if (allItems.every((i) => i.qcStatus === "PASSED")) return "QC Passed";
+                if (allItems.every((i) => i.qcStatus === "FAILED")) return "QC Failed";
+                if (qcDoneCount === total_items) return "QC Completed";
+                if (qcDoneCount > 0) return "QC In Progress";
+                if (allItems.every((i) => i.inwardStatus === "RECEIVED")) return "Fully Received";
+                if (inwardDone > 0) return "Partially Received";
                 return "Submitted";
             })();
 
@@ -349,12 +363,12 @@ export const getAllPurchaseItems = async (req, res) => {
                 ...po,
                 overallStatus,
                 purchaseOrderSummary: {
-                    totalOrders:   allOrders.length,
-                    totalItems:    total_items,
+                    totalOrders: allOrders.length,
+                    totalItems: total_items,
                     inwardDone,
                     inwardPending: total_items - inwardDone,
-                    qcDone:        qcDoneCount,
-                    qcPending:     total_items - qcDoneCount,
+                    qcDone: qcDoneCount,
+                    qcPending: total_items - qcDoneCount,
                     qcPassed,
                     qcFailed,
                 },
@@ -364,20 +378,29 @@ export const getAllPurchaseItems = async (req, res) => {
 
         const totalPages = Math.ceil(total / limit);
 
-        return sendSuccessResponse(res, 200, {
-            purchaseOrders: enrichedOrders,
-            pagination: {
-                currentPage: page,
-                totalPages,
-                totalRecords: total,
-                hasNext: page < totalPages,
-                hasPrev: page > 1,
+        return sendSuccessResponse(
+            res,
+            200,
+            {
+                purchaseOrders: enrichedOrders,
+                pagination: {
+                    currentPage: page,
+                    totalPages,
+                    totalRecords: total,
+                    hasNext: page < totalPages,
+                    hasPrev: page > 1,
+                },
             },
-        }, "Purchase orders retrieved successfully");
-
+            "Purchase orders retrieved successfully"
+        );
     } catch (error) {
         console.error("Get All Purchase Items Error:", error);
-        return sendErrorResponse(res, 500, "GET_PURCHASE_ITEMS_ERROR", error.message || "Something went wrong");
+        return sendErrorResponse(
+            res,
+            500,
+            "GET_PURCHASE_ITEMS_ERROR",
+            error.message || "Something went wrong"
+        );
     }
 };
 
@@ -389,7 +412,7 @@ export const getVendorPurchaseItemsById = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
 
-        const purchaseOrder = await VendorPurchase.findById(id).lean();
+        const purchaseOrder = await VendorPurchase.findOne({ _id: id, tenantId: req.user.tenantId }).lean();
         if (!purchaseOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
         }
@@ -410,7 +433,7 @@ export const deleteVendorPurchaseItems = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
 
-        const purchaseOrder = await VendorPurchase.findByIdAndDelete(id);
+        const purchaseOrder = await VendorPurchase.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
         if (!purchaseOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
         }
@@ -431,7 +454,7 @@ export const updateVendorPurchaseItems = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
 
-        const purchaseOrder = await VendorPurchase.findById(id);
+        const purchaseOrder = await VendorPurchase.findOne({ _id: id, tenantId: req.user.tenantId });
         if (!purchaseOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
         }
@@ -488,7 +511,7 @@ export const getOrdersByVendorId = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_VENDOR_ID", "Invalid vendorId");
         }
 
-        const vendor = await Vendor.findById(vendorId).lean();
+        const vendor = await Vendor.findOne({ _id: vendorId, tenantId: req.user.tenantId }).lean();
         if (!vendor) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Vendor not found");
         }
@@ -541,7 +564,7 @@ export const getOrdersByVendorId = async (req, res) => {
             })).filter((order) => order.vendorItems.length > 0),
         })).filter((bulkOrder) => bulkOrder.orders.length > 0);
 
-        const purchaseFilter = { "vendor.vendorId": new mongoose.Types.ObjectId(vendorId) };
+        const purchaseFilter = { "vendor.vendorId": new mongoose.Types.ObjectId(vendorId), tenantId: req.user.tenantId };
         if (fromDate || toDate) purchaseFilter.createdAt = rxFilter.createdAt;
 
         const [purchaseOrders, purchaseTotal] = await Promise.all([
@@ -591,7 +614,7 @@ export const updateVendorRefId = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "refIds array is required. Each entry: { itemId, vendorRefId }");
         }
 
-        const purchaseOrder = await VendorPurchase.findById(id);
+        const purchaseOrder = await VendorPurchase.findOne({ _id: id, tenantId: req.user.tenantId });
         if (!purchaseOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
         }
@@ -654,6 +677,7 @@ const buildItemsFilter = (req, extraItemFilter = {}) => {
     if (isReplacement !== undefined) {
         filter.isReplacement = isReplacement === "true";
     }
+    filter.tenantId = req.user.tenantId;
     if (fromDate || toDate) {
         filter.createdAt = {};
         if (fromDate) filter.createdAt.$gte = new Date(fromDate);
@@ -901,12 +925,12 @@ export const createReplacementOrder = async (req, res) => {
             }
         }
 
-        const purchaseReturn = await PurchaseReturnModel.findById(purchaseReturnId);
+        const purchaseReturn = await PurchaseReturnModel.findOne({ _id: purchaseReturnId, tenantId: req.user.tenantId });
         if (!purchaseReturn) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase return not found");
         }
 
-        const originalPO = await VendorPurchase.findById(purchaseReturn.purchaseOrderId);
+        const originalPO = await VendorPurchase.findOne({ _id: purchaseReturn.purchaseOrderId, tenantId: req.user.tenantId });
         if (!originalPO) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Original purchase order not found");
         }
@@ -1167,7 +1191,7 @@ export const getAllReplacementOrders = async (req, res) => {
         const limit = Math.min(parseInt(req.query.limit) || 20, 100);
         const skip  = (page - 1) * limit;
 
-        const filter = { isReplacement: true };
+        const filter = { isReplacement: true, tenantId: req.user.tenantId };
 
         if (req.query.vendorId && mongoose.Types.ObjectId.isValid(req.query.vendorId)) {
             filter["vendor.vendorId"] = new mongoose.Types.ObjectId(req.query.vendorId);
@@ -1272,7 +1296,7 @@ export const getReplacementOrderById = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid ID");
         }
 
-        const po = await VendorPurchase.findOne({ _id: id, isReplacement: true }).lean();
+        const po = await VendorPurchase.findOne({ _id: id, isReplacement: true, tenantId: req.user.tenantId }).lean();
         if (!po) return sendErrorResponse(res, 404, "NOT_FOUND", "Replacement order not found");
 
         const [purchaseReturn, originalPO] = await Promise.all([
@@ -1280,7 +1304,7 @@ export const getReplacementOrderById = async (req, res) => {
                 ? PurchaseReturnModel.findById(po.replacementFor).lean()
                 : null,
             po.originalPurchaseOrderId
-                ? VendorPurchase.findById(po.originalPurchaseOrderId).lean()
+                ? VendorPurchase.findOne({ _id: po.originalPurchaseOrderId, tenantId: req.user.tenantId }).lean()
                 : null,
         ]);
 

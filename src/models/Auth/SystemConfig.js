@@ -13,15 +13,9 @@ const systemConfigSchema = new mongoose.Schema({
     trim: true,
     uppercase: true
   }],
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'employee',
-    required: true
-  },
-  updatedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'employee'
-  }
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee', required: true },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee' },
+  tenantId:  { type: String, trim: true, uppercase: true, default: null, index: true },
 }, { timestamps: true });
 
 const SystemConfig = mongoose.model('SystemConfig', systemConfigSchema);

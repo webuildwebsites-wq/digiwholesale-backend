@@ -92,30 +92,18 @@ const locationSchema = new mongoose.Schema({
     default: true,
     index: true
   },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'employee',
-    required: true
-  },
-  updatedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'employee'
-  }
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee', required: true },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'employee' },
+  tenantId:  { type: String, trim: true, uppercase: true, default: null, index: true },
 }, {
   timestamps: true,
   toJSON: { 
     virtuals: true,
-    transform: function(doc, ret) {
-      delete ret.id;
-      return ret;
-    }
+    transform: function(doc, ret) { delete ret.id; return ret; }
   },
   toObject: { 
     virtuals: true,
-    transform: function(doc, ret) {
-      delete ret.id;
-      return ret;
-    }
+    transform: function(doc, ret) { delete ret.id; return ret; }
   }
 });
 

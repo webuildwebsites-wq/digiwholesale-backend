@@ -22,21 +22,17 @@ const returnItemSchema = new mongoose.Schema(
 
 const returnRefundSchema = new mongoose.Schema(
   {
-    /* ---------- Basic Info ---------- */
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
     email: { type: String, trim: true },
 
-    /* ---------- Eligibility ---------- */
     dateOfPurchase: { type: Date, required: true },
     itemType: { type: String, required: true },
     condition: { type: String, required: true },
     reasonForReturn: { type: String, required: true },
 
-    /* ---------- Items ---------- */
     items: { type: [returnItemSchema], required: true },
 
-    /* ---------- Refund Details ---------- */
     refundAmount: { type: Number, required: true, min: 0 },
     refundMethod: {
       type: String,
@@ -44,12 +40,10 @@ const returnRefundSchema = new mongoose.Schema(
       enum: ["CASH", "CARD", "UPI", "LOYALTY_POINTS", "GIFT_VOUCHER"],
     },
     loyaltyPoints: { type: Number, default: 0, min: 0 },
-    giftVoucherUrl: { type: String, default: null }, // GCS URL
+    giftVoucherUrl: { type: String, default: null }, 
 
-    /* ---------- Photos ---------- */
-    photos: [{ type: String }], // GCS URLs (max 10)
+    photos: [{ type: String }], 
 
-    /* ---------- Status ---------- */
     status: {
       type: String,
       enum: ["Pending", "Return_Approved", "Refund_Approved", "Rejected", "Completed"],
@@ -59,9 +53,9 @@ const returnRefundSchema = new mongoose.Schema(
 
     remark: { type: String },
 
-    /* ---------- Audit ---------- */
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     createdByName: { type: String },
+    tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
   },
   { timestamps: true }
 );

@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import cookieParser from 'cookie-parser'
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import hpp from 'hpp';
 import compression from 'compression';
@@ -23,18 +23,18 @@ import vendorRouter from './src/routes/vendor.routes.js';
 import vendorOrderRouter from './src/routes/vendorOrder.routes.js';
 import jobCardRoutes from './src/routes/jobCard.routes.js';
 import analyticsRouter from './src/routes/analytics.routes.js';
-import Salesrouter  from './src/routes/SALES/sales.routes.js'
-import returnRefundRouter from './src/routes/SALES/returnRefund.routes.js'
-import exchangeRouter from './src/routes/SALES/exchange.routes.js'
-import settingRouter from "./src/routes/SETTING/settings.routes.js"
+import Salesrouter from './src/routes/SALES/sales.routes.js';
+import returnRefundRouter from './src/routes/SALES/returnRefund.routes.js';
+import exchangeRouter from './src/routes/SALES/exchange.routes.js';
+import settingRouter from "./src/routes/SETTING/settings.routes.js";
 import purchaseRouter from './src/routes/Purchase/purchase.route.js';
 import purchaseInwardRouter from './src/routes/Purchase/purchaseInward.routes.js';
 import purchaseQCRouter from './src/routes/Purchase/purchaseQC.routes.js';
 import purchaseReturnRouter from './src/routes/Purchase/purchaseReturn.routes.js';
 import billingRouter from './src/routes/billing.routes.js';
+import tenantRouter from './src/routes/tenant.routes.js';
 import { startBillingCron } from './src/core/services/billing/billingCron.js';
 import { initBrowserPool } from './src/core/services/pdfService.js';
-import { testStartBillingCron } from './src/core/services/billing/test.billingCron.js';
 
 dotenv.config();
 
@@ -83,7 +83,7 @@ app.use(compression());
 app.use(morgan('combined'));
 app.use(hpp());
 app.use(express.json({ limit: '10mb' }));
-app.use(cookieParser())
+app.use(cookieParser());
 app.set('trust proxy', 1);
 
 try {
@@ -121,6 +121,8 @@ try {
   app.use('/api/location', locationRouter);
 
   // CUSTOMER ORDER MODULE
+  app.use("/api/tenants", tenantRouter);
+
   app.use('/api/order', orderRouter);
 
   // PRODUCTS MODULE

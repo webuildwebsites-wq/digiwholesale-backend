@@ -1,5 +1,5 @@
 import express from "express";
-import { getOrder, listOrders, updateDraftOrder, cancelOrder, deleteOrder, getProductNames, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductCoatings, suggestionsOrders, getRxOrders, getDraftOrders } from "../../core/controllers/order/order.controller.js";
+import { getOrder, listOrders,  cancelOrder, deleteOrder, suggestionsOrders, getRxOrders, getDraftOrders } from "../../core/controllers/order/order.controller.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
 import { createBulkOrder, getBulkOrderChallan, getBulkOrderInvoice, updateOrderStatus, updateBulkDraftOrder, getPublicOrderStatus } from "../../core/controllers/order/bulkorder/bulkorder.js";
 import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
@@ -10,15 +10,15 @@ orderRouter.get("/status/public", getPublicOrderStatus);
 
 orderRouter.use(ProtectUser);
 
-orderRouter.get("/product/get-tint", getTintOptions);
-orderRouter.get("/product/get-frame-types", getFrameTypes);
-orderRouter.get("/product-fields/brand", getProductBrands);
-orderRouter.get("/product-fields/category", getProductCategories);
-orderRouter.get("/product-fields/treatment", getProductTreatments);
-orderRouter.get("/product-fields/index", getProductIndexes);
+// orderRouter.get("/product/get-tint", getTintOptions);
+// orderRouter.get("/product/get-frame-types", getFrameTypes);
+// orderRouter.get("/product-fields/brand", getProductBrands);
+// orderRouter.get("/product-fields/category", getProductCategories);
+// orderRouter.get("/product-fields/treatment", getProductTreatments);
+// orderRouter.get("/product-fields/index", getProductIndexes);
 // orderRouter.get("/product-fields/productType", getProductTypes);
-orderRouter.get("/product-fields/coating", getProductCoatings);
-orderRouter.get("/product-names", getProductNames);
+// orderRouter.get("/product-fields/coating", getProductCoatings);
+// orderRouter.get("/product-names", getProductNames);
 
 orderRouter.post("/create-bulk-orders", checkPermission("ADD_ORDER"), createBulkOrder);
 orderRouter.get("/bulk-orders/:orderId/challan", checkPageAccess("ALL_ORDERS"), getBulkOrderChallan);

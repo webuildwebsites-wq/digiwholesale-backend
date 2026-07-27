@@ -20,6 +20,7 @@ export const createSale = async (req, res) => {
       paymentMode,
       createdBy: req.user._id,
       createdByName: req.user.name,
+      tenantId: req.user.tenantId,
     });
 
     return sendSuccessResponse(res, 201, { sale }, "Sale created successfully");
@@ -35,7 +36,7 @@ export const getAllSales = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const filter = {  };
+    const filter = { tenantId: req.user.tenantId };
 
     const sales = await Sale.find(filter)
       .sort({ createdAt: -1 })
@@ -62,6 +63,7 @@ export const getSaleById = async (req, res) => {
   try {
     const sale = await Sale.findOne({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!sale) {
@@ -79,6 +81,7 @@ export const updateSale = async (req, res) => {
   try {
     const sale = await Sale.findOne({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!sale) {
@@ -106,6 +109,7 @@ export const deleteSale = async (req, res) => {
   try {
     const sale = await Sale.findOneAndDelete({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!sale) {
@@ -128,6 +132,7 @@ export const filterSales = async (req, res) => {
     }
 
     let query = {
+      tenantId: req.user.tenantId,
     };
 
     if (startDate && endDate) {

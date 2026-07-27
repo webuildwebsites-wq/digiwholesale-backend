@@ -247,6 +247,7 @@ const bulkOrderSchema = new mongoose.Schema(
         challanUrl:    { type: String, default: null },
         invoiceGenAt:  { type: Date,   default: null },
         challanGenAt:  { type: Date,   default: null },
+        tenantId:      { type: String, trim: true, uppercase: true, default: null, index: true },
     },
     { timestamps: true }
 );
