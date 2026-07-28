@@ -49,7 +49,9 @@ const allowedOrigins = [
   "http://139.59.65.108:3005",
   "https://digioptics-wholesale.netlify.app",
   "https://digiopticswholesaledibysr.netlify.app",
-  "https://digiwholesale-frontend.digibysr.in"
+  "https://digiwholesale-frontend.digibysr.in",
+  "http://testing-digiwholesale-backend.digibysr.in",
+  "http://testing-digiwholesale-frontend.digibysr.in"
 ];
 
 
