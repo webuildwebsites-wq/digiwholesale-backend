@@ -36,7 +36,7 @@ export const employeeLogin = async (req, res) => {
       return sendErrorResponse(res, 422, 'INVALID_CREDENTIALS', 'Invalid credentials or account is inactive');
     }
 
-    if (!user.tenantId) {
+    if (!user.tenantId && user.EmployeeType !== 'PLATFORM_OWNER') {
       return sendErrorResponse(res, 403, 'NO_TENANT', 'Account is not associated with any workspace. Please contact support.');
     }
 

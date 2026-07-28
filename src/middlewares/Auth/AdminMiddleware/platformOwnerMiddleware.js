@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import PlatformOwner from "../../../models/Tenant/PlatformOwner.model.js";
+import Employee from "../../../models/Auth/Employee.js";
 
 export const protectPlatformOwner = async (req, res, next) => {
     try {
@@ -19,22 +19,29 @@ export const protectPlatformOwner = async (req, res, next) => {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        if (decoded.AccountType !== "PLATFORM_OWNER") {
+        const user = await Employee.findById(decoded.id);
+
+        if (!user || !user.isActive) {
+            return res.status(401).json({
+                success: false,
+                error: { code: "USER_NOT_FOUND", message: "User not found or inactive", timestamp: new Date().toISOString() },
+            });
+        }
+
+        if (user.EmployeeType !== "PLATFORM_OWNER") {
             return res.status(403).json({
                 success: false,
                 error: { code: "FORBIDDEN", message: "Platform Owner access required", timestamp: new Date().toISOString() },
             });
         }
 
-        const owner = await PlatformOwner.findById(decoded.id);
-        if (!owner || !owner.isActive) {
-            return res.status(401).json({
-                success: false,
-                error: { code: "OWNER_NOT_FOUND", message: "Platform owner not found or inactive", timestamp: new Date().toISOString() },
-            });
-        }
+        req.user = {
+            id:           user._id,
+            EmployeeType: user.EmployeeType,
+            AccountType:  "PLATFORM_OWNER",
+            ...user.toObject(),
+        };
 
-        req.owner = owner;
         next();
     } catch (err) {
         return res.status(401).json({

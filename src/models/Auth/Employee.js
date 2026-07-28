@@ -100,28 +100,18 @@ const employee = new mongoose.Schema({
       type: String,
       trim: true,
       required: function () {
-        return this.EmployeeType !== 'SUPERADMIN';
+        return !['SUPERADMIN', 'PLATFORM_OWNER'].includes(this.EmployeeType);
       }
     },
     refId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Department',
       required: function () {
-        return this.EmployeeType !== 'SUPERADMIN';
+        return !['SUPERADMIN', 'PLATFORM_OWNER'].includes(this.EmployeeType);
       }
     }
   },
   subRoles: [subRoleSchema],
-  // lab: {
-  //   name: {
-  //     type: String,
-  //     trim: true
-  //   },
-  //   refId: {
-  //     type: mongoose.Schema.Types.ObjectId,
-  //     ref: 'Lab'
-  //   }
-  // },
   zone: {
     name: {
       type: String,
@@ -164,7 +154,7 @@ const employee = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'employee',
     required: function () {
-      return !['SUPERADMIN'].includes(this.EmployeeType);
+      return !['SUPERADMIN', 'PLATFORM_OWNER'].includes(this.EmployeeType);
     }
   },
   supervisor: {
