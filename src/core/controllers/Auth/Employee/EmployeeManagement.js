@@ -945,7 +945,7 @@ export const updateEmployeeDetails = async (req, res) => {
     Object.assign(user, updates);
 
     if (permissionsDotNotation) {
-      await employeeSchema.findByIdAndUpdate(userId, { $set: permissionsDotNotation });
+      await employeeSchema.findOneAndUpdate({ _id: userId, tenantId: req.user.tenantId }, { $set: permissionsDotNotation });
     }
 
     await user.save();
@@ -958,7 +958,7 @@ export const updateEmployeeDetails = async (req, res) => {
       );
     }
 
-    const updatedUser = await employeeSchema.findById(userId).select('-password');
+    const updatedUser = await employeeSchema.findOne({ _id: userId, tenantId: req.user.tenantId }).select('-password');
     return sendSuccessResponse(res, 200, { user: updatedUser }, 'Employee updated successfully');
 
   } catch (error) {
@@ -988,7 +988,7 @@ export const deactivateEmployee = async (req, res) => {
     const department = req.user.Department?.name || req.user.Department;
     const employeeType = req.user.EmployeeType;
 
-    const targetUser = await employeeSchema.findById(userId);
+    const targetUser = await employeeSchema.findOne({ _id: userId, tenantId: req.user.tenantId });
 
     if (!targetUser || !targetUser.isActive || targetUser.isDeleted) {
       return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'Employee not found or already inactive');
@@ -1060,26 +1060,7 @@ export const getEmployeeDetails = async (req, res) => {
       return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid user ID format');
     }
 
-    let query = { _id: userId, isActive: true };
-    if (req.user.EmployeeType === 'SUPERADMIN') {
-    } else if (req.user.EmployeeType === 'ADMIN') {
-      const targetUser = await employeeSchema.findById(userId);
-      if (targetUser && targetUser.EmployeeType === 'SUPERADMIN') {
-        return sendErrorResponse(res, 403, 'FORBIDDEN', 'Admin cannot view SuperAdmin details');
-      }
-    } else if (req.user.EmployeeType === 'SUPERVISOR') {
-      query['Department.name'] = req.user.Department;
-      query['region.name'] = req.user.region;
-    } else {
-      const targetUser = await employeeSchema.findById(userId);
-      if (targetUser &&
-        (targetUser._id.toString() !== req.user.id &&
-          (targetUser.Department?.name !== req.user.Department ||
-            targetUser.region?.name !== req.user.region ||
-            targetUser.EmployeeType !== 'EMPLOYEE'))) {
-        return sendErrorResponse(res, 403, 'FORBIDDEN', 'Access denied');
-      }
-    }
+    let query = { _id: userId, isActive: true, tenantId: req.user.tenantId };
 
     const user = await employeeSchema.findOne(query)
       .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret')
@@ -1236,7 +1217,8 @@ export const getSupervisorsByDepartment = async (req, res) => {
 
     let query = {
       EmployeeType: 'SUPERVISOR',
-      isActive: true
+      isActive: true,
+      tenantId: req.user.tenantId,
     };
     if (req.user.EmployeeType === 'SUPERADMIN') {
       if (department) query['Department.name'] = department.toUpperCase();
@@ -1273,7 +1255,7 @@ export const getDraftEmployeeDetails = async (req, res) => {
       return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid user ID format');
     }
 
-    let query = { _id: userId, isActive: true };
+    let query = { _id: userId, isActive: true, tenantId: req.user.tenantId };
     const user = await employeeDraftSchema.findOne(query)
       .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret')
 
@@ -1309,7 +1291,7 @@ export const restoreEmployee = async (req, res) => {
       return sendErrorResponse(res, 403, "FORBIDDEN", "You don't have permission to restore employees");
     }
 
-    const targetUser = await employeeSchema.findOne({ _id: userId, isDeleted: true });
+    const targetUser = await employeeSchema.findOne({ _id: userId, isDeleted: true, tenantId: req.user.tenantId });
 
     if (!targetUser) {
       return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'Employee not found in recycle bin');
@@ -1422,7 +1404,8 @@ export const getEmployeesUnderSupervisor = async (req, res) => {
     const supervisor = await employeeSchema.findOne({
       _id: supervisorId,
       EmployeeType: 'SUPERVISOR',
-      isActive: true
+      isActive: true,
+      tenantId: req.user.tenantId,
     })
       .populate('teamLeadsUnderMe', 'employeeName username email phone EmployeeType Department zone')
       .populate('employeesUnderMe', 'employeeName username email phone EmployeeType Department zone supervisor teamLead');
@@ -1463,7 +1446,8 @@ export const getEmployeesUnderTeamLead = async (req, res) => {
     const teamLead = await employeeSchema.findOne({
       _id: teamLeadId,
       EmployeeType: 'TEAMLEAD',
-      isActive: true
+      isActive: true,
+      tenantId: req.user.tenantId,
     })
       .populate('employeesUnderMe', 'employeeName username email phone EmployeeType Department zone supervisor teamLead');
 
@@ -1507,7 +1491,8 @@ export const getMultipleEmployees = async (req, res) => {
     const employees = await employeeSchema.find({
       _id: { $in: employeeIds },
       isActive: true,
-      isDeleted: false
+      isDeleted: false,
+      tenantId: req.user.tenantId
     })
     .select('employeeName _id EmployeeType email phone employeeProfileImg')
     .populate('EmployeeType', 'name');
@@ -1544,7 +1529,8 @@ export const getDepartmentHierarchy = async (req, res) => {
     const supervisors = await employeeSchema.find({
       'Department.refId': departmentId,
       EmployeeType: 'SUPERVISOR',
-      isActive: true
+      isActive: true,
+      tenantId: req.user.tenantId,
     })
       .populate('teamLeadsUnderMe', 'employeeName username email EmployeeType')
       .populate('employeesUnderMe', 'employeeName username email EmployeeType')

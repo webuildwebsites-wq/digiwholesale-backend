@@ -198,7 +198,7 @@ export const restoreEmployeeDraft = async (req, res) => {
       return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid draft ID format');
     }
 
-    const draftEmployee = await employeeDraftSchema.findOne({ _id: draftId, isDeleted: true });
+    const draftEmployee = await employeeDraftSchema.findOne({ _id: draftId, isDeleted: true, tenantId: req.user.tenantId });
 
     if (!draftEmployee) {
       return sendErrorResponse(res, 404, 'NOT_FOUND', 'Draft employee not found in recycle bin');

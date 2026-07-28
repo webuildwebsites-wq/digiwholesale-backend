@@ -32,7 +32,7 @@ export const createReturnRefund = async (req, res) => {
       return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid Order ID");
     }
 
-    const bulkOrder = await BulkOrder.findById(OrderId);
+    const bulkOrder = await BulkOrder.findOne({ _id: OrderId, tenantId: req.user.tenantId });
     if (!bulkOrder) {
       return sendErrorResponse(res, 404, "ORDER_NOT_FOUND", "Order not found");
     }
@@ -199,6 +199,7 @@ export const getReturnRefundById = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOne({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!returnRefund) {
@@ -221,7 +222,7 @@ export const updateReturnRefundStatus = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Status must be one of: ${allowed.join(", ")}`);
     }
 
-    const returnRefund = await ReturnRefund.findById(req.params.id);
+    const returnRefund = await ReturnRefund.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
     if (!returnRefund) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Return/Refund request not found");
     }
@@ -237,7 +238,7 @@ export const updateReturnRefundStatus = async (req, res) => {
       if (productIds.length > 0) {
         const approvedStatus = status === "Refund_Approved" ? "REFUNDED" : "RETURNED";
         const bulkOrder = orderNumber
-          ? await BulkOrder.findOne({ "orders.orderNumber": orderNumber })
+          ? await BulkOrder.findOne({ "orders.orderNumber": orderNumber, tenantId: req.user.tenantId })
           : null;
 
         if (bulkOrder) {
@@ -259,7 +260,7 @@ export const updateReturnRefundStatus = async (req, res) => {
 
       if (productIds.length > 0) {
         const bulkOrder = orderNumber
-          ? await BulkOrder.findOne({ "orders.orderNumber": orderNumber })
+          ? await BulkOrder.findOne({ "orders.orderNumber": orderNumber, tenantId: req.user.tenantId })
           : null;
 
         if (bulkOrder) {
@@ -287,6 +288,7 @@ export const updateReturnRefund = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOne({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!returnRefund) {
@@ -320,6 +322,7 @@ export const deleteReturnRefund = async (req, res) => {
   try {
     const returnRefund = await ReturnRefund.findOneAndDelete({
       _id: req.params.id,
+      tenantId: req.user.tenantId,
     });
 
     if (!returnRefund) {

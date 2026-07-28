@@ -118,12 +118,12 @@ const buildInvoiceData = (bulkOrder, customer) => {
     };
 };
 
-export const generateAndStoreChallan = async (orderId) => {
+export const generateAndStoreChallan = async (orderId, tenantId) => {
     try {
         const [bulkOrder, customerDoc] = await Promise.all([
-            BulkOrder.findById(orderId).lean(),
-            BulkOrder.findById(orderId).lean().then(bo =>
-                bo ? Customer.findById(bo.customer.customerId).lean() : null
+            BulkOrder.findOne({ _id: orderId, tenantId }).lean(),
+            BulkOrder.findOne({ _id: orderId, tenantId }).lean().then(bo =>
+                bo ? Customer.findOne({ _id: bo.customer.customerId, tenantId }).lean() : null
             ),
         ]);
 
@@ -135,7 +135,7 @@ export const generateAndStoreChallan = async (orderId) => {
         const fileName   = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
         const url        = await uploadPDFToGCS(pdfBuffer, fileName);
 
-        await BulkOrder.findByIdAndUpdate(orderId, {
+        await BulkOrder.findOneAndUpdate({ _id: orderId, tenantId }, {
             challanUrl:   url,
             challanGenAt: new Date(),
         });
@@ -148,18 +148,18 @@ export const generateAndStoreChallan = async (orderId) => {
     }
 };
 
-export const generateAndStoreInvoice = async (orderId) => {
+export const generateAndStoreInvoice = async (orderId, tenantId) => {
     try {
-        const bulkOrder = await BulkOrder.findById(orderId).lean();
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId }).lean();
         if (!bulkOrder) throw new Error("BulkOrder not found");
 
-        const customer   = await Customer.findById(bulkOrder.customer.customerId).lean();
+        const customer   = await Customer.findOne({ _id: bulkOrder.customer.customerId, tenantId }).lean();
         const invoiceHTML = generatedorderInvoice(buildInvoiceData(bulkOrder, customer));
         const pdfBuffer  = await generatePDF(invoiceHTML);
         const fileName   = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
         const url        = await uploadPDFToGCS(pdfBuffer, fileName);
 
-        await BulkOrder.findByIdAndUpdate(orderId, {
+        await BulkOrder.findOneAndUpdate({ _id: orderId, tenantId }, {
             invoiceUrl:   url,
             invoiceGenAt: new Date(),
         });
@@ -172,8 +172,8 @@ export const generateAndStoreInvoice = async (orderId) => {
     }
 };
 
-export const invalidatePDFs = async (orderId) => {
-    await BulkOrder.findByIdAndUpdate(orderId, {
+export const invalidatePDFs = async (orderId, tenantId) => {
+    await BulkOrder.findOneAndUpdate({ _id: orderId, ...(tenantId ? { tenantId } : {}) }, {
         invoiceUrl:   null,
         challanUrl:   null,
         invoiceGenAt: null,

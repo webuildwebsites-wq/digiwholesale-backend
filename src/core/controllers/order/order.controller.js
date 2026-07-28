@@ -68,7 +68,7 @@ export const deleteOrder = async (req, res) => {
 
 export const updateDraftOrder = async (req, res) => {
   try {
-    const order = await updateDraftOrderService(req.params.id, req.body);
+    const order = await updateDraftOrderService(req.params.id, req.body, req.user.tenantId);
     return sendSuccessResponse(res, 200, order, "Draft order updated successfully");
   } catch (err) {
     return handleError(res, err);

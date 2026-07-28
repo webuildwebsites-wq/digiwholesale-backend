@@ -34,7 +34,7 @@ export const createExchange = async (req, res) => {
       return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid Order ID");
     }
 
-    const bulkOrder = await BulkOrder.findById(OrderId);
+    const bulkOrder = await BulkOrder.findOne({ _id: OrderId, tenantId: req.user.tenantId });
     if (!bulkOrder) {
       return sendErrorResponse(res, 404, "ORDER_NOT_FOUND", "Order not found");
     }
@@ -147,7 +147,7 @@ export const createExchange = async (req, res) => {
         };
       });
 
-      const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
+      const customer = await Customer.findOne({ _id: bulkOrder.customer.customerId, tenantId: req.user.tenantId }).lean();
 
       const newBulkOrder = await BulkOrder.create({
         customer: {
@@ -165,6 +165,7 @@ export const createExchange = async (req, res) => {
             status:      "Submitted",
           },
         ],
+        tenantId: req.user.tenantId,
       });
 
       newBulkOrderId = newBulkOrder._id;
@@ -198,7 +199,7 @@ export const createExchange = async (req, res) => {
 
 export const selectNewProduct = async (req, res) => {
   try {
-    const exchange = await Exchange.findById(req.params.id);
+    const exchange = await Exchange.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
     if (!exchange) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Exchange request not found");
     }
@@ -212,7 +213,7 @@ export const selectNewProduct = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "productId is required");
     }
 
-    const product = await DigiProduct.findById(productId);
+    const product = await DigiProduct.findOne({ _id: productId, tenantId: req.user.tenantId });
     if (!product) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Product not found in inventory");
     }
@@ -282,7 +283,7 @@ export const getAllExchanges = async (req, res) => {
 
 export const getExchangeById = async (req, res) => {
   try {
-    const exchange = await Exchange.findById(req.params.id);
+    const exchange = await Exchange.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
     if (!exchange) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Exchange request not found");
     }
@@ -301,7 +302,7 @@ export const updateExchangeStatus = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Status must be one of: ${allowed.join(", ")}`);
     }
 
-    const exchange = await Exchange.findById(req.params.id);
+    const exchange = await Exchange.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
     if (!exchange) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Exchange request not found");
     }
@@ -311,7 +312,7 @@ export const updateExchangeStatus = async (req, res) => {
     await exchange.save();
 
     if (status === "Approved") {
-      const bulkOrder = await BulkOrder.findById(exchange.OrderId);
+      const bulkOrder = await BulkOrder.findOne({ _id: exchange.OrderId, tenantId: req.user.tenantId });
       if (bulkOrder) {
         const productIds = exchange.items.map(i => i.productId?.toString()).filter(Boolean);
         for (const order of bulkOrder.orders) {
@@ -326,7 +327,7 @@ export const updateExchangeStatus = async (req, res) => {
     }
 
     if (status === "Rejected") {
-      const bulkOrder = await BulkOrder.findById(exchange.OrderId);
+      const bulkOrder = await BulkOrder.findOne({ _id: exchange.OrderId, tenantId: req.user.tenantId });
       if (bulkOrder) {
         const productIds = exchange.items.map(i => i.productId?.toString()).filter(Boolean);
         for (const order of bulkOrder.orders) {
@@ -349,7 +350,7 @@ export const updateExchangeStatus = async (req, res) => {
 
 export const updateExchange = async (req, res) => {
   try {
-    const exchange = await Exchange.findById(req.params.id);
+    const exchange = await Exchange.findOne({ _id: req.params.id, tenantId: req.user.tenantId });
     if (!exchange) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Exchange request not found");
     }
@@ -379,7 +380,7 @@ export const updateExchange = async (req, res) => {
 
 export const deleteExchange = async (req, res) => {
   try {
-    const exchange = await Exchange.findByIdAndDelete(req.params.id);
+    const exchange = await Exchange.findOneAndDelete({ _id: req.params.id, tenantId: req.user.tenantId });
     if (!exchange) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Exchange request not found");
     }

@@ -4,13 +4,16 @@ import { sendErrorResponse, sendTokenResponse } from "../../../../Utils/response
 
 export async function verifyCustomerEmail(req, res) {
   try {
-    const { email, Emailotp } = req.body;
+    const { email, Emailotp, tenantId } = req.body;
     
     if(!email || !Emailotp){
       return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'All required fields must be provided');
     }
 
-    const user = await Customer.findOne({ email: email });
+    const query = { email };
+    if (tenantId) query.tenantId = tenantId;
+
+    const user = await Customer.findOne(query);
     if (!user) {
       return sendErrorResponse(res, 401, 'INVALID_EMAIL', 'Customer not found');
     }

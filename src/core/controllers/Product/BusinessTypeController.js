@@ -9,7 +9,7 @@ export const createBusinessType = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Business type name is required");
     }
 
-    const existingBusinessType = await BusinessType.findOne({ name: name.trim() });
+    const existingBusinessType = await BusinessType.findOne({ name: name.trim(), tenantId: req.user.tenantId });
     if (existingBusinessType) {
       return sendErrorResponse(res, 409, "DUPLICATE_ERROR", "Business type already exists");
     }
@@ -18,6 +18,7 @@ export const createBusinessType = async (req, res) => {
       name: name.trim(),
       description,
       createdBy: req.user.id,
+      tenantId: req.user.tenantId,
     });
 
     return sendSuccessResponse(res, 201, businessType, "Business type created successfully");
@@ -30,8 +31,8 @@ export const createBusinessType = async (req, res) => {
 export const getAllBusinessTypes = async (req, res) => {
   try {
     const { isActive } = req.query;
-    
-    const filter = {};
+
+    const filter = { tenantId: req.user.tenantId };
     if (isActive !== undefined) {
       filter.isActive = isActive === 'true';
     }
@@ -49,7 +50,7 @@ export const getBusinessTypeById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const businessType = await BusinessType.findById(id);
+    const businessType = await BusinessType.findOne({ _id: id, tenantId: req.user.tenantId });
 
     if (!businessType) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Business type not found");
@@ -67,13 +68,13 @@ export const updateBusinessType = async (req, res) => {
     const { id } = req.params;
     const { name, description, isActive } = req.body;
 
-    const businessType = await BusinessType.findById(id);
+    const businessType = await BusinessType.findOne({ _id: id, tenantId: req.user.tenantId });
     if (!businessType) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Business type not found");
     }
 
     if (name && name.trim() !== businessType.name) {
-      const existingBusinessType = await BusinessType.findOne({ name: name.trim() });
+      const existingBusinessType = await BusinessType.findOne({ name: name.trim(), tenantId: req.user.tenantId });
       if (existingBusinessType) {
         return sendErrorResponse(res, 409, "DUPLICATE_ERROR", "Business type name already exists");
       }
@@ -96,12 +97,10 @@ export const deleteBusinessType = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const businessType = await BusinessType.findById(id);
+    const businessType = await BusinessType.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
     if (!businessType) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Business type not found");
     }
-
-    await BusinessType.findByIdAndDelete(id);
 
     return sendSuccessResponse(res, 200, null, "Business type deleted successfully");
   } catch (error) {

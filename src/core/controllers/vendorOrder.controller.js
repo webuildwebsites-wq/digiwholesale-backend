@@ -129,7 +129,7 @@ export const createVendorOrder = async (req, res) => {
     const pdfUrl = await uploadToGCSPDF(pdfBuffer, fileName);
 
     await VendorOrder.updateOne(
-      { _id: order._id },
+      { _id: order._id, tenantId: req.user.tenantId },
       {
         invoiceUrl: pdfUrl,
         invoiceGeneratedAt: new Date(),

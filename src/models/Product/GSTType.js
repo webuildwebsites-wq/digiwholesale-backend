@@ -22,6 +22,12 @@ const gstTypeSchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -42,7 +48,7 @@ const gstTypeSchema = new mongoose.Schema(
   }
 );
 
-gstTypeSchema.index({ name: 1 }, { unique: true });
+gstTypeSchema.index({ name: 1, tenantId: 1 }, { unique: true });
 gstTypeSchema.index({ isActive: 1 });
 
 export default mongoose.model("GSTType", gstTypeSchema);

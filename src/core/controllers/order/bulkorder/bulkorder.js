@@ -308,7 +308,7 @@ export const createBulkOrder = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "orders array is required and must not be empty");
         }
 
-        const customer = await Customer.findById(customerId);
+        const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
 
         if (!customer) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Customer not found");
@@ -469,7 +469,7 @@ export const createBulkOrder = async (req, res) => {
             customerShipToBranchName: shipToBranchName,
         };
 
-        const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders });
+        const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders, tenantId: req.user.tenantId });
 
         sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
             console.error("Vendor email notification error:", err.message)
@@ -487,10 +487,10 @@ export const createBulkOrder = async (req, res) => {
                 orderNumber:  bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
             }).catch(err => console.error("Low stock alert error:", err.message));
 
-            generateAndStoreChallan(bulkOrder._id.toString()).catch(err =>
+            generateAndStoreChallan(bulkOrder._id.toString(), req.user.tenantId).catch(err =>
                 console.error("Pre-generate challan error:", err.message)
             );
-            generateAndStoreInvoice(bulkOrder._id.toString()).catch(err =>
+            generateAndStoreInvoice(bulkOrder._id.toString(), req.user.tenantId).catch(err =>
                 console.error("Pre-generate invoice error:", err.message)
             );
         }
@@ -512,7 +512,7 @@ export const getBulkOrderChallan = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
         }
 
-        const bulkOrder = await BulkOrder.findById(orderId).select("challanUrl orders customer").lean();
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("challanUrl orders customer").lean();
         if (!bulkOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
         }
@@ -529,7 +529,7 @@ export const getBulkOrderChallan = async (req, res) => {
             return res.end(buffer);
         }
 
-        const { url, buffer } = await generateAndStoreChallan(orderId);
+        const { url, buffer } = await generateAndStoreChallan(orderId, req.user.tenantId);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Length", buffer.length);
@@ -548,7 +548,7 @@ export const getBulkOrderInvoice = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
         }
 
-        const bulkOrder = await BulkOrder.findById(orderId).select("invoiceUrl orders customer").lean();
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("invoiceUrl orders customer").lean();
         if (!bulkOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
         }
@@ -565,7 +565,7 @@ export const getBulkOrderInvoice = async (req, res) => {
             return res.end(buffer);
         }
 
-        const { url, buffer } = await generateAndStoreInvoice(orderId);
+        const { url, buffer } = await generateAndStoreInvoice(orderId, req.user.tenantId);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Length", buffer.length);
@@ -607,7 +607,7 @@ export const updateOrderStatus = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_STATUS", `Status must be one of: ${VALID_STATUSES.join(", ")}`);
         }
 
-        const bulkOrder = await BulkOrder.findById(orderId);
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId });
         if (!bulkOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
         }
@@ -644,7 +644,7 @@ export const updateOrderStatus = async (req, res) => {
 
         await bulkOrder.save();
 
-        invalidatePDFs(orderId).catch(err => console.error("PDF invalidation error:", err.message));
+        invalidatePDFs(orderId, req.user.tenantId).catch(err => console.error("PDF invalidation error:", err.message));
 
         return sendSuccessResponse(res, 200, { bulkOrder }, `Order status updated to ${status}`);
     } catch (error) {
@@ -662,7 +662,7 @@ export const updateBulkDraftOrder = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ID", "Invalid order ID");
         }
 
-        const bulkOrder = await BulkOrder.findById(id);
+        const bulkOrder = await BulkOrder.findOne({ _id: id, tenantId: req.user.tenantId });
         if (!bulkOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Order not found");
         }
@@ -673,7 +673,7 @@ export const updateBulkDraftOrder = async (req, res) => {
         }
 
         if (customerShipToId) {
-            const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
+            const customer = await Customer.findOne({ _id: bulkOrder.customer.customerId, tenantId: req.user.tenantId }).lean();
             if (customer) {
                 const shipTo = customer.customerShipToDetails?.find(
                     s => s._id.toString() === customerShipToId.toString()
@@ -731,10 +731,10 @@ export const updateBulkDraftOrder = async (req, res) => {
 
         await bulkOrder.save();
 
-        invalidatePDFs(id).catch(err => console.error("PDF invalidation error:", err.message));
+        invalidatePDFs(id, req.user.tenantId).catch(err => console.error("PDF invalidation error:", err.message));
 
         if (submitNow) {
-            const customer = await Customer.findById(bulkOrder.customer.customerId).lean();
+            const customer = await Customer.findOne({ _id: bulkOrder.customer.customerId, tenantId: req.user.tenantId }).lean();
             if (customer) {
                 handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
                     console.error("Billing notification error:", err.message)

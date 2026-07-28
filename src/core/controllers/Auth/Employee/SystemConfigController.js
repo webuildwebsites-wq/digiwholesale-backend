@@ -33,7 +33,7 @@ export const createConfig = async (req, res) => {
 
     const formattedValue = value.trim().toUpperCase();
 
-    let config = await SystemConfig.findOne({ configType });
+    let config = await SystemConfig.findOne({ configType, tenantId: req.user.tenantId });
 
     if (!config) {
       config = await SystemConfig.create({

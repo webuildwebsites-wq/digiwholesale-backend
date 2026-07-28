@@ -500,9 +500,10 @@ export const updateDraftCustomer = async (req, res) => {
     // Check if email is being changed and if it already exists
     if (updateData?.businessEmail && updateData?.businessEmail.toLowerCase() !== draftCustomer.businessEmail) {
       const [existingCustomer, existingDraft] = await Promise.all([
-        Customer.findOne({ businessEmail: updateData?.businessEmail.toLowerCase() }),
+        Customer.findOne({ businessEmail: updateData?.businessEmail.toLowerCase(), tenantId: req.user.tenantId }),
         customerDraftSchema.findOne({
           businessEmail: updateData?.businessEmail.toLowerCase(),
+          tenantId: req.user.tenantId,
           _id: { $ne: draftId }
         })
       ]);

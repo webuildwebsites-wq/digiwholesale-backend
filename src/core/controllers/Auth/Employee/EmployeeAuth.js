@@ -9,19 +9,25 @@ dotenv.config();
 
 export const employeeLogin = async (req, res) => {
   try {
-    const { loginId, password } = req.body;
+    const { loginId, password, tenantId } = req.body;
     if (!loginId || !password) {
       return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'Please provide login ID (username, email, or employee code) and password');
     }
 
-    const user = await employeeSchema.findOne({ 
+    const query = {
       $or: [
         { username: loginId },
         { email: loginId.toLowerCase() },
         { employeeCode: loginId.toUpperCase() }
       ],
-      isActive: true 
-    })
+      isActive: true,
+    };
+
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const user = await employeeSchema.findOne(query)
     .select('+password')
     .populate('EmployeeType', 'name')
     .populate('createdBy supervisor', 'username employeeName email');
@@ -57,13 +63,16 @@ export const employeeLogin = async (req, res) => {
 
 export const employeeForgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, tenantId } = req.body;
 
     if (!email) {
       return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'Please provide email address');
     }
 
-    const user = await employeeSchema.findOne({ email: email.toLowerCase(), isActive: true }).select('+password');
+    const query = { email: email.toLowerCase(), isActive: true };
+    if (tenantId) query.tenantId = tenantId;
+
+    const user = await employeeSchema.findOne(query).select('+password');
 
     if (!user) {
       return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'No active account found with that email address');

@@ -28,6 +28,12 @@ const courierTimeSchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -48,7 +54,7 @@ const courierTimeSchema = new mongoose.Schema(
   }
 );
 
-courierTimeSchema.index({ location: 1, time: 1 }, { unique: true });
+courierTimeSchema.index({ location: 1, time: 1, tenantId: 1 }, { unique: true });
 courierTimeSchema.index({ isActive: 1 });
 
 export default mongoose.model("CourierTime", courierTimeSchema);

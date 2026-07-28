@@ -15,7 +15,6 @@ import SpecificLab from "../../../models/Product/SpecificLab.js";
 import { sendErrorResponse, sendSuccessResponse } from "../../../Utils/response/responseHandler.js";
 import mongoose from "mongoose";
 
-// Generic CRUD functions
 const createGenericItem = (Model, itemName) => async (req, res) => {
   try {
     const { name, description, days, location, time } = req.body;
@@ -32,11 +31,11 @@ const createGenericItem = (Model, itemName) => async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", `${itemName} name is required`);
     }
 
-    const query = Model.modelName === 'CreditDay' 
-      ? { days } 
+    const query = Model.modelName === 'CreditDay'
+      ? { days, tenantId: req.user.tenantId }
       : Model.modelName === 'CourierTime'
-      ? { location: location.trim(), time: time.trim() }
-      : { name: name.trim() };
+      ? { location: location.trim(), time: time.trim(), tenantId: req.user.tenantId }
+      : { name: name.trim(), tenantId: req.user.tenantId };
 
     const existingItem = await Model.findOne(query);
     if (existingItem) {
@@ -44,10 +43,10 @@ const createGenericItem = (Model, itemName) => async (req, res) => {
     }
 
     const itemData = Model.modelName === 'CreditDay'
-      ? { days, description, createdBy: req.user.id }
+      ? { days, description, createdBy: req.user.id, tenantId: req.user.tenantId }
       : Model.modelName === 'CourierTime'
-      ? { location: location.trim(), time: time.trim(), description, createdBy: req.user.id }
-      : { name: name.trim(), description, createdBy: req.user.id };
+      ? { location: location.trim(), time: time.trim(), description, createdBy: req.user.id, tenantId: req.user.tenantId }
+      : { name: name.trim(), description, createdBy: req.user.id, tenantId: req.user.tenantId };
 
     const item = await Model.create(itemData);
 
@@ -61,8 +60,8 @@ const createGenericItem = (Model, itemName) => async (req, res) => {
 const getAllGenericItems = (Model, itemName) => async (req, res) => {
   try {
     const { isActive } = req.query;
-    
-    const filter = {};
+
+    const filter = { tenantId: req.user.tenantId };
     if (isActive !== undefined) {
       filter.isActive = isActive === 'true';
     }
@@ -81,7 +80,7 @@ const getGenericItemById = (Model, itemName) => async (req, res) => {
   try {
     const { id } = req.params;
 
-    const item = await Model.findById(id);
+    const item = await Model.findOne({ _id: id, tenantId: req.user.tenantId });
 
     if (!item) {
       return sendErrorResponse(res, 404, "NOT_FOUND", `${itemName} not found`);
@@ -99,13 +98,13 @@ const updateGenericItem = (Model, itemName) => async (req, res) => {
     const { id } = req.params;
     const { name, description, isActive, days, location, time } = req.body;
 
-    const item = await Model.findById(id);
+    const item = await Model.findOne({ _id: id, tenantId: req.user.tenantId });
     if (!item) {
       return sendErrorResponse(res, 404, "NOT_FOUND", `${itemName} not found`);
     }
 
     if (Model.modelName === 'CreditDay' && days !== undefined && days !== item.days) {
-      const existingItem = await Model.findOne({ days });
+      const existingItem = await Model.findOne({ days, tenantId: req.user.tenantId });
       if (existingItem) {
         return sendErrorResponse(res, 409, "DUPLICATE_ERROR", `${itemName} days already exists`);
       }
@@ -114,9 +113,10 @@ const updateGenericItem = (Model, itemName) => async (req, res) => {
 
     if (Model.modelName === 'CourierTime') {
       if (location && location.trim() !== item.location || time && time.trim() !== item.time) {
-        const existingItem = await Model.findOne({ 
-          location: location ? location.trim() : item.location, 
+        const existingItem = await Model.findOne({
+          location: location ? location.trim() : item.location,
           time: time ? time.trim() : item.time,
+          tenantId: req.user.tenantId,
           _id: { $ne: id }
         });
         if (existingItem) {
@@ -128,7 +128,7 @@ const updateGenericItem = (Model, itemName) => async (req, res) => {
     }
 
     if (Model.modelName !== 'CreditDay' && Model.modelName !== 'CourierTime' && name && name.trim() !== item.name) {
-      const existingItem = await Model.findOne({ name: name.trim() });
+      const existingItem = await Model.findOne({ name: name.trim(), tenantId: req.user.tenantId });
       if (existingItem) {
         return sendErrorResponse(res, 409, "DUPLICATE_ERROR", `${itemName} name already exists`);
       }
@@ -151,12 +151,10 @@ const deleteGenericItem = (Model, itemName) => async (req, res) => {
   try {
     const { id } = req.params;
 
-    const item = await Model.findById(id);
+    const item = await Model.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
     if (!item) {
       return sendErrorResponse(res, 404, "NOT_FOUND", `${itemName} not found`);
     }
-
-    await Model.findByIdAndDelete(id);
 
     return sendSuccessResponse(res, 200, null, `${itemName} deleted successfully`);
   } catch (error) {
@@ -251,7 +249,7 @@ export const createBrand = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Brand name is required");
     }
 
-    const existingBrand = await Brand.findOne({ name: name.toUpperCase() });
+    const existingBrand = await Brand.findOne({ name: name.toUpperCase(), tenantId: req.user.tenantId });
     if (existingBrand) {
       return sendErrorResponse(res, 409, "DUPLICATE_ERROR", "Brand already exists");
     }
@@ -260,6 +258,7 @@ export const createBrand = async (req, res) => {
       name: name.toUpperCase(),
       description,
       createdBy: req.user.id,
+      tenantId: req.user.tenantId,
     });
 
     return sendSuccessResponse(res, 201, brand, "Brand created successfully");
@@ -272,18 +271,18 @@ export const createBrand = async (req, res) => {
 export const getAllBrands = async (req, res) => {
   try {
     const { isActive, includeCategories } = req.query;
-    
-    const filter = {};
+
+    const filter = { tenantId: req.user.tenantId };
     if (isActive !== undefined) {
       filter.isActive = isActive === 'true';
     }
 
     let query = Brand.find(filter).sort({ name: 1 });
-    
+
     if (includeCategories === 'true') {
       query = query.populate({
         path: 'categories',
-        match: { isActive: true },
+        match: { isActive: true, tenantId: req.user.tenantId },
         select: 'name description isActive'
       });
     }
@@ -301,8 +300,9 @@ export const getBrandById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const brand = await Brand.findById(id).populate({
+    const brand = await Brand.findOne({ _id: id, tenantId: req.user.tenantId }).populate({
       path: 'categories',
+      match: { tenantId: req.user.tenantId },
       select: 'name description isActive'
     });
 
@@ -322,13 +322,13 @@ export const updateBrand = async (req, res) => {
     const { id } = req.params;
     const { name, description, isActive } = req.body;
 
-    const brand = await Brand.findById(id);
+    const brand = await Brand.findOne({ _id: id, tenantId: req.user.tenantId });
     if (!brand) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Brand not found");
     }
 
     if (name && name.toUpperCase() !== brand.name) {
-      const existingBrand = await Brand.findOne({ name: name.toUpperCase() });
+      const existingBrand = await Brand.findOne({ name: name.toUpperCase(), tenantId: req.user.tenantId });
       if (existingBrand) {
         return sendErrorResponse(res, 409, "DUPLICATE_ERROR", "Brand name already exists");
       }
@@ -351,22 +351,22 @@ export const deleteBrand = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const brand = await Brand.findById(id);
+    const brand = await Brand.findOne({ _id: id, tenantId: req.user.tenantId });
     if (!brand) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Brand not found");
     }
 
-    const categoryCount = await Category.countDocuments({ brand: id });
+    const categoryCount = await Category.countDocuments({ brand: id, tenantId: req.user.tenantId });
     if (categoryCount > 0) {
       return sendErrorResponse(
-        res, 
-        400, 
+        res,
+        400,
         "VALIDATION_ERROR",
         `Cannot delete brand. It has ${categoryCount} associated categories. Please delete or reassign categories first.`
       );
     }
 
-    await Brand.findByIdAndDelete(id);
+    await Brand.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
 
     return sendSuccessResponse(res, 200, null, "Brand deleted successfully");
   } catch (error) {
@@ -379,7 +379,7 @@ export const deleteBrand = async (req, res) => {
 export const createCategory = async (req, res) => {
   try {
     const { name, brand, description } = req.body;
-    
+
     if (!name || !brand) {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Category name and brand are required");
     }
@@ -388,12 +388,12 @@ export const createCategory = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Invalid brand format");
     }
 
-    const brandExists = await Brand.findById(brand);
+    const brandExists = await Brand.findOne({ _id: brand, tenantId: req.user.tenantId });
     if (!brandExists) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Brand not found");
     }
 
-    const existingCategory = await Category.findOne({ name, brand });
+    const existingCategory = await Category.findOne({ name, brand, tenantId: req.user.tenantId });
     if (existingCategory) {
       return sendErrorResponse(res, 409, "DUPLICATE_ERROR", "Category already exists for this brand");
     }
@@ -403,9 +403,10 @@ export const createCategory = async (req, res) => {
       brand,
       description,
       createdBy: req.user.id,
+      tenantId: req.user.tenantId,
     });
 
-    const populatedCategory = await Category.findById(category._id).populate('brand', 'name');
+    const populatedCategory = await Category.findOne({ _id: category._id, tenantId: req.user.tenantId }).populate('brand', 'name');
 
     return sendSuccessResponse(res, 201, populatedCategory, "Category created successfully");
   } catch (error) {
@@ -417,8 +418,8 @@ export const createCategory = async (req, res) => {
 export const getAllCategories = async (req, res) => {
   try {
     const { brand, isActive } = req.query;
-    
-    const filter = {};
+
+    const filter = { tenantId: req.user.tenantId };
     if (brand) filter.brand = brand;
     if (isActive !== undefined) filter.isActive = isActive === 'true';
 
@@ -434,18 +435,19 @@ export const getAllCategories = async (req, res) => {
 export const getCategoriesByBrand = async (req, res) => {
   try {
     const { brandId } = req.params;
-    const brand = await Brand.findById(brandId);
+
+    const brand = await Brand.findOne({ _id: brandId, tenantId: req.user.tenantId });
     if (!brand) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Brand not found");
     }
 
-    const categories = await Category.find({ brand: brandId, isActive: true })
+    const categories = await Category.find({ brand: brandId, isActive: true, tenantId: req.user.tenantId })
       .select('name description')
       .sort({ name: 1 });
 
     return sendSuccessResponse(
-      res, 
-      200, 
+      res,
+      200,
       { brand: brand.name, categories },
       "Categories retrieved successfully"
     );
@@ -459,7 +461,7 @@ export const getCategoryById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const category = await Category.findById(id).populate('brand', 'name description');
+    const category = await Category.findOne({ _id: id, tenantId: req.user.tenantId }).populate('brand', 'name description');
 
     if (!category) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Category not found");
@@ -477,21 +479,24 @@ export const updateCategory = async (req, res) => {
     const { id } = req.params;
     const { name, brand, description, isActive } = req.body;
 
-    const category = await Category.findById(id);
+    const category = await Category.findOne({ _id: id, tenantId: req.user.tenantId });
     if (!category) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Category not found");
     }
+
     if (brand && brand !== category.brand.toString()) {
-      const brandExists = await Brand.findById(brand);
+      const brandExists = await Brand.findOne({ _id: brand, tenantId: req.user.tenantId });
       if (!brandExists) {
         return sendErrorResponse(res, 404, "NOT_FOUND", "Brand not found");
       }
       category.brand = brand;
     }
+
     if (name && name !== category.name) {
-      const existingCategory = await Category.findOne({ 
-        name, 
+      const existingCategory = await Category.findOne({
+        name,
         brand: category.brand,
+        tenantId: req.user.tenantId,
         _id: { $ne: id }
       });
       if (existingCategory) {
@@ -505,7 +510,7 @@ export const updateCategory = async (req, res) => {
 
     await category.save();
 
-    const updatedCategory = await Category.findById(id).populate('brand', 'name');
+    const updatedCategory = await Category.findOne({ _id: id, tenantId: req.user.tenantId }).populate('brand', 'name');
 
     return sendSuccessResponse(res, 200, updatedCategory, "Category updated successfully");
   } catch (error) {
@@ -518,12 +523,10 @@ export const deleteCategory = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const category = await Category.findById(id);
+    const category = await Category.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
     if (!category) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Category not found");
     }
-
-    await Category.findByIdAndDelete(id);
 
     return sendSuccessResponse(res, 200, null, "Category deleted successfully");
   } catch (error) {

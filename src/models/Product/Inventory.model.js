@@ -63,6 +63,12 @@ const inventorySchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { timestamps: true }
 );

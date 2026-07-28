@@ -33,7 +33,7 @@ export const getCustomerProfile = async (req, res) => {
 export const getCustomerById = async (req, res) => {
   try {
     const { customerId } = req.params;
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
 
     if (!customer) {
       return sendErrorResponse(res, 404, "USER_NOT_FOUND", "Customer not found");
@@ -56,7 +56,7 @@ export const getCustomerById = async (req, res) => {
 export const getDraftCustomers = async (req, res) => {
   try {
     const { customerId } = req.params;
-    const customer = await CustomerDraft.findById(customerId);
+    const customer = await CustomerDraft.findOne({ _id: customerId, tenantId: req.user.tenantId });
 
     if (!customer) {
       return sendErrorResponse(res, 404, "USER_NOT_FOUND", "Customer not found");

@@ -22,6 +22,12 @@ const specificLabSchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -42,7 +48,7 @@ const specificLabSchema = new mongoose.Schema(
   }
 );
 
-specificLabSchema.index({ name: 1 }, { unique: true });
+specificLabSchema.index({ name: 1, tenantId: 1 }, { unique: true });
 specificLabSchema.index({ isActive: 1 });
 
 export default mongoose.model("SpecificLab", specificLabSchema);

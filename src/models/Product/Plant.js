@@ -22,6 +22,12 @@ const plantSchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -42,7 +48,7 @@ const plantSchema = new mongoose.Schema(
   }
 );
 
-plantSchema.index({ name: 1 }, { unique: true });
+plantSchema.index({ name: 1, tenantId: 1 }, { unique: true });
 plantSchema.index({ isActive: 1 });
 
 export default mongoose.model("Plant", plantSchema);

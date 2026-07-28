@@ -237,7 +237,7 @@ export const createPurchaseQC = async (req, res) => {
         if (passedItems.length > 0) {
             const bulkOps = passedItems.map(({ productId, qty }) => ({
                 updateOne: {
-                    filter: { _id: productId },
+                    filter: { _id: productId, tenantId: req.user.tenantId },
                     update: { $inc: { qty } },
                 },
             }));
@@ -255,6 +255,7 @@ export const createPurchaseQC = async (req, res) => {
                 status:        "Pending",
                 vendorNotified: false,
                 createdBy:     req.user._id,
+                tenantId:      req.user.tenantId,
             });
 
             if (notifyVendor && vendor) {
@@ -296,11 +297,14 @@ export const createPurchaseQC = async (req, res) => {
                     }).catch(err => console.error("QC WhatsApp error:", err.message));
                 }
 
-                await PurchaseReturn.findByIdAndUpdate(purchaseReturn._id, {
-                    vendorNotified:   true,
-                    vendorNotifiedAt: new Date(),
-                    status:           "VendorNotified",
-                });
+                await PurchaseReturn.findOneAndUpdate(
+                    { _id: purchaseReturn._id, tenantId: req.user.tenantId },
+                    {
+                        vendorNotified:   true,
+                        vendorNotifiedAt: new Date(),
+                        status:           "VendorNotified",
+                    }
+                );
             }
         }
 
@@ -382,6 +386,7 @@ export const getQCFailedItemsReport = async (req, res) => {
 
         const matchStage = {
             "items.qcResult": { $in: ["FAILED", "PARTIAL"] },
+            tenantId: req.user.tenantId,
         };
 
         if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {

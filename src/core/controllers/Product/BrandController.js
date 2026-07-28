@@ -10,7 +10,7 @@ export const createBrand = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Brand name is required");
     }
 
-    const existingBrand = await Brand.findOne({ name: name.toUpperCase() });
+    const existingBrand = await Brand.findOne({ name: name.toUpperCase(), tenantId: req.user.tenantId });
     if (existingBrand) {
       return sendErrorResponse(res, 409, "DUPLICATE_ERROR", "Brand already exists");
     }
@@ -19,6 +19,7 @@ export const createBrand = async (req, res) => {
       name: name.toUpperCase(),
       description,
       createdBy: req.user.id,
+      tenantId: req.user.tenantId,
     });
 
     return sendSuccessResponse(res, 201, brand, "Brand created successfully");
@@ -31,18 +32,18 @@ export const createBrand = async (req, res) => {
 export const getAllBrands = async (req, res) => {
   try {
     const { isActive, includeCategories } = req.query;
-    
-    const filter = {};
+
+    const filter = { tenantId: req.user.tenantId };
     if (isActive !== undefined) {
       filter.isActive = isActive === 'true';
     }
 
     let query = Brand.find(filter).sort({ name: 1 });
-    
+
     if (includeCategories === 'true') {
       query = query.populate({
         path: 'categories',
-        match: { isActive: true },
+        match: { isActive: true, tenantId: req.user.tenantId },
         select: 'name description isActive'
       });
     }
@@ -60,8 +61,9 @@ export const getBrandById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const brand = await Brand.findById(id).populate({
+    const brand = await Brand.findOne({ _id: id, tenantId: req.user.tenantId }).populate({
       path: 'categories',
+      match: { tenantId: req.user.tenantId },
       select: 'name description isActive'
     });
 
@@ -81,13 +83,13 @@ export const updateBrand = async (req, res) => {
     const { id } = req.params;
     const { name, description, isActive } = req.body;
 
-    const brand = await Brand.findById(id);
+    const brand = await Brand.findOne({ _id: id, tenantId: req.user.tenantId });
     if (!brand) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Brand not found");
     }
 
     if (name && name.toUpperCase() !== brand.name) {
-      const existingBrand = await Brand.findOne({ name: name.toUpperCase() });
+      const existingBrand = await Brand.findOne({ name: name.toUpperCase(), tenantId: req.user.tenantId });
       if (existingBrand) {
         return sendErrorResponse(res, 409, "DUPLICATE_ERROR", "Brand name already exists");
       }
@@ -110,23 +112,22 @@ export const deleteBrand = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const brand = await Brand.findById(id);
+    const brand = await Brand.findOne({ _id: id, tenantId: req.user.tenantId });
     if (!brand) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Brand not found");
     }
 
-    // Check if brand has categories
-    const categoryCount = await Category.countDocuments({ brand: id });
+    const categoryCount = await Category.countDocuments({ brand: id, tenantId: req.user.tenantId });
     if (categoryCount > 0) {
       return sendErrorResponse(
-        res, 
-        400, 
+        res,
+        400,
         "VALIDATION_ERROR",
         `Cannot delete brand. It has ${categoryCount} associated categories. Please delete or reassign categories first.`
       );
     }
 
-    await Brand.findByIdAndDelete(id);
+    await Brand.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
 
     return sendSuccessResponse(res, 200, null, "Brand deleted successfully");
   } catch (error) {

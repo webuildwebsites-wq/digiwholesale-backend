@@ -22,6 +22,12 @@ const courierNameSchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -42,7 +48,7 @@ const courierNameSchema = new mongoose.Schema(
   }
 );
 
-courierNameSchema.index({ name: 1 }, { unique: true });
+courierNameSchema.index({ name: 1, tenantId: 1 }, { unique: true });
 courierNameSchema.index({ isActive: 1 });
 
 export default mongoose.model("CourierName", courierNameSchema);

@@ -444,6 +444,7 @@ export const addInventory = async (req, res) => {
         mrp: mrp || product.mrp,
         vendorId: vendorId ? vendorId : null,
         vendorName: vendorName || "",
+        tenantId: req.user.tenantId,
       });
     }
 

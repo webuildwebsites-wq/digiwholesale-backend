@@ -15,8 +15,10 @@ export const getMainReportData = async (req, res) => {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
-    const dateMatch = { createdAt: { $gte: start, $lte: end } };
+    const tenantId = req.user.tenantId;
+    const dateMatch = { tenantId, createdAt: { $gte: start, $lte: end } };
     const completedDateMatch = {
+      tenantId,
       status: "Completed",
       updatedAt: { $gte: start, $lte: end },
     };
@@ -182,6 +184,7 @@ export const getDailyReportData = async (req, res) => {
     end.setHours(23, 59, 59, 999);
 
     const baseMatch = {
+      tenantId: req.user.tenantId,
       createdAt: { $gte: start, $lte: end },
     };
 

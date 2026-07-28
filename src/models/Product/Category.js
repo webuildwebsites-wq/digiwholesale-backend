@@ -27,11 +27,17 @@ const categorySchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { timestamps: true }
 );
 
-categorySchema.index({ name: 1, brand: 1 }, { unique: true });
+categorySchema.index({ name: 1, brand: 1, tenantId: 1 }, { unique: true });
 categorySchema.index({ brand: 1 });
 categorySchema.index({ isActive: 1 });
 

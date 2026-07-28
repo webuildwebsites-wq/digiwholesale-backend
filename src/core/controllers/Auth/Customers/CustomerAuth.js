@@ -31,19 +31,25 @@ dotenv.config();
 
 export const customerLogin = async (req, res) => {
   try {
-    const { loginId, password } = req.body;
+    const { loginId, password, tenantId } = req.body;
 
     if (!loginId || !password) {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Please provide login ID (email or customer code) and password",);
     }
 
-    const customer = await Customer.findOne({
+    const query = {
       $or: [
         { businessEmail: loginId.toLowerCase() },
         { customerCode: loginId.toUpperCase() }
       ],
-      'status.isActive': true
-    }).select("+password -emailOtp -emailOtpExpires -mobileOtp -mobileOtpExpires -gstNumber -gstCertificateImg -panCard -panCardImg -aadharCard -aadharCardImg -isLocked -failedLoginAttempts -lockUntil -createdByDepartment -approvalStatus");
+      'status.isActive': true,
+    };
+
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const customer = await Customer.findOne(query).select("+password -emailOtp -emailOtpExpires -mobileOtp -mobileOtpExpires -gstNumber -gstCertificateImg -panCard -panCardImg -aadharCard -aadharCardImg -isLocked -failedLoginAttempts -lockUntil -createdByDepartment -approvalStatus");
 
     if (!customer) {
       return sendErrorResponse(res, 422, "INVALID_CREDENTIALS", "Invalid credentials or account is inactive",);
@@ -491,16 +497,22 @@ export const customerBasicRegistration = async (req, res) => {
 
 export const customerForgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, tenantId } = req.body;
 
     if (!email) {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Please provide email address");
     }
 
-    const customer = await Customer.findOne({
+    const query = {
       businessEmail: email.toLowerCase(),
       "status.isActive": true,
-    }).select("+password");
+    };
+
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const customer = await Customer.findOne(query).select("+password");
 
     if (!customer) {
       return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'No active account found with that email address');
@@ -915,7 +927,7 @@ export const resetCustomerCredit = async (req, res) => {
       return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid customer ID');
     }
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
     if (!customer) {
       return sendErrorResponse(res, 404, 'NOT_FOUND', 'Customer not found');
     }
@@ -980,7 +992,7 @@ export const sendCustomerForCorrection = async (req, res) => {
       return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'remark is required to explain what needs to be corrected');
     }
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
 
     if (!customer) {
       return sendErrorResponse(res, 404, 'NOT_FOUND', 'Customer not found');
@@ -1098,7 +1110,7 @@ export const resubmitCorrectedCustomer = async (req, res) => {
       return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid customer ID format');
     }
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
 
     if (!customer) {
       return sendErrorResponse(res, 404, 'NOT_FOUND', 'Customer not found');
@@ -1354,7 +1366,7 @@ export const updateCustomerShipToDetails = async (req, res) => {
       }
     }
 
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
     if (!customer) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Customer not found");
     }

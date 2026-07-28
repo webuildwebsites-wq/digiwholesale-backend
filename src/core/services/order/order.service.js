@@ -125,7 +125,7 @@ export async function deleteOrderService(orderId, tenantId) {
   if (!["Draft", "Cancelled"].includes(order.status)) {
     throw { statusCode: 400, code: "INVALID_STATUS", message: `Cannot delete an order with status "${order.status}". Only Draft or Cancelled orders can be deleted.` };
   }
-  await Order.findByIdAndDelete(orderId);
+  await Order.findOneAndDelete(filter);
 }
 
 export async function listOrdersService({ customerId, status, page = 1, limit = 20, search, fromDate, toDate, tenantId }) {
@@ -261,8 +261,10 @@ export async function cancelOrderService(orderId, reason, tenantId) {
   return bulkOrder;
 }
 
-export async function updateDraftOrderService(orderId, data) {
-  const order = await BulkOrder.findById(orderId);
+export async function updateDraftOrderService(orderId, data, tenantId) {
+  const filter = { _id: orderId };
+  if (tenantId) filter.tenantId = tenantId;
+  const order = await BulkOrder.findOne(filter);
   if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
 
   const canUpdate = order.orders.every(o => ["Draft", "Submitted"].includes(o.status));
@@ -336,7 +338,7 @@ export async function updateDraftOrderService(orderId, data) {
 
   if (data.customer) {
     if (data.customer.customerId) {
-      const customer = await Customer.findById(data.customer.customerId).lean();
+      const customer = await Customer.findOne({ _id: data.customer.customerId, ...(tenantId ? { tenantId } : {}) }).lean();
       if (!customer) throw { statusCode: 404, code: "NOT_FOUND", message: "Customer not found" };
 
       let customerShipToBranchName = order.customer.customerShipToBranchName;
@@ -355,7 +357,7 @@ export async function updateDraftOrderService(orderId, data) {
         customerShipToBranchName: customerShipToBranchName,
       };
     } else if (data.customer.customerShipToId) {
-      const customer = await Customer.findById(order.customer.customerId).lean();
+      const customer = await Customer.findOne({ _id: order.customer.customerId, ...(tenantId ? { tenantId } : {}) }).lean();
       const shipTo = (customer?.customerShipToDetails || []).find(
         (s) => s._id.toString() === data.customer.customerShipToId.toString()
       );

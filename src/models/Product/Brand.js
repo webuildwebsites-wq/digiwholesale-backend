@@ -23,6 +23,12 @@ const brandSchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -49,7 +55,7 @@ brandSchema.virtual('categories', {
   foreignField: 'brand'
 });
 
-brandSchema.index({ name: 1 }, { unique: true });
+brandSchema.index({ name: 1, tenantId: 1 }, { unique: true });
 brandSchema.index({ isActive: 1 });
 
 export default mongoose.model("Brand", brandSchema);

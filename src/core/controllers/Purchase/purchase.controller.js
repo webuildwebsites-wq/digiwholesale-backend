@@ -516,7 +516,7 @@ export const getOrdersByVendorId = async (req, res) => {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Vendor not found");
         }
 
-        const rxFilter = { "orders.items.rx.vendor.id": vendorId };
+        const rxFilter = { "orders.items.rx.vendor.id": vendorId, tenantId: req.user.tenantId };
 
         if (search && search.trim()) {
             const regex = { $regex: search.trim(), $options: "i" };
@@ -776,7 +776,7 @@ export const getQCPendingItems = async (req, res) => {
 
         const allItems = [];
         for (const po of purchaseOrders) {
-            const inwardRecord = await PurchaseInward.findOne({ purchaseOrderId: po._id })
+            const inwardRecord = await PurchaseInward.findOne({ purchaseOrderId: po._id, tenantId: req.user.tenantId })
                 .sort({ createdAt: -1 })
                 .lean();
 
@@ -830,7 +830,7 @@ export const getQCPassedItems = async (req, res) => {
         const purchaseOrders = await VendorPurchase.find(filter).sort({ createdAt: -1 }).lean();
 
         const purchaseOrderIds = purchaseOrders.map(po => po._id);
-        const qcRecords = await PurchaseQC.find({ purchaseOrderId: { $in: purchaseOrderIds } })
+        const qcRecords = await PurchaseQC.find({ purchaseOrderId: { $in: purchaseOrderIds }, tenantId: req.user.tenantId })
             .select("purchaseOrderId items createdBy createdByName qcDate")
             .populate("createdBy", "employeeName username")
             .lean();
@@ -1123,6 +1123,7 @@ export const createReplacementOrder = async (req, res) => {
                 remarks:     remarks || `Replacement for Purchase Return ${purchaseReturnId}`,
             }],
             createdBy: req.user._id,
+            tenantId:  req.user.tenantId,
         });
 
         for (const entry of replacementItems) {
@@ -1232,7 +1233,7 @@ export const getAllReplacementOrders = async (req, res) => {
         const enriched = await Promise.all(
             replacementOrders.map(async po => {
                 const purchaseReturn = po.replacementFor
-                    ? await PurchaseReturnModel.findById(po.replacementFor).lean()
+                    ? await PurchaseReturnModel.findOne({ _id: po.replacementFor, tenantId: req.user.tenantId }).lean()
                     : null;
 
                 const allItems   = po.orders.flatMap(o => o.items || []);

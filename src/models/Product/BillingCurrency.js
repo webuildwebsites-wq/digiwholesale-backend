@@ -22,6 +22,12 @@ const billingCurrencySchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
+    tenantId: {
+      type: String,
+      required: true,
+      trim: true,
+      index: true,
+    },
   },
   { 
     timestamps: true,
@@ -42,7 +48,7 @@ const billingCurrencySchema = new mongoose.Schema(
   }
 );
 
-billingCurrencySchema.index({ name: 1 }, { unique: true });
+billingCurrencySchema.index({ name: 1, tenantId: 1 }, { unique: true });
 billingCurrencySchema.index({ isActive: 1 });
 
 export default mongoose.model("BillingCurrency", billingCurrencySchema);
