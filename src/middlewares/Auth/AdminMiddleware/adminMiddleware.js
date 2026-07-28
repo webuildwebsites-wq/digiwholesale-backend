@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import employeeSchema from '../../../models/Auth/Employee.js';
 import Customer from '../../../models/Auth/Customer.js';
+import Tenant from '../../../models/Tenant/Tenant.model.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -43,11 +44,21 @@ export const ProtectUser = async (req, res, next) => {
 
       const userObj = user.toObject();
 
-      if (!userObj.tenantId) {
+      if (!userObj.tenantId && userObj.EmployeeType !== 'PLATFORM_OWNER') {
         return res.status(403).json({
           success: false,
           error: { code: 'NO_TENANT', message: 'Account is not associated with any workspace. Please contact support.', timestamp: new Date().toISOString() },
         });
+      }
+
+      if (userObj.tenantId) {
+        const tenant = await Tenant.findOne({ tenantId: userObj.tenantId }).lean();
+        if (!tenant || tenant.status === 'SUSPENDED') {
+          return res.status(403).json({
+            success: false,
+            error: { code: 'TENANT_SUSPENDED', message: 'Your workspace has been suspended. Please contact support.', timestamp: new Date().toISOString() },
+          });
+        }
       }
 
       req.user = {

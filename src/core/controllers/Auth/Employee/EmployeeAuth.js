@@ -1,6 +1,7 @@
 import { sendSuccessResponse, sendErrorResponse, sendTokenResponse } from '../../../../Utils/response/responseHandler.js';
 import { generateToken, generateRefreshToken } from '../../../../Utils/Auth/tokenUtils.js';
 import employeeSchema from '../../../../models/Auth/Employee.js';
+import Tenant from '../../../../models/Tenant/Tenant.model.js';
 import { sendEmail } from '../../../../core/config/Email/emailService.js';
 import ResetPasswordTemplate from '../../../../Utils/Mail/ResetPasswordTemplate.js';
 import { generateResetToken, verifyResetToken, decodeUidb36 } from '../../../../Utils/Auth/passwordResetUtils.js';
@@ -38,6 +39,13 @@ export const employeeLogin = async (req, res) => {
 
     if (!user.tenantId && user.EmployeeType !== 'PLATFORM_OWNER') {
       return sendErrorResponse(res, 403, 'NO_TENANT', 'Account is not associated with any workspace. Please contact support.');
+    }
+
+    if (user.tenantId) {
+      const tenant = await Tenant.findOne({ tenantId: user.tenantId }).lean();
+      if (!tenant || tenant.status === 'SUSPENDED') {
+        return sendErrorResponse(res, 403, 'TENANT_SUSPENDED', 'Your workspace has been suspended. Please contact support.');
+      }
     }
 
     if (user.isLocked) {

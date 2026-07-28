@@ -12,6 +12,7 @@ import {
 } from "../../../../Utils/Auth/customerAuthUtils.js";
 import Customer from "../../../../models/Auth/Customer.js";
 import customerDraftSchema from "../../../../models/Auth/CustomerDraft.js";
+import Tenant from "../../../../models/Tenant/Tenant.model.js";
 import Location from "../../../../models/Location/Location.js";
 import SpecificLab from "../../../../models/Product/SpecificLab.js";
 import Plant from "../../../../models/Product/Plant.js";
@@ -57,6 +58,11 @@ export const customerLogin = async (req, res) => {
 
     if (!customer.tenantId) {
       return sendErrorResponse(res, 403, "NO_TENANT", "Account is not associated with any workspace. Please contact support.",);
+    }
+
+    const tenantDoc = await Tenant.findOne({ tenantId: customer.tenantId }).lean();
+    if (!tenantDoc || tenantDoc.status === 'SUSPENDED') {
+      return sendErrorResponse(res, 403, "TENANT_SUSPENDED", "Your workspace has been suspended. Please contact support.",);
     }
 
     if (customer.isLocked) {

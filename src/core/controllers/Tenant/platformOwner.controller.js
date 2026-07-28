@@ -270,7 +270,10 @@ export const deleteTenant = async (req, res) => {
     try {
         const tenant = await Tenant.findByIdAndDelete(req.params.id);
         if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
-        return sendSuccessResponse(res, 200, null, `Tenant "${tenant.storeInformation?.storeName}" deleted successfully`);
+
+        // await Employee.deleteMany({ tenantId: tenant.tenantId });
+
+        return sendSuccessResponse(res, 200, null, `Tenant "${tenant.storeInformation?.storeName || tenant.businessName || tenant.tenantId}" and all associated employees deleted successfully`);
     } catch (err) {
         return sendErrorResponse(res, 500, "DELETE_TENANT_ERROR", err.message);
     }

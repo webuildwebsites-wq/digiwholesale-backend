@@ -5,7 +5,7 @@ import { sendSuccessResponse, sendErrorResponse } from '../../../../Utils/respon
 // Get all departments
 export const getAllDepartments = async (req, res) => {
   try {
-    const departments = await Department.find({ isActive: true, tenantId: req.user.tenantId })
+    const departments = await Department.find({ isActive: true })
       .select('name code description subRoles isActive')
       .lean();
 
@@ -21,7 +21,7 @@ export const getDepartmentById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const department = await Department.findOne({ _id: id, tenantId: req.user.tenantId }).lean();
+    const department = await Department.findOne({ _id: id,  }).lean();
 
     if (!department) {
       return sendErrorResponse(res, 404, 'DEPARTMENT_NOT_FOUND', 'Department not found');
@@ -39,7 +39,7 @@ export const getSubRolesByDepartment = async (req, res) => {
   try {
     const { departmentId } = req.params;
 
-    const department = await Department.findOne({ _id: departmentId, tenantId: req.user.tenantId })
+    const department = await Department.findOne({ _id: departmentId,  })
       .select('name subRoles')
       .lean();
 
@@ -74,7 +74,6 @@ export const createDepartment = async (req, res) => {
     }
 
     const existingDepartment = await Department.findOne({
-      tenantId: req.user.tenantId,
       $or: [{ name: name.toUpperCase() }, { code: code.toUpperCase() }]
     });
 
@@ -87,8 +86,7 @@ export const createDepartment = async (req, res) => {
       code: code.toUpperCase(),
       description,
       subRoles: subRoles || [],
-      createdBy: req.user.id,
-      tenantId: req.user.tenantId,
+      createdBy: req.user.id
     });
 
     return sendSuccessResponse(res, 201, department, 'Department created successfully');
@@ -108,7 +106,7 @@ export const addSubRole = async (req, res) => {
       return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'Name and code are required');
     }
 
-    const department = await Department.findOne({ _id: departmentId, tenantId: req.user.tenantId });
+    const department = await Department.findOne({ _id: departmentId,  });
 
     if (!department) {
       return sendErrorResponse(res, 404, 'DEPARTMENT_NOT_FOUND', 'Department not found');
@@ -155,7 +153,7 @@ export const updateSubRole = async (req, res) => {
     const { departmentId, subRoleId } = req.params;
     const { name, code, description, isActive } = req.body;
 
-    const department = await Department.findOne({ _id: departmentId, tenantId: req.user.tenantId });
+    const department = await Department.findOne({ _id: departmentId,  });
 
     if (!department) {
       return sendErrorResponse(res, 404, 'DEPARTMENT_NOT_FOUND', 'Department not found');
@@ -199,7 +197,7 @@ export const deleteSubRole = async (req, res) => {
       return sendErrorResponse(res,400,"INVALID_ID","Invalid department or sub-role id");
     }
 
-    const department = await Department.findOne({ _id: departmentId, tenantId: req.user.tenantId });
+    const department = await Department.findOne({ _id: departmentId,  });
 
     if (!department) {
       return sendErrorResponse(res,404,"DEPARTMENT_NOT_FOUND","Department not found");
@@ -236,7 +234,7 @@ export const updateDepartment = async (req, res) => {
     const { id } = req.params;
     const { name, code, description, isActive } = req.body;
 
-    const department = await Department.findOne({ _id: id, tenantId: req.user.tenantId });
+    const department = await Department.findOne({ _id: id,  });
 
     if (!department) {
       return sendErrorResponse(res, 404, 'DEPARTMENT_NOT_FOUND', 'Department not found');
