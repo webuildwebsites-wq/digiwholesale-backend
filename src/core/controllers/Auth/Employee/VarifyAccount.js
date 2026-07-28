@@ -18,6 +18,10 @@ export async function verifyUserEmail(req, res) {
       return sendErrorResponse(res, 401, 'INVALID_EMAIL', 'Employee not found');
     }
 
+    if (!user.tenantId) {
+      return sendErrorResponse(res, 403, 'NO_TENANT', 'Account is not associated with any workspace. Please contact support.');
+    }
+
     const isCodeValid = user.emailOtp === Emailotp;
     const isNotExpired = user.emailOtpExpires > Date.now();
 

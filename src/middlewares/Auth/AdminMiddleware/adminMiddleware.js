@@ -42,11 +42,19 @@ export const ProtectUser = async (req, res, next) => {
       }
 
       const userObj = user.toObject();
+
+      if (!userObj.tenantId) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'NO_TENANT', message: 'Account is not associated with any workspace. Please contact support.', timestamp: new Date().toISOString() },
+        });
+      }
+
       req.user = {
         id:               user._id,
         EmployeeType:     decoded.EmployeeType,
         AccountType:      decoded.AccountType  || 'EMPLOYEE',
-        tenantId:         userObj.tenantId      || null,
+        tenantId:         userObj.tenantId,
         ...userObj,
         EmployeeType:     decoded.EmployeeType,
         Department:       userObj.Department?.name || userObj.Department,

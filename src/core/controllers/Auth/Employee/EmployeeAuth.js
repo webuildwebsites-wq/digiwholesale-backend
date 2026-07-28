@@ -35,7 +35,11 @@ export const employeeLogin = async (req, res) => {
     if (!user) {
       return sendErrorResponse(res, 422, 'INVALID_CREDENTIALS', 'Invalid credentials or account is inactive');
     }
-    
+
+    if (!user.tenantId) {
+      return sendErrorResponse(res, 403, 'NO_TENANT', 'Account is not associated with any workspace. Please contact support.');
+    }
+
     if (user.isLocked) {
       return sendErrorResponse(res, 423, 'ACCOUNT_LOCKED', 'Account is temporarily locked due to too many failed login attempts');
     }
