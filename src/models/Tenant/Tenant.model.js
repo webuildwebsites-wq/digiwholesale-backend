@@ -117,7 +117,6 @@ const tenantSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-tenantSchema.index({ tenantId: 1 });
 tenantSchema.index({ "owner.email": 1 });
 tenantSchema.index({ status: 1 });
 

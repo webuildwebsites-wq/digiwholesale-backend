@@ -25,7 +25,7 @@ export const sendErrorResponse = (res, statusCode = 500, code = 'INTERNAL_ERROR'
   return res.status(statusCode).json(response);
 };
 
-export const sendTokenResponse = (user, statusCode, res, AccountType = 'EMPLOYEE', generateToken, generateRefreshToken) => {
+export const sendTokenResponse = (user, statusCode, res, AccountType = 'EMPLOYEE', generateToken, generateRefreshToken, tenant = null) => {
   const EmployeeType = AccountType === 'CUSTOMER' 
     ? 'CUSTOMER' 
     : (user.EmployeeType?.name || user.EmployeeType);
@@ -33,7 +33,7 @@ export const sendTokenResponse = (user, statusCode, res, AccountType = 'EMPLOYEE
   const refreshToken = generateRefreshToken(user._id, EmployeeType, AccountType);
 
   const options = {
-    expires: new Date(Date.now() + parseFloat(process.env.JWT_COOKIE_EXPIRE || 24) * 60 * 60 * 1000), // set JWT_COOKIE_EXPIRE in hours (e.g. 0.0167 for 1 min)
+    expires: new Date(Date.now() + parseFloat(process.env.JWT_COOKIE_EXPIRE || 24) * 60 * 60 * 1000),
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict'
@@ -41,6 +41,18 @@ export const sendTokenResponse = (user, statusCode, res, AccountType = 'EMPLOYEE
 
   const userObj = user.toObject();
   delete userObj.password;
+
+  const tenantData = tenant
+    ? {
+        _id: tenant._id,
+        tenantId: tenant.tenantId,
+        storeInformation: tenant.storeInformation,
+        status: tenant.status,
+        subscription: tenant.subscription,
+        loyalty: tenant.loyalty,
+        whatsappConfig: tenant.whatsappConfig,
+      }
+    : null;
 
   return res
     .status(statusCode)
@@ -57,6 +69,7 @@ export const sendTokenResponse = (user, statusCode, res, AccountType = 'EMPLOYEE
           EmployeeType,
           AccountType
         },
+        tenant: tenantData,
         tokens: {
           accessToken: token,
           refreshToken: refreshToken,

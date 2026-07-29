@@ -12,14 +12,13 @@ import { protectPlatformOwner } from "../middlewares/Auth/AdminMiddleware/platfo
 
 const tenantRouter = express.Router();
 
-tenantRouter.use(protectPlatformOwner);
 
-tenantRouter.post("/register",      registerTenant);
-tenantRouter.get("/",               getAllTenants);
-tenantRouter.get("/:id",            getTenantById);
-tenantRouter.put("/:id",            updateTenant);
-tenantRouter.patch("/:id/suspend",  suspendTenant);
-tenantRouter.patch("/:id/activate", activateTenant);
-tenantRouter.delete("/:id",         deleteTenant);
+tenantRouter.post("/register", protectPlatformOwner, registerTenant);
+tenantRouter.get("/", protectPlatformOwner, getAllTenants);
+tenantRouter.get("/:id", getTenantById);
+tenantRouter.put("/:id", protectPlatformOwner, updateTenant);
+tenantRouter.patch("/:id/suspend", protectPlatformOwner, suspendTenant);
+tenantRouter.patch("/:id/activate", protectPlatformOwner, activateTenant);
+tenantRouter.delete("/:id", protectPlatformOwner, deleteTenant);
 
 export default tenantRouter;

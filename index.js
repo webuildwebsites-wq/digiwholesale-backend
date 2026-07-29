@@ -34,7 +34,6 @@ import purchaseReturnRouter from './src/routes/Purchase/purchaseReturn.routes.js
 import billingRouter from './src/routes/billing.routes.js';
 import tenantRouter from './src/routes/tenant.routes.js';
 import { startBillingCron } from './src/core/services/billing/billingCron.js';
-import { initBrowserPool } from './src/core/services/pdfService.js';
 
 dotenv.config();
 
@@ -195,6 +194,5 @@ connectDB()
     console.log("DB Connected");
     console.log("MongoDB TTL indexes active - Automatic deletion enabled for records older than 30 days");
     startBillingCron();
-    await initBrowserPool();
   })
   .catch(err => console.error("DB Failed:", err));

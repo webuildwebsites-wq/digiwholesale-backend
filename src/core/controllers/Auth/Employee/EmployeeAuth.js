@@ -41,8 +41,9 @@ export const employeeLogin = async (req, res) => {
       return sendErrorResponse(res, 403, 'NO_TENANT', 'Account is not associated with any workspace. Please contact support.');
     }
 
+    let tenant = null;
     if (user.tenantId) {
-      const tenant = await Tenant.findOne({ tenantId: user.tenantId }).lean();
+      tenant = await Tenant.findOne({ tenantId: user.tenantId }).lean();
       if (!tenant || tenant.status === 'SUSPENDED') {
         return sendErrorResponse(res, 403, 'TENANT_SUSPENDED', 'Your workspace has been suspended. Please contact support.');
       }
@@ -65,7 +66,7 @@ export const employeeLogin = async (req, res) => {
     user.lastLogin = new Date();
     await user.save({ validateBeforeSave: false });
 
-    return sendTokenResponse(user, 200, res, 'EMPLOYEE', generateToken, generateRefreshToken);
+    return sendTokenResponse(user, 200, res, 'EMPLOYEE', generateToken, generateRefreshToken, tenant);
 
   } catch (error) {
     console.error('Employee login error:', error);
