@@ -488,6 +488,13 @@ export const createEmployee = async (req, res) => {
       return sendErrorResponse(res, 400, 'INVALID_ID', `Invalid ${error.path} format. Please provide a valid MongoDB ObjectId`);
     }
 
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      const fieldLabels = { username: 'Username', email: 'Email', employeeCode: 'Employee code' };
+      const label = fieldLabels[field] || field;
+      return sendErrorResponse(res, 409, 'DUPLICATE_ERROR', `${label} '${error.keyValue[field]}' is already taken`);
+    }
+
     return sendErrorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to create employee');
   }
 };
