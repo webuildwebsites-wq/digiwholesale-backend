@@ -21,7 +21,7 @@ export const createZoneLocation = async (req, res) => {
       regionalManager,
       createdBy: req.user.id,
       isActive: true,
-      tenantId: req.user.tenantId,
+      // tenantId: req.user.tenantId,
     };
 
     const location = new Location(locationData);
@@ -45,7 +45,7 @@ export const getAllLocations = async (req, res) => {
     const filter = {};
     if (zone) filter.zone = zone.toUpperCase();
     if (isActive !== undefined) filter.isActive = isActive === 'true';
-    filter.tenantId = req.user.tenantId;
+    // filter.tenantId = req.user.tenantId;
 
     const locations = await Location.find(filter)
       .populate('createdBy', 'username employeeName email')
@@ -63,7 +63,9 @@ export const getLocationByZone = async (req, res) => {
   try {
     const { zone } = req.params;
 
-    const location = await Location.findOne({ _id: zone, isActive: true, tenantId: req.user.tenantId })
+    const location = await Location.findOne({ _id: zone, isActive: true, 
+      // tenantId: req.user.tenantId 
+    })
       .populate('createdBy', 'username employeeName email')
       .populate('regionalManager.refId', 'username employeeName email phone');
 
@@ -205,7 +207,7 @@ export const getStatesByZone = async (req, res) => {
   try {
     const { zone } = req.params;
 
-    const location = await Location.findOne({ _id: zone, isActive: true, tenantId: req.user.tenantId });
+    const location = await Location.findOne({ _id: zone, isActive: true });
     if (!location) {
       return sendErrorResponse(res, 404, 'LOCATION_NOT_FOUND', 'Location not found');
     }
@@ -222,7 +224,7 @@ export const getCitiesByState = async (req, res) => {
   try {
     const { zone, stateId } = req.params;
 
-    const location = await Location.findOne({ _id: zone, isActive: true, tenantId: req.user.tenantId });
+    const location = await Location.findOne({ _id: zone, isActive: true });
     if (!location) {
       return sendErrorResponse(res, 404, 'LOCATION_NOT_FOUND', 'Location not found');
     }
@@ -244,7 +246,9 @@ export const getZipCodesByCity = async (req, res) => {
   try {
     const { zone, stateId, cityId } = req.params;
 
-    const location = await Location.findOne({ _id: zone, isActive: true, tenantId: req.user.tenantId });
+    const location = await Location.findOne({ _id: zone, isActive: true,
+      //  tenantId: req.user.tenantId 
+      });
     if (!location) {
       return sendErrorResponse(res, 404, 'LOCATION_NOT_FOUND', 'Location not found');
     }
@@ -306,7 +310,9 @@ export const updateLocation = async (req, res) => {
     delete updates.createdBy;
     delete updates.zone;
 
-    const location = await Location.findOne({ _id: zone, isActive: true, tenantId: req.user.tenantId });
+    const location = await Location.findOne({ _id: zone, isActive: true, 
+      // tenantId: req.user.tenantId 
+    });
     if (!location) {
       return sendErrorResponse(res, 404, 'LOCATION_NOT_FOUND', 'Location not found');
     }

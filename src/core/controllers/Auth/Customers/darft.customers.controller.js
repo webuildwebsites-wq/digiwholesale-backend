@@ -67,13 +67,6 @@ export const customerDraftRegistration = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", "billToAddress must be an object");
     }
 
-    const noChequeProvided = !chequeDetails || !Array.isArray(chequeDetails) ||
-      chequeDetails.every(c => (!c.chequeNumber || c.chequeNumber.trim() === "") && (!c.chequeImage || c.chequeImage.trim() === ""));
-
-    if (noChequeProvided && (!chequeRemark || chequeRemark.trim() === "")) {
-      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "chequeRemark is required when chequeDetails are not provided");
-    }
-
     const normalizedEmail = businessEmail?.trim().toLowerCase();
     console.log("normalizedEmail :  ", normalizedEmail);
 

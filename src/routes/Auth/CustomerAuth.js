@@ -42,8 +42,8 @@ customerRouter.get('/customer/correction-required', ProtectUser, attachDepartmen
 customerRouter.get('/customer/pending-terms', ProtectUser, attachDepartmentInfo, checkPageAccess('APPROVALS'), getPendingTermsCustomers);
 customerRouter.get('/get-all-customers', ProtectUser, checkPageAccess('CUSTOMER_LIST'), getAllCustomers);
 customerRouter.get('/customers-profile', protectCustomer, getCustomerProfile);
-customerRouter.get('/get-customer/:customerId', getCustomerById);
-customerRouter.get('/get-draft-customer/:customerId', getDraftCustomers);
+customerRouter.get('/get-customer/:customerId', ProtectUser, getCustomerById);
+customerRouter.get('/get-draft-customer/:customerId',ProtectUser, getDraftCustomers);
 
 customerRouter.get('/get-all-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('CUSTOMER_LIST'), getAllDraftCustomers);
 customerRouter.get('/get-my-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('CUSTOMER_LIST'), getMyDraftCustomers);

@@ -376,6 +376,13 @@ const customerDraftSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "employee",
     },
+    tenantId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
+    },
     createdByDepartment: {
       type: String,
       enum: ['SALES', 'FINANCE', 'SUPERADMIN'],
