@@ -21,12 +21,6 @@ const creditDaySchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
-    tenantId: {
-      type: String,
-      required: true,
-      trim: true,
-      index: true,
-    },
   },
   { 
     timestamps: true,
@@ -47,7 +41,7 @@ const creditDaySchema = new mongoose.Schema(
   }
 );
 
-creditDaySchema.index({ days: 1, tenantId: 1 }, { unique: true });
+creditDaySchema.index({ days: 1 }, { unique: true });
 creditDaySchema.index({ isActive: 1 });
 
 export default mongoose.model("CreditDay", creditDaySchema);

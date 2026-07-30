@@ -22,12 +22,6 @@ const countrySchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
-    tenantId: {
-      type: String,
-      required: true,
-      trim: true,
-      index: true,
-    },
   },
   { 
     timestamps: true,
@@ -48,7 +42,7 @@ const countrySchema = new mongoose.Schema(
   }
 );
 
-countrySchema.index({ name: 1, tenantId: 1 }, { unique: true });
+countrySchema.index({ name: 1 }, { unique: true });
 countrySchema.index({ isActive: 1 });
 
 export default mongoose.model("Country", countrySchema);

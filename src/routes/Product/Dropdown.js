@@ -21,6 +21,27 @@ const dropdownRouter = express.Router();
 
 dropdownRouter.use(ProtectUser);
 
+// State Routes
+dropdownRouter.post('/states', createState);
+dropdownRouter.get('/states', getAllStates);
+dropdownRouter.get('/states/:id', getStateById);
+dropdownRouter.put('/states/:id', updateState);
+dropdownRouter.delete('/states/:id', deleteState);
+
+// Country Routes
+dropdownRouter.post('/countries', createCountry);
+dropdownRouter.get('/countries', getAllCountries);
+dropdownRouter.get('/countries/:id', getCountryById);
+dropdownRouter.put('/countries/:id', updateCountry);
+dropdownRouter.delete('/countries/:id', deleteCountry);
+
+// Billing Currency Routes
+dropdownRouter.post('/billing-currencies', createBillingCurrency);
+dropdownRouter.get('/billing-currencies', getAllBillingCurrencies);
+dropdownRouter.get('/billing-currencies/:id', getBillingCurrencyById);
+dropdownRouter.put('/billing-currencies/:id', updateBillingCurrency);
+dropdownRouter.delete('/billing-currencies/:id', deleteBillingCurrency);
+
 // Business Type Routes
 dropdownRouter.post('/business-types', createBusinessType);
 dropdownRouter.get('/business-types', getAllBusinessTypes);
@@ -34,6 +55,21 @@ dropdownRouter.get('/gst-types', getAllGSTTypes);
 dropdownRouter.get('/gst-types/:id', getGSTTypeById);
 dropdownRouter.put('/gst-types/:id', updateGSTType);
 dropdownRouter.delete('/gst-types/:id', deleteGSTType);
+
+// Credit Day Routes
+dropdownRouter.post('/credit-days', createCreditDay);
+dropdownRouter.get('/credit-days', getAllCreditDays);
+dropdownRouter.get('/credit-days/:id', getCreditDayById);
+dropdownRouter.put('/credit-days/:id', updateCreditDay);
+dropdownRouter.delete('/credit-days/:id', deleteCreditDay);
+
+// Courier Time Routes
+dropdownRouter.post('/courier-times', createCourierTime);
+dropdownRouter.get('/courier-times', getAllCourierTimes);
+dropdownRouter.get('/courier-times/:id', getCourierTimeById);
+dropdownRouter.put('/courier-times/:id', updateCourierTime);
+dropdownRouter.delete('/courier-times/:id', deleteCourierTime);
+
 
 // Plant Routes
 dropdownRouter.post('/plants', createPlant);
@@ -56,47 +92,12 @@ dropdownRouter.get('/fitting-centers/:id', getFittingCenterById);
 dropdownRouter.put('/fitting-centers/:id', updateFittingCenter);
 dropdownRouter.delete('/fitting-centers/:id', deleteFittingCenter);
 
-// Credit Day Routes
-dropdownRouter.post('/credit-days', createCreditDay);
-dropdownRouter.get('/credit-days', getAllCreditDays);
-dropdownRouter.get('/credit-days/:id', getCreditDayById);
-dropdownRouter.put('/credit-days/:id', updateCreditDay);
-dropdownRouter.delete('/credit-days/:id', deleteCreditDay);
-
 // Courier Name Routes
 dropdownRouter.post('/courier-names', createCourierName);
 dropdownRouter.get('/courier-names', getAllCourierNames);
 dropdownRouter.get('/courier-names/:id', getCourierNameById);
 dropdownRouter.put('/courier-names/:id', updateCourierName);
 dropdownRouter.delete('/courier-names/:id', deleteCourierName);
-
-// Courier Time Routes
-dropdownRouter.post('/courier-times', createCourierTime);
-dropdownRouter.get('/courier-times', getAllCourierTimes);
-dropdownRouter.get('/courier-times/:id', getCourierTimeById);
-dropdownRouter.put('/courier-times/:id', updateCourierTime);
-dropdownRouter.delete('/courier-times/:id', deleteCourierTime);
-
-// State Routes
-dropdownRouter.post('/states', createState);
-dropdownRouter.get('/states', getAllStates);
-dropdownRouter.get('/states/:id', getStateById);
-dropdownRouter.put('/states/:id', updateState);
-dropdownRouter.delete('/states/:id', deleteState);
-
-// Country Routes
-dropdownRouter.post('/countries', createCountry);
-dropdownRouter.get('/countries', getAllCountries);
-dropdownRouter.get('/countries/:id', getCountryById);
-dropdownRouter.put('/countries/:id', updateCountry);
-dropdownRouter.delete('/countries/:id', deleteCountry);
-
-// Billing Currency Routes
-dropdownRouter.post('/billing-currencies', createBillingCurrency);
-dropdownRouter.get('/billing-currencies', getAllBillingCurrencies);
-dropdownRouter.get('/billing-currencies/:id', getBillingCurrencyById);
-dropdownRouter.put('/billing-currencies/:id', updateBillingCurrency);
-dropdownRouter.delete('/billing-currencies/:id', deleteBillingCurrency);
 
 // Brand Routes
 dropdownRouter.post('/brands', createBrand);

@@ -22,12 +22,6 @@ const businessTypeSchema = new mongoose.Schema(
       ref: "employee",
       required: true,
     },
-    tenantId: {
-      type: String,
-      required: true,
-      trim: true,
-      index: true,
-    },
   },
   { 
     timestamps: true,
@@ -48,7 +42,7 @@ const businessTypeSchema = new mongoose.Schema(
   }
 );
 
-businessTypeSchema.index({ name: 1, tenantId: 1 }, { unique: true });
+businessTypeSchema.index({ name: 1 }, { unique: true });
 businessTypeSchema.index({ isActive: 1 });
 
 export default mongoose.model("BusinessType", businessTypeSchema);
