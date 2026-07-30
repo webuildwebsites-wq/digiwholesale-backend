@@ -1,5 +1,4 @@
 import DigiProduct from "../../../models/Product/Product.model.js";
-import Inventory from "../../../models/Product/Inventory.model.js";
 import { uploadToGCSProduct } from "../../../Utils/uploads/uploadToGCS.js";
 import mongoose from "mongoose";
 
@@ -355,36 +354,21 @@ export const deleteProduct = async (req, res) => {
 //  ADD INVENTORY
 export const addInventory = async (req, res) => {
   try {
-
     let { items } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Inventory data is required",
-      });
+      return res.status(400).json({ success: false, message: "Inventory data is required" });
     }
-
 
     for (const item of items) {
-      const { productCode, qty } = item;
-
-      if (!productCode || !qty) {
-        return res.status(400).json({
-          success: false,
-          message: "Product code and qty are required",
-        });
+      if (!item.productCode || !item.qty) {
+        return res.status(400).json({ success: false, message: "Product code and qty are required" });
       }
-
-      if (qty <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Quantity must be greater than 0",
-        });
+      if (item.qty <= 0) {
+        return res.status(400).json({ success: false, message: "Quantity must be greater than 0" });
       }
     }
 
-    //  FETCH ALL PRODUCTS AT ONCE
     const productCodes = items.map(i => i.productCode);
 
     const products = await DigiProduct.find({
@@ -395,76 +379,29 @@ export const addInventory = async (req, res) => {
     if (products.length !== productCodes.length) {
       const foundCodes = products.map(p => p.productCode);
       const missing = productCodes.filter(c => !foundCodes.includes(c));
-
-      return res.status(404).json({
-        success: false,
-        message: `Product not found: ${missing.join(", ")}`,
-      });
+      return res.status(404).json({ success: false, message: `Product not found: ${missing.join(", ")}` });
     }
 
-    // Map for fast access
     const productMap = {};
-    products.forEach(p => {
-      productMap[p.productCode] = p;
-    });
-
-    //  PREPARE UPDATES
-    const inventoryDocs = [];
+    products.forEach(p => { productMap[p.productCode] = p; });
 
     for (const item of items) {
-      const {
-        productCode,
-        qty,
-        expiry,
-        price,
-        gst,
-        total,
-        mrp,
-        vendorId,
-        vendorName,
-      } = item;
-
-      const product = productMap[productCode];
-
-      // Prepare product updates
-      product.qty += qty;
-
-      if (mrp && mrp > product.mrp) {
-        product.mrp = mrp;
-      }
-
-      inventoryDocs.push({
-        productId: product._id,
-        productCode,
-        qty: qty,
-        expiry: expiry || null,
-        price: price || 0,
-        gst: gst || 0,
-        total: total || 0,
-        mrp: mrp || product.mrp,
-        vendorId: vendorId ? vendorId : null,
-        vendorName: vendorName || "",
-        tenantId: req.user.tenantId,
-      });
+      const product = productMap[item.productCode];
+      product.qty += item.qty;
+      if (item.mrp && item.mrp > product.mrp) product.mrp = item.mrp;
+      if (item.price) product.price = item.price;
     }
 
-    // Save products
     await Promise.all(products.map(p => p.save()));
 
-    // Save inventory
-    const savedInventory = await Inventory.insertMany(inventoryDocs);
-
-    res.status(201).json({
+    return res.status(200).json({
       success: true,
-      count: savedInventory.length,
-      inventory: savedInventory,
+      message: `Updated quantity for ${products.length} product(s)`,
+      updated: products.map(p => ({ productCode: p.productCode, qty: p.qty })),
     });
 
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
