@@ -4,7 +4,7 @@ import FormData from 'form-data';
 dotenv.config();
 
 const WHATSAPP_BASE_URL   = process.env.WHATSAPP_BASE_URL   || "https://digiwppconnect-backend.digibysr.in";
-const WHATSAPP_DEVICE_TOKEN = process.env.WHATSAPP_DEVICE_TOKEN || "29a959f6-e5ee-46e5-80b7-603d8dc92efd";
+const WHATSAPP_DEVICE_TOKEN = process.env.WHATSAPP_DEVICE_TOKEN || "29a959f6-e5ee-46e5-80b7-603d8dc92efdc";
 
 const DEFAULT_PHONE         = process.env.WHATSAPP_DEFAULT_PHONE || "917579440117";
 
