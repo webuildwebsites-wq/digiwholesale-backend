@@ -394,9 +394,12 @@ export async function getFrameTypesService() {
   return await FrameType.find({}).sort({ name: 1 }).lean();
 }
 
-export async function getProductBrandsService() {
+export async function getProductBrandsService({ tenantId } = {}) {
+  const match = { brand: { $nin: [null, ""] } };
+  if (tenantId) match.tenantId = tenantId;
+
   return await DigiProduct.aggregate([
-    { $match: { brand: { $nin: [null, ""] } } },
+    { $match: match },
     { $sort: { brand: 1, createdAt: 1 } },
     {
       $group: {
@@ -421,8 +424,9 @@ export async function getProductBrandsService() {
   ]);
 }
 
-export async function getProductCategoriesService({ brand } = {}) {
+export async function getProductCategoriesService({ brand, tenantId } = {}) {
   const match = { category: { $nin: [null, ""] } };
+  if (tenantId) match.tenantId = tenantId;
   if (brand?.trim()) match.brand = { $regex: `^${brand.trim()}$`, $options: "i" };
 
   return await DigiProduct.aggregate([
@@ -451,8 +455,9 @@ export async function getProductCategoriesService({ brand } = {}) {
   ]);
 }
 
-export async function getProductCoatingsService({ brand, category } = {}) {
+export async function getProductCoatingsService({ brand, category, tenantId } = {}) {
   const match = { coating: { $nin: [null, ""] } };
+  if (tenantId) match.tenantId = tenantId;
   if (brand?.trim()) match.brand = { $regex: `^${brand.trim()}$`, $options: "i" };
   if (category?.trim()) match.category = { $regex: `^${category.trim()}$`, $options: "i" };
 
@@ -482,8 +487,9 @@ export async function getProductCoatingsService({ brand, category } = {}) {
   ]);
 }
 
-export async function getProductNamesService({ brand, category, search = "", limit = 100, page = 1 }) {
+export async function getProductNamesService({ brand, category, search = "", limit = 100, page = 1, tenantId } = {}) {
   const filter = { productName: { $nin: [null, ""] } };
+  if (tenantId) filter.tenantId = tenantId;
   if (brand?.trim()) filter.brand = { $regex: `^${brand.trim()}$`, $options: "i" };
   if (category?.trim()) filter.category = { $regex: `^${category.trim()}$`, $options: "i" };
   if (search.trim()) filter.productName = { $regex: search.trim(), $options: "i" };
@@ -511,9 +517,16 @@ export async function getProductTreatmentsService() {
   return await ProductTreatment.find({}).sort({ name: 1 }).lean();
 }
 
-export async function getProductIndexesService() {
+export async function getProductTypesService() {
+  return await ProductType.find({}).sort({ name: 1 }).lean();
+}
+
+export async function getProductIndexesService({ tenantId } = {}) {
+  const match = { index: { $nin: [null, ""] } };
+  if (tenantId) match.tenantId = tenantId;
+
   return await DigiProduct.aggregate([
-    { $match: { index: { $nin: [null, ""] } } },
+    { $match: match },
     { $sort: { index: 1, createdAt: 1 } },
     {
       $group: {

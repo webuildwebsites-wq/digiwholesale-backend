@@ -6,6 +6,15 @@ import {
   suggestionsOrdersService,
   getRxOrdersService,
   getDraftOrdersService,
+  getTintOptionsService,
+  getFrameTypesService,
+  getProductBrandsService,
+  getProductCategoriesService,
+  getProductTreatmentsService,
+  getProductIndexesService,
+  getProductTypesService,
+  getProductCoatingsService,
+  getProductNamesService,
 } from "../../services/order/order.service.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 
@@ -134,6 +143,94 @@ export const getDraftOrders = async (req, res) => {
         hasPrev: result.pagination.page > 1,
       },
     }, "Draft orders retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getTintOptions = async (req, res) => {
+  try {
+    const data = await getTintOptionsService();
+    return sendSuccessResponse(res, 200, data, "Tint options retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getFrameTypes = async (req, res) => {
+  try {
+    const data = await getFrameTypesService();
+    return sendSuccessResponse(res, 200, data, "Frame types retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getProductBrands = async (req, res) => {
+  try {
+    const data = await getProductBrandsService({ tenantId: req.user.tenantId });
+    return sendSuccessResponse(res, 200, data, "Product brands retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getProductCategories = async (req, res) => {
+  try {
+    const data = await getProductCategoriesService({ brand: req.query.brand, tenantId: req.user.tenantId });
+    return sendSuccessResponse(res, 200, data, "Product categories retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getProductTreatments = async (req, res) => {
+  try {
+    const data = await getProductTreatmentsService({ tenantId: req.user.tenantId });
+    return sendSuccessResponse(res, 200, data, "Product treatments retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getProductIndexes = async (req, res) => {
+  try {
+    const data = await getProductIndexesService({ tenantId: req.user.tenantId });
+    return sendSuccessResponse(res, 200, data, "Product indexes retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getProductTypes = async (req, res) => {
+  try {
+    const data = await getProductTypesService();
+    return sendSuccessResponse(res, 200, data, "Product types retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getProductCoatings = async (req, res) => {
+  try {
+    const data = await getProductCoatingsService({ brand: req.query.brand, category: req.query.category, tenantId: req.user.tenantId });
+    return sendSuccessResponse(res, 200, data, "Product coatings retrieved successfully");
+  } catch (err) {
+    return handleError(res, err);
+  }
+};
+
+export const getProductNames = async (req, res) => {
+  try {
+    const data = await getProductNamesService({
+      brand: req.query.brand,
+      category: req.query.category,
+      search: req.query.search,
+      limit: req.query.limit,
+      page: req.query.page,
+      tenantId: req.user.tenantId,
+    });
+    return sendSuccessResponse(res, 200, data, "Product names retrieved successfully");
   } catch (err) {
     return handleError(res, err);
   }
