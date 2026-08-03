@@ -31,7 +31,7 @@ returnRefundRouter.get("/:id",  getReturnRefundById);
 
 // returnRefundRouter.put("/:id", updateReturnRefund);
 
-returnRefundRouter.patch("/:id/status", updateReturnRefundStatus);
+returnRefundRouter.put("/:id/status", updateReturnRefundStatus);
 
 returnRefundRouter.delete("/:id", deleteReturnRefund);
 
