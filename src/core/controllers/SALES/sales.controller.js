@@ -19,7 +19,7 @@ export const createSale = async (req, res) => {
       totalAmount,
       paymentMode,
       createdBy: req.user._id,
-      createdByName: req.user.name,
+      createdByName: req.user.employeeName || req.user.name,
       tenantId: req.user.tenantId,
     });
 
