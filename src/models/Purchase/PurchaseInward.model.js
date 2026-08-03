@@ -27,6 +27,7 @@ const purchaseInwardSchema = new mongoose.Schema(
         remarks:         String,
         status:          { type: String, enum: ["Draft", "Confirmed"], default: "Confirmed" },
         createdBy:       { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+        tenantId:        { type: String, trim: true, uppercase: true, default: null, index: true },
     },
     { timestamps: true }
 );

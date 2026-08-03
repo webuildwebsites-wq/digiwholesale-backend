@@ -776,7 +776,7 @@ export const getQCPendingItems = async (req, res) => {
 
         const allItems = [];
         for (const po of purchaseOrders) {
-            const inwardRecord = await PurchaseInward.findOne({ purchaseOrderId: po._id, tenantId: req.user.tenantId })
+            const inwardRecord = await PurchaseInward.findOne({ purchaseOrderId: po._id })
                 .sort({ createdAt: -1 })
                 .lean();
 
