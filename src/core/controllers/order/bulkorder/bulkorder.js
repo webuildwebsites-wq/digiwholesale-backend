@@ -346,13 +346,15 @@ export const createBulkOrder = async (req, res) => {
             }
 
             for (const item of order.items) {
-                if (!item.productId) {
-                    return sendErrorResponse(res, 400, "VALIDATION_ERROR", "productId is required for every item");
+                if (item.orderType !== "RX" && !item.productId) {
+                    return sendErrorResponse(res, 400, "VALIDATION_ERROR", "productId is required for STOCK items");
                 }
-                if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+                if (item.productId && !mongoose.Types.ObjectId.isValid(item.productId)) {
                     return sendErrorResponse(res, 400, "INVALID_PRODUCT_ID", `Invalid productId: ${item.productId}`);
                 }
-                allProductIds.push(item.productId.toString());
+                if (item.productId) {
+                    allProductIds.push(item.productId.toString());
+                }
             }
         }
 
@@ -370,68 +372,68 @@ export const createBulkOrder = async (req, res) => {
 
         for (const order of orders) {
             for (const item of order.items) {
-                const product = productMap[item.productId.toString()];
+                const product = item.productId ? productMap[item.productId.toString()] : null;
 
-                if (!product) {
+                if (item.orderType !== "RX" && !product) {
                     return sendErrorResponse(res, 404, "PRODUCT_NOT_FOUND", `Product not found: ${item.productId}`);
                 }
 
                 const qty = Number(item.qty);
 
                 if (!qty || qty <= 0) {
-                    return sendErrorResponse(res, 400, "INVALID_QUANTITY", `Quantity must be greater than 0 for ${product.productName}`);
+                    return sendErrorResponse(res, 400, "INVALID_QUANTITY", `Quantity must be greater than 0 for ${item.itemName || item.productId}`);
                 }
 
-                const rawCategory    = (item.category || product.category || "").toUpperCase();
+                const rawCategory     = (item.category || product?.category || "").toUpperCase();
                 const validationError = validateItemByCategory(item, product);
 
                 if (validationError) {
-                    return sendErrorResponse(res, 400, "VALIDATION_ERROR", `${validationError}. Product: ${product.productName}`);
+                    return sendErrorResponse(res, 400, "VALIDATION_ERROR", `${validationError}. Product: ${item.itemName || item.productId}`);
                 }
 
                 if (item.orderType === "STOCK") {
                     delete item.rx;
                 }
 
-                item.itemName = item.itemName || product.productName;
+                item.itemName = item.itemName || product?.productName;
                 item.category = rawCategory;
-                item.price    = item.price  ?? product.price ?? 0;
-                item.mrp      = item.mrp    ?? product.mrp   ?? 0;
-                item.gst      = item.gst    ?? product.gst   ?? 0;
-                item.hsnSac   = item.hsnSac || product.hsnSac;
+                item.price    = item.price  ?? product?.price ?? 0;
+                item.mrp      = item.mrp    ?? product?.mrp   ?? 0;
+                item.gst      = item.gst    ?? product?.gst   ?? 0;
+                item.hsnSac   = item.hsnSac || product?.hsnSac;
                 item.qty      = qty;
                 item.photos   = Array.isArray(item.photos) ? item.photos : [];
 
                 if (FRAME_SUNGLASS_CATEGORIES.includes(rawCategory)) {
-                    item.code        = item.code        || product.productCode;
-                    item.brand       = item.brand       || product.brand;
-                    item.color       = item.color       || product.color;
-                    item.size        = item.size        || product.size;
-                    item.type        = item.type        || product.type;
-                    item.shape       = item.shape       || product.shape;
-                    item.material    = item.material    || product.material;
-                    item.dimensions  = item.dimensions  || product.dimensions;
+                    item.code        = item.code        || product?.productCode;
+                    item.brand       = item.brand       || product?.brand;
+                    item.color       = item.color       || product?.color;
+                    item.size        = item.size        || product?.size;
+                    item.type        = item.type        || product?.type;
+                    item.shape       = item.shape       || product?.shape;
+                    item.material    = item.material    || product?.material;
+                    item.dimensions  = item.dimensions  || product?.dimensions;
                 }
 
                 if (LENS_CATEGORIES.includes(rawCategory)) {
                     if (item.orderType === "RX") {
-                        item.index   = item.index   ?? product.index;
-                        item.coating = item.coating || product.coating;
+                        item.index   = item.index   ?? product?.index;
+                        item.coating = item.coating || product?.coating;
                     } else {
-                        item.sph     = item.sph     ?? product.sph;
-                        item.cyl     = item.cyl     ?? product.cyl;
-                        item.axis    = item.axis    ?? product.axis;
-                        item.add     = item.add     ?? product.add;
-                        item.index   = item.index   ?? product.index;
-                        item.tint    = item.tint    || product.tint;
-                        item.coating = item.coating || product.coating;
+                        item.sph     = item.sph     ?? product?.sph;
+                        item.cyl     = item.cyl     ?? product?.cyl;
+                        item.axis    = item.axis    ?? product?.axis;
+                        item.add     = item.add     ?? product?.add;
+                        item.index   = item.index   ?? product?.index;
+                        item.tint    = item.tint    || product?.tint;
+                        item.coating = item.coating || product?.coating;
                     }
                 }
 
                 if (rawCategory === "CONTACT_LENS") {
-                    item.color         = item.color         || product.color;
-                    item.expiry        = item.expiry        || product.expiry;
-                    item.disposability = item.disposability || product.disposability;
+                    item.color         = item.color         || product?.color;
+                    item.expiry        = item.expiry        || product?.expiry;
+                    item.disposability = item.disposability || product?.disposability;
                 }
 
                 if (item.orderType === "RX" && item.rx) {
