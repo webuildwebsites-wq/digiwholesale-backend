@@ -9,6 +9,7 @@ import VendorOrderUpdatedTemplate from "../../../Utils/Mail/VendorOrderUpdatedTe
 import { generatePurchaseOrderExcel } from "../../../Utils/excel/generatePurchaseOrderExcel.js";
 import PurchaseReturnModel from "../../../models/Purchase/PurchaseReturn.model.js";
 import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
+import { sendWhatsAppMessage, vendorNewOrderWhatsApp, vendorOrderUpdatedWhatsApp } from "../../../Utils/whatsapp/whatsappService.js";
 
 const FRAME_SUNGLASS_CATEGORIES = ["FRAME", "SUNGLASS"];
 const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
@@ -250,6 +251,19 @@ export const createVendorPurchaseItems = async (req, res) => {
             }).catch(err => console.error("Vendor purchase email error:", err.message));
         }
 
+        if (vendor.mobile) {
+            sendWhatsAppMessage({
+                to:      vendor.mobile,
+                message: vendorNewOrderWhatsApp({
+                    vendorName:      vendor.name,
+                    purchaseOrderId: vendorPurchase._id.toString(),
+                    orderDate:       new Date(vendorPurchase.createdAt).toLocaleDateString("en-IN"),
+                    totalOrders:     vendorPurchase.orders.length,
+                    totalItems:      vendorPurchase.orders.reduce((sum, o) => sum + o.items.length, 0),
+                }),
+            }).catch(err => console.error("Vendor purchase WhatsApp error:", err.message));
+        }
+
         return sendSuccessResponse(res, 201, { vendorPurchase }, "Vendor purchase order created successfully");
 
     } catch (error) {
@@ -489,6 +503,18 @@ export const updateVendorPurchaseItems = async (req, res) => {
                     },
                 ],
             }).catch(err => console.error("Vendor update email error:", err.message));
+        }
+
+        if (vendor?.mobile) {
+            sendWhatsAppMessage({
+                to:      vendor.mobile,
+                message: vendorOrderUpdatedWhatsApp({
+                    vendorName:      purchaseOrder.vendor.vendorName,
+                    purchaseOrderId: purchaseOrder._id.toString(),
+                    orderDate:       new Date(purchaseOrder.createdAt).toLocaleDateString("en-IN"),
+                    updatedAt:       new Date().toLocaleDateString("en-IN"),
+                }),
+            }).catch(err => console.error("Vendor update WhatsApp error:", err.message));
         }
 
         return sendSuccessResponse(res, 200, { purchaseOrder }, "Purchase order updated successfully");

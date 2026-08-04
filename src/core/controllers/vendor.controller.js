@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
 import Vendor from "../../models/Vendor.model.js";
+import { sendEmail } from "../config/Email/emailService.js";
+import VendorRegistrationTemplate from "../../Utils/Mail/VendorRegistrationTemplate.js";
+import { sendWhatsAppMessage, vendorRegistrationWhatsApp } from "../../Utils/whatsapp/whatsappService.js";
 
 export const createVendor = async (req, res) => {
   const session = await mongoose.startSession();
@@ -11,7 +14,7 @@ export const createVendor = async (req, res) => {
       throw new Error("Vendor name, firm, email and mobile are required");
     }
 
-    const firmName = firm.trim().toUpperCase();
+    const firmName   = firm.trim().toUpperCase();
     const vendorName = name.trim().toUpperCase();
 
     const existingVendor = await Vendor.findOne({
@@ -28,6 +31,17 @@ export const createVendor = async (req, res) => {
     await vendor.save({ session });
     await session.commitTransaction();
     session.endSession();
+
+    sendEmail({
+      to:      email,
+      subject: "Welcome to DigiOptics Wholesale — Vendor Registration Confirmed",
+      html:    VendorRegistrationTemplate({ vendorName, firmName, mobile, email }),
+    }).catch(err => console.error("Vendor registration email error:", err.message));
+
+    sendWhatsAppMessage({
+      to:      mobile,
+      message: vendorRegistrationWhatsApp({ name: vendorName, firm: firmName, mobile, email }),
+    }).catch(err => console.error("Vendor registration WhatsApp error:", err.message));
 
     return res.status(201).json({ success: true, message: "Vendor created successfully", vendor });
   } catch (error) {
