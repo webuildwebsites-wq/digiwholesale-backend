@@ -2,15 +2,17 @@ import mongoose from "mongoose";
 
 const settingsSchema = new mongoose.Schema(
     {
-        allCategories:   [String],
-        gst:             [String],
-        paymentFor:      [String],
-        salesPaymentFor: [String],
-        status:          [String],
-        transactionType: [String],
-        tenantId:        { type: String, trim: true, uppercase: true, default: null, index: true },
+        allCategories:   { type: [String], default: [] },
+        gst:             { type: [String], default: [] },
+        paymentFor:      { type: [String], default: [] },
+        salesPaymentFor: { type: [String], default: [] },
+        status:          { type: [String], default: [] },
+        transactionType: { type: [String], default: [] },
     },
-    { timestamps: true }
+    {
+        timestamps: true,
+        strict: false,
+    }
 );
 
 export default mongoose.model("Settings", settingsSchema);

@@ -3,12 +3,7 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/
 
 export const getSettingsByStore = async (req, res) => {
   try {
-    const settings = await Settings.findOneAndUpdate(
-      { tenantId: req.user.tenantId },
-      { $setOnInsert: { tenantId: req.user.tenantId } },
-      { new: true, upsert: true, runValidators: true }
-    );
-
+    const settings = await Settings.find({}).lean();
     return sendSuccessResponse(res, 200, { settings });
 
   } catch (error) {

@@ -8,6 +8,7 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/respon
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
 import { handleOrderBillingNotification } from "../../../services/billing/billingNotification.service.js";
+import { sendWhatsAppMessage } from "../../../../Utils/whatsapp/whatsappService.js";
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
 import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
 
@@ -173,7 +174,7 @@ const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
 
         const vendorIds = [...vendorItemsMap.keys()].filter(id => mongoose.Types.ObjectId.isValid(id));
         const vendors = await Vendor.find({ _id: { $in: vendorIds } }).lean();
-        const vendorEmailMap = new Map(vendors.map(v => [v._id.toString(), v.email]));
+        const vendorEmailMap = new Map(vendors.map(v => [v._id.toString(), { email: v.email, mobile: v.mobile }]));
 
         const orderDate = new Date(bulkOrder.createdAt).toLocaleDateString("en-IN");
         const orderNumber = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
@@ -183,8 +184,8 @@ const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
         const emailPromises = [];
 
         for (const [vendorId, { vendorName, items }] of vendorItemsMap) {
-            const vendorEmail = vendorEmailMap.get(vendorId);
-            if (!vendorEmail) {
+            const vendorContact = vendorEmailMap.get(vendorId);
+            if (!vendorContact?.email) {
                 console.warn(`No email found for vendor ${vendorId} (${vendorName}), skipping.`);
                 continue;
             }
@@ -203,11 +204,33 @@ const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
 
             emailPromises.push(
                 sendEmail({
-                    to:      vendorEmail,
+                    to:      vendorContact.email,
                     subject: `RX Order ${orderNumber} — DigiOptics`,
                     html,
                 }).catch(err => console.error(`Failed to send email to vendor ${vendorId}:`, err.message))
             );
+
+            if (vendorContact.mobile) {
+                const whatsappMsg = `Hello ${vendorName} 👋,
+
+A new *RX Order* has been assigned to you on *DigiOptics Wholesale*.
+
+*Order Details:*
+• Order Number: ${orderNumber}
+• Order Date: ${orderDate}
+• Customer: ${customer.ownerName || customer.shopName}
+• Total RX Items: ${items.length}
+
+Please check your email for complete RX specifications and lens details.
+
+Thank you,
+*DigiOptics Wholesale Team*`;
+
+                emailPromises.push(
+                    sendWhatsAppMessage({ to: vendorContact.mobile, message: whatsappMsg })
+                        .catch(err => console.error(`Failed to send WhatsApp to vendor ${vendorId}:`, err.message))
+                );
+            }
         }
 
         await Promise.all(emailPromises);
