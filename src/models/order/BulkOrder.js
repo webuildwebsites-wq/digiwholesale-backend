@@ -50,7 +50,9 @@ const BulkOrderItemSchema = new mongoose.Schema(
         productId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "DigiProduct",
-            required: true,
+            required: function () {
+                return this.orderType !== "RX";
+            },
         },
 
         orderType: {
