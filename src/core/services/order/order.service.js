@@ -7,6 +7,7 @@ import ProductTreatment from "../../../models/order/ProductTreatment.js";
 import ProductType from "../../../models/order/ProductType.js";
 import DigiProduct from "../../../models/Product/Product.model.js";
 import BulkOrder from "../../../models/order/BulkOrder.js";
+import { invalidatePDFs } from "../pdfStorageService.js";
 
 
 export async function generateOrderNumber() {
@@ -130,14 +131,14 @@ export async function deleteOrderService(orderId, tenantId) {
 
 export async function listOrdersService({ customerId, status, page = 1, limit = 20, search, fromDate, toDate, tenantId }) {
   const STATUS_MAP = {
-    PENDING:    ["Processing"],
-    CONFIRMED:  ["Confirmed"],
+    PENDING: ["Processing"],
+    CONFIRMED: ["Confirmed"],
     PROCESSING: ["Processing"],
-    COMPLETED:  ["Completed"],
-    CANCELLED:  ["Cancelled"],
-    SUBMITTED:  ["Submitted"],
-    DRAFT:      ["Draft"],
-    DELIVERABLE:["Deliverable"],
+    COMPLETED: ["Completed"],
+    CANCELLED: ["Cancelled"],
+    SUBMITTED: ["Submitted"],
+    DRAFT: ["Draft"],
+    DELIVERABLE: ["Deliverable"],
   };
   const filter = {};
   if (tenantId) filter.tenantId = tenantId;
@@ -157,12 +158,12 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     const matchedCustomers = await Customer.find({
       ...(tenantId ? { tenantId } : {}),
       $or: [
-        { shopName:      searchRegex },
-        { ownerName:     searchRegex },
+        { shopName: searchRegex },
+        { ownerName: searchRegex },
         { businessEmail: searchRegex },
-        { mobileNo1:     searchRegex },
-        { mobileNo2:     searchRegex },
-        { customerCode:  searchRegex },
+        { mobileNo1: searchRegex },
+        { mobileNo2: searchRegex },
+        { customerCode: searchRegex },
       ],
     }).select("_id").lean();
 
@@ -170,7 +171,7 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
 
     filter.$or = [
       { "customer.customerName": searchRegex },
-      { "orders.orderNumber":    searchRegex },
+      { "orders.orderNumber": searchRegex },
       { "orders.items.itemName": searchRegex },
       ...(customerIds.length > 0 ? [{ "customer.customerId": { $in: customerIds } }] : []),
     ];
@@ -195,20 +196,20 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     .lean();
 
   const customerIds = [...new Set(orders.map(o => o.customer?.customerId?.toString()).filter(Boolean))];
-  const customers   = await Customer.find({ _id: { $in: customerIds }, ...(filter.tenantId ? { tenantId: filter.tenantId } : {}) })
+  const customers = await Customer.find({ _id: { $in: customerIds }, ...(filter.tenantId ? { tenantId: filter.tenantId } : {}) })
     .select("_id billingMode billingCycle")
     .lean();
   const customerMap = new Map(customers.map(c => [c._id.toString(), c]));
 
   const ordersWithTotalPrice = orders.map((bulkOrder) => {
-    const custId   = bulkOrder.customer?.customerId?.toString();
+    const custId = bulkOrder.customer?.customerId?.toString();
     const custData = custId ? customerMap.get(custId) : null;
 
     return {
       ...bulkOrder,
       customer: {
         ...bulkOrder.customer,
-        billingMode:  custData?.billingMode  || null,
+        billingMode: custData?.billingMode || null,
         billingCycle: custData?.billingCycle || null,
       },
       orders: bulkOrder.orders.map((order) => ({
@@ -227,7 +228,7 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
   });
 
   return {
-    orders : ordersWithTotalPrice,
+    orders: ordersWithTotalPrice,
     pagination: {
       total,
       page: parseInt(page),
@@ -237,27 +238,52 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
   };
 }
 
-export async function cancelOrderService(orderId, reason, tenantId) {
+export async function cancelOrderService(orderId, reason, tenantId, user = {}) {
+  const ALLOWED_TRANSITIONS = {
+    "Draft":           ["Submitted", "Cancelled"],
+    "Submitted":       ["Processing", "Cancelled"],
+    "Processing":      ["QC", "Cancelled"],
+    "QC":              ["ReadyToDispatch", "Cancelled"],
+    "ReadyToDispatch": ["Dispatched", "Cancelled"],
+    "Dispatched":      ["Delivered", "Cancelled"],
+    "Delivered":       ["Completed"],
+    "Completed":       [],
+    "Cancelled":       [],
+  };
+
   const filter = { _id: orderId };
   if (tenantId) filter.tenantId = tenantId;
+
   const bulkOrder = await BulkOrder.findOne(filter);
   if (!bulkOrder) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
 
-  const cancellable = ["PENDING", "CONFIRMED"];
-  let anyChanged = false;
-
-  bulkOrder.orders.forEach((order) => {
-    if (cancellable.includes(order.status)) {
-      order.status = "CANCELLED";
-      anyChanged = true;
+  for (const order of bulkOrder.orders) {
+    const allowed = ALLOWED_TRANSITIONS[order.status] || [];
+    if (!allowed.includes("Cancelled")) {
+      throw {
+        statusCode: 400,
+        code: "INVALID_TRANSITION",
+        message: `Order "${order.orderNumber}" cannot be cancelled from status "${order.status}". Allowed next: ${allowed.length ? allowed.join(", ") : "none"}`,
+      };
     }
-  });
 
-  if (!anyChanged) {
-    throw { statusCode: 400, code: "INVALID_STATUS", message: "No orders in a cancellable state (PENDING or CONFIRMED)" };
+    order.statusHistory.push({
+      from:          order.status,
+      to:            "Cancelled",
+      remarks:       reason || "",
+      changedBy:     user._id     || user.id || null,
+      changedByName: user.employeeName || user.name || "",
+      changedAt:     new Date(),
+    });
+
+    order.status  = "Cancelled";
+    order.remarks = reason || order.remarks || null;
   }
 
   await bulkOrder.save();
+
+  invalidatePDFs(orderId, tenantId).catch(err => console.error("PDF invalidation error (cancel):", err.message));
+
   return bulkOrder;
 }
 
@@ -622,8 +648,8 @@ export async function getRxOrdersService({ page = 1, limit = 20, search, fromDat
     }
   }
 
-  const skip    = (parseInt(page) - 1) * parseInt(limit);
-  const total   = await BulkOrder.countDocuments(filter);
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+  const total = await BulkOrder.countDocuments(filter);
   const records = await BulkOrder.find(filter)
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -686,7 +712,7 @@ export async function getDraftOrdersService({ page = 1, limit = 20, search, cust
     }
   }
 
-  const skip  = (parseInt(page) - 1) * parseInt(limit);
+  const skip = (parseInt(page) - 1) * parseInt(limit);
   const total = await BulkOrder.countDocuments(filter);
 
   const records = await BulkOrder.find(filter)
@@ -704,8 +730,8 @@ export async function getDraftOrdersService({ page = 1, limit = 20, search, cust
         totalOrderPrice: Number(
           order.items
             .reduce((sum, item) => {
-              const price      = Number(item.price || 0);
-              const gstPercent = Number(item.gst   || 0);
+              const price = Number(item.price || 0);
+              const gstPercent = Number(item.gst || 0);
               return sum + price + (price * gstPercent) / 100;
             }, 0)
             .toFixed(2)
@@ -717,8 +743,8 @@ export async function getDraftOrdersService({ page = 1, limit = 20, search, cust
     orders,
     pagination: {
       total,
-      page:       parseInt(page),
-      limit:      parseInt(limit),
+      page: parseInt(page),
+      limit: parseInt(limit),
       totalPages: Math.ceil(total / parseInt(limit)),
     },
   };

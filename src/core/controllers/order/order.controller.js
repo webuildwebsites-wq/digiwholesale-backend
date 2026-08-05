@@ -59,7 +59,7 @@ export const listOrders = async (req, res) => {
 
 export const cancelOrder = async (req, res) => {
   try {
-    const order = await cancelOrderService(req.params.id, req.body.reason, req.user.tenantId);
+    const order = await cancelOrderService(req.params.id, req.body.reason, req.user.tenantId, req.user);
     return sendSuccessResponse(res, 200, order, "Order cancelled");
   } catch (err) {
     return handleError(res, err);
