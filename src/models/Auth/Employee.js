@@ -224,7 +224,7 @@ const employee = new mongoose.Schema({
       "RETURN_REFUND", "EXCHANGE_REQUESTS", "DRAFTS", "DAILY_REPORT",
       "MAIN_REPORT", "ADD_REPAIR", "REPAIR_LIST", "ADD_VENDOR",
       "VENDOR_LIST", "VENDOR_ORDER", "QUALITY", "FITTING", "SHIPPING",
-      "INVENTORY",
+      "INVENTORY", "SETTINGS"
     ],
     default: [],
   },
