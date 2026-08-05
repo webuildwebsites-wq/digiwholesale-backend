@@ -32,6 +32,7 @@ const purchaseReturnSchema = new mongoose.Schema(
         vendorNotifiedAt: { type: Date, default: null },
         remarks:          String,
         createdBy:        { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+        tenantId:         { type: String, trim: true, uppercase: true, default: null, index: true },
     },
     { timestamps: true }
 );

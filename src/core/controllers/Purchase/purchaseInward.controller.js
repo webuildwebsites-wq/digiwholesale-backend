@@ -169,7 +169,7 @@ export const getPurchaseInwardById = async (req, res) => {
         const inward = await PurchaseInward.findOne({ _id: id, tenantId: req.user.tenantId }).lean();
         if (!inward) return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase inward not found");
 
-        const purchaseOrder = await VendorPurchase.findById(inward.purchaseOrderId).lean();
+        const purchaseOrder = await VendorPurchase.findOne({ _id: inward.purchaseOrderId, tenantId: req.user.tenantId }).lean();
 
         const allPurchaseItems = purchaseOrder
             ? purchaseOrder.orders.flatMap(o => o.items)

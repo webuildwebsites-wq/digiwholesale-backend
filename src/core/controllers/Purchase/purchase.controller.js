@@ -1328,7 +1328,7 @@ export const getReplacementOrderById = async (req, res) => {
 
         const [purchaseReturn, originalPO] = await Promise.all([
             po.replacementFor
-                ? PurchaseReturnModel.findById(po.replacementFor).lean()
+                ? PurchaseReturnModel.findOne({ _id: po.replacementFor, tenantId: req.user.tenantId }).lean()
                 : null,
             po.originalPurchaseOrderId
                 ? VendorPurchase.findOne({ _id: po.originalPurchaseOrderId, tenantId: req.user.tenantId }).lean()
