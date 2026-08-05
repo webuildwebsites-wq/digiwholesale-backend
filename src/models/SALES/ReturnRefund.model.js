@@ -16,6 +16,9 @@ const returnItemSchema = new mongoose.Schema(
     orderNumber: { type: String },
     returnType: { type: String },
     category: { type: String },
+    condition: { type: String },
+    reasonForReturn: { type: String },
+    images: [{ type: String }],
   },
   { _id: false }
 );
@@ -28,8 +31,6 @@ const returnRefundSchema = new mongoose.Schema(
 
     dateOfPurchase: { type: Date, required: true },
     itemType: { type: String, required: true },
-    condition: { type: String, required: true },
-    reasonForReturn: { type: String, required: true },
 
     items: { type: [returnItemSchema], required: true },
 
@@ -40,9 +41,7 @@ const returnRefundSchema = new mongoose.Schema(
       enum: ["CASH", "CARD", "UPI", "LOYALTY_POINTS", "GIFT_VOUCHER"],
     },
     loyaltyPoints: { type: Number, default: 0, min: 0 },
-    giftVoucherUrl: { type: String, default: null }, 
-
-    photos: [{ type: String }], 
+    giftVoucherUrl: { type: String, default: null },
 
     status: {
       type: String,

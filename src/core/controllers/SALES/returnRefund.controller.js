@@ -8,25 +8,22 @@ export const createReturnRefund = async (req, res) => {
   try {
     const {
       name, phone, email,
-      dateOfPurchase, itemType, condition, reasonForReturn,
+      dateOfPurchase, itemType,
       items,
       refundAmount, refundMethod, loyaltyPoints,
       remark,
       OrderId,
       returnType,
-      images,
     } = req.body;
 
-    if (!name)            throw new Error("Customer name is required");
-    if (!phone)           throw new Error("Phone number is required");
-    if (!email)           throw new Error("Email is required");
-    if (!dateOfPurchase)  throw new Error("Date of purchase is required");
-    if (!itemType)        throw new Error("Item type is required");
-    if (!condition)       throw new Error("Condition is required");
-    if (!reasonForReturn) throw new Error("Reason for return is required");
-    if (!refundAmount)    throw new Error("Refund amount is required");
-    if (!refundMethod)    throw new Error("Refund method is required");
-    if (!OrderId)         throw new Error("Order id is required");
+    if (!name)           throw new Error("Customer name is required");
+    if (!phone)          throw new Error("Phone number is required");
+    if (!email)          throw new Error("Email is required");
+    if (!dateOfPurchase) throw new Error("Date of purchase is required");
+    if (!itemType)       throw new Error("Item type is required");
+    if (!refundAmount)   throw new Error("Refund amount is required");
+    if (!refundMethod)   throw new Error("Refund method is required");
+    if (!OrderId)        throw new Error("Order id is required");
 
     if (!mongoose.Types.ObjectId.isValid(OrderId)) {
       return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid Order ID");
@@ -124,6 +121,9 @@ export const createReturnRefund = async (req, res) => {
       ...i,
       returnType: requestedStatus,
       category: (i.category || "").toUpperCase(),
+      condition: i.condition || "",
+      reasonForReturn: i.reasonForReturn || "",
+      images: Array.isArray(i.images) ? i.images : [],
       orderNumber: bulkOrder.orders.find((o) =>
         o.items.some((it) =>
           it.productId.toString() === (i.productId || "").toString() &&
@@ -132,22 +132,17 @@ export const createReturnRefund = async (req, res) => {
       )?.orderNumber || "",
     }));
 
-    const topLevelImages = Array.isArray(images) ? images : [];
-
     const returnRefund = await ReturnRefund.create({
       name: name.trim().toUpperCase(),
       phone: phone.trim(),
       email: email?.trim(),
       dateOfPurchase: new Date(dateOfPurchase),
       itemType,
-      condition,
-      reasonForReturn,
       items: enrichedItems,
       refundAmount: Number(refundAmount),
       refundMethod,
       loyaltyPoints: Number(loyaltyPoints) || 0,
       giftVoucherUrl,
-      photos: topLevelImages,
       remark,
       createdBy: req.user._id,
       createdByName: req.user.employeeName || req.user.name,
@@ -297,7 +292,7 @@ export const updateReturnRefund = async (req, res) => {
 
     const editableFields = [
       "name", "phone", "email",
-      "dateOfPurchase", "itemType", "condition", "reasonForReturn",
+      "dateOfPurchase", "itemType",
       "items",
       "refundAmount", "refundMethod", "loyaltyPoints",
       "remark",
