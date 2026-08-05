@@ -63,7 +63,21 @@ app.use(cors({
   },
   credentials: true,
   allowedHeaders: ["Content-Type", "Authorization"],
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  optionsSuccessStatus: 200,
+}));
+
+app.options("*", cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  optionsSuccessStatus: 200,
 }));
 
 
@@ -83,7 +97,7 @@ app.use(helmet({
 app.use(compression());
 app.use(morgan('combined'));
 app.use(hpp());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.set('trust proxy', 1);
 
@@ -165,23 +179,31 @@ try {
 
 } catch (error) {
   console.error("Error occurred:", error);
-  res.status(500).json({
-    message: "Internal Server Error",
-    error: true,
-    success: false,
-    server: "lens-manufacturing-erp",
-    serverError: error.message || error
-  });
 }
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
-  const status = err?.status || 500;
+
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  }
+
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ success: false, error: { code: "PAYLOAD_TOO_LARGE", message: "Request body too large" } });
+  }
+
+  const status = err?.status || err?.statusCode || 500;
   res.status(status).json({
-    message: err?.message || 'Internal Server Error',
-    error: true,
     success: false,
-    ...(process.env.NODE_ENV === 'development' ? { stack: err.stack } : {})
+    error: {
+      code: err?.code || "INTERNAL_ERROR",
+      message: err?.message || "Internal Server Error",
+    },
+    ...(process.env.NODE_ENV === "development" ? { stack: err.stack } : {}),
   });
 });
 
