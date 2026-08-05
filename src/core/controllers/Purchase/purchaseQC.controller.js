@@ -190,12 +190,12 @@ export const createPurchaseQC = async (req, res) => {
                 photos:        itemPhotos,
             });
 
-            if (passed > 0 && item.productId) {
+            if (passed > 0 && item.productId && !item.isNewProduct) {
                 passedItems.push({ productId: item.productId, qty: passed });
             }
 
-            if (passed > 0 && !item.productId && item.orderType === "RX") {
-                passedItems.push({ productId: null, qty: passed, item });
+            if (passed > 0 && (!item.productId || item.isNewProduct)) {
+                passedItems.push({ productId: item.productId || null, qty: passed, item });
             }
 
             if (failed > 0) {
@@ -313,46 +313,53 @@ export const createPurchaseQC = async (req, res) => {
                 createdBy:     req.user._id,
                 tenantId:      req.user.tenantId,
             });
+        }
 
-            if (notifyVendor && vendor) {
-                const html = buildQCRejectionEmailHTML({
-                    vendorName:      purchaseOrder.vendor.vendorName,
-                    purchaseOrderId: purchaseOrderId.toString(),
-                    qcDate:          new Date(),
-                    failedItems,
-                    totalPassed:     passedItems.reduce((s, i) => s + i.qty, 0),
-                    totalFailed:     failedItems.reduce((s, i) => s + (i.failedQty || i.qty || 0), 0),
-                });
+        if (notifyVendor && vendor) {
+            const totalPassed = qcItems.reduce((s, i) => s + (i.passedQty || 0), 0);
+            const totalFailed = qcItems.reduce((s, i) => s + (i.failedQty || 0), 0);
 
-                const excelBuffer = generateQCRejectionExcel({
-                    purchaseOrderId: purchaseOrderId.toString(),
-                    purchaseQCId:    purchaseQC._id.toString(),
-                    vendorName:      purchaseOrder.vendor.vendorName,
-                    qcDate:          new Date(),
-                    failedItems,
-                });
+            const html = buildQCRejectionEmailHTML({
+                vendorName:      purchaseOrder.vendor.vendorName,
+                purchaseOrderId: purchaseOrderId.toString(),
+                qcDate:          new Date(),
+                failedItems,
+                totalPassed,
+                totalFailed,
+            });
 
-                if (vendor.email) {
-                    sendEmail({
-                        to:      vendor.email,
-                        subject: `QC Rejection Notice — Purchase Order ${purchaseOrderId}`,
-                        html,
-                        attachments: [
-                            {
-                                name:    `QC-Rejection-${purchaseOrderId}.xlsx`,
-                                content: excelBuffer.toString("base64"),
-                            },
-                        ],
-                    }).catch(err => console.error("QC rejection email error:", err.message));
-                }
+            const excelBuffer = generateQCRejectionExcel({
+                purchaseOrderId: purchaseOrderId.toString(),
+                purchaseQCId:    purchaseQC._id.toString(),
+                vendorName:      purchaseOrder.vendor.vendorName,
+                qcDate:          new Date(),
+                failedItems,
+            });
 
-                if (vendor.mobile) {
-                    sendWhatsAppOTP({
-                        phone: `91${vendor.mobile}`,
-                        otp:   `QC FAILED for PO ${purchaseOrderId}. ${failedItems.length} item(s) rejected. Please arrange replacement.`,
-                    }).catch(err => console.error("QC WhatsApp error:", err.message));
-                }
+            if (vendor.email) {
+                sendEmail({
+                    to:      vendor.email,
+                    subject: `QC Report — Purchase Order ${purchaseOrderId}`,
+                    html,
+                    attachments: failedItems.length > 0 ? [
+                        {
+                            name:    `QC-Report-${purchaseOrderId}.xlsx`,
+                            content: excelBuffer.toString("base64"),
+                        },
+                    ] : [],
+                }).catch(err => console.error("QC email error:", err.message));
+            }
 
+            if (vendor.mobile) {
+                const totalPassed = qcItems.reduce((s, i) => s + (i.passedQty || 0), 0);
+                const totalFailed = qcItems.reduce((s, i) => s + (i.failedQty || 0), 0);
+                sendWhatsAppOTP({
+                    phone: `91${vendor.mobile}`,
+                    otp:   `QC Report for PO ${purchaseOrderId}: ${totalPassed} item(s) PASSED, ${totalFailed} item(s) FAILED. Please check your email for details.`,
+                }).catch(err => console.error("QC WhatsApp error:", err.message));
+            }
+
+            if (purchaseReturn) {
                 await PurchaseReturn.findOneAndUpdate(
                     { _id: purchaseReturn._id, tenantId: req.user.tenantId },
                     {
