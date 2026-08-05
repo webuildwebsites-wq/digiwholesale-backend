@@ -194,6 +194,10 @@ export const createPurchaseQC = async (req, res) => {
                 passedItems.push({ productId: item.productId, qty: passed });
             }
 
+            if (passed > 0 && !item.productId && item.orderType === "RX") {
+                passedItems.push({ productId: null, qty: passed, item });
+            }
+
             if (failed > 0) {
                 failedItems.push({
                     itemId:        item._id,
@@ -235,13 +239,65 @@ export const createPurchaseQC = async (req, res) => {
         });
 
         if (passedItems.length > 0) {
-            const bulkOps = passedItems.map(({ productId, qty }) => ({
-                updateOne: {
-                    filter: { _id: productId, tenantId: req.user.tenantId },
-                    update: { $inc: { qty } },
-                },
-            }));
-            await DigiProduct.bulkWrite(bulkOps);
+            const stockItems = passedItems.filter(p => p.productId);
+            const rxItems    = passedItems.filter(p => !p.productId);
+
+            if (stockItems.length > 0) {
+                const bulkOps = stockItems.map(({ productId, qty }) => ({
+                    updateOne: {
+                        filter: { _id: productId, tenantId: req.user.tenantId },
+                        update: { $inc: { qty } },
+                    },
+                }));
+                await DigiProduct.bulkWrite(bulkOps);
+            }
+
+            for (const { qty, item } of rxItems) {
+                const productCode = item.code?.trim()
+                    || `RX-${item.category?.toUpperCase() || "PROD"}-${Date.now()}`;
+
+                let product = await DigiProduct.findOne({
+                    productCode,
+                    tenantId: req.user.tenantId,
+                });
+
+                if (product) {
+                    product.qty += qty;
+                    await product.save();
+                } else {
+                    product = await DigiProduct.create({
+                        productCode,
+                        productName:  (item.itemName || productCode).toUpperCase(),
+                        category:     (item.category || "LENS").toUpperCase(),
+                        brand:        item.brand?.toUpperCase() || "",
+                        color:        item.color?.toUpperCase() || "",
+                        size:         item.size?.toUpperCase()  || "",
+                        shape:        item.shape?.toUpperCase() || "",
+                        material:     item.material?.toUpperCase() || "",
+                        dimensions:   item.dimensions || "",
+                        coating:      item.coating?.toUpperCase() || "",
+                        sph:          item.sph?.toString() || "",
+                        cyl:          item.cyl?.toString() || "",
+                        axis:         item.axis?.toString() || "",
+                        addition:     item.add?.toString()  || "",
+                        index:        item.index?.toString() || "",
+                        price:        item.price  ?? 0,
+                        mrp:          item.mrp    ?? 0,
+                        gst:          item.gst    ?? 0,
+                        hsnSac:       item.hsnSac || "",
+                        qty,
+                        tenantId:     req.user.tenantId,
+                        createdBy:    req.user._id,
+                    });
+                }
+
+                const allPO = purchaseOrder.orders.flatMap(o => o.items);
+                const poItem = allPO.find(i => i._id.toString() === item._id.toString());
+                if (poItem) {
+                    poItem.productId = product._id;
+                    await purchaseOrder.save();
+                }
+            }
         }
 
         let purchaseReturn = null;
