@@ -1,5 +1,5 @@
 import multer from "multer";
-import { sendErrorResponse } from "../response/responseHandler.js";
+import { sendErrorResponse } from "../../Utils/response/responseHandler.js";
 
 const FILE_SIZE_LIMIT = 10 * 1024 * 1024;
 

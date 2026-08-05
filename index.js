@@ -67,20 +67,6 @@ app.use(cors({
   optionsSuccessStatus: 200,
 }));
 
-app.options("*", cors({
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  allowedHeaders: ["Content-Type", "Authorization"],
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  optionsSuccessStatus: 200,
-}));
-
-
 
 app.use(helmet({
   crossOriginResourcePolicy: false,
