@@ -3,6 +3,28 @@ import { sendErrorResponse } from "../../Utils/response/responseHandler.js";
 
 const FILE_SIZE_LIMIT = 10 * 1024 * 1024;
 
+const ALLOWED_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+  "image/bmp",
+  "image/tiff",
+  "application/pdf",
+  "text/csv",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "application/zip",
+  "application/x-zip-compressed",
+]);
+
 const uploadImage = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -10,8 +32,7 @@ const uploadImage = multer({
     files: 1,
   },
   fileFilter: (req, file, cb) => {
-    const allowedMimeTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
-    if (allowedMimeTypes.includes(file.mimetype)) {
+    if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new multer.MulterError("LIMIT_UNEXPECTED_FILE", `Unsupported file type: ${file.mimetype}`));
