@@ -1283,6 +1283,60 @@ export const getDraftEmployeeDetails = async (req, res) => {
   }
 };
 
+
+export const updateEmployeeContact = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { email, phone } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid user ID format');
+    }
+
+    if (!email && !phone) {
+      return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'At least one of email or phone is required');
+    }
+
+    if (req.user.EmployeeType !== 'SUPERADMIN') {
+      return sendErrorResponse(res, 403, 'FORBIDDEN', 'Only SuperAdmin can update employee contact details');
+    }
+
+    const employee = await employeeSchema.findOne({ _id: userId, tenantId: req.user.tenantId });
+
+    if (!employee) {
+      return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'Employee not found');
+    }
+
+    if (email) {
+      const emailExists = await employeeSchema.findOne({ email: email.toLowerCase().trim(), _id: { $ne: userId } });
+      if (emailExists) {
+        return sendErrorResponse(res, 409, 'DUPLICATE_ERROR', `Email '${email}' is already taken by another employee`);
+      }
+      employee.email = email.toLowerCase().trim();
+    }
+
+    if (phone) {
+      employee.phone = phone.trim();
+    }
+
+    await employee.save({ validateBeforeSave: false });
+
+    const updated = await employeeSchema.findById(userId).select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret').lean();
+
+    return sendSuccessResponse(res, 200, { user: updated }, 'Employee contact details updated successfully');
+
+  } catch (error) {
+    console.error('Update employee contact error:', error);
+
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return sendErrorResponse(res, 409, 'DUPLICATE_ERROR', `${field} already exists`);
+    }
+
+    return sendErrorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to update employee contact details');
+  }
+};
+
 export const restoreEmployee = async (req, res) => {
   try {
     const { userId } = req.params;

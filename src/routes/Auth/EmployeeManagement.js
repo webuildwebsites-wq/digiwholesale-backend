@@ -1,6 +1,6 @@
 import express from 'express';
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
-import { updateEmployeeDetails, deactivateEmployee, getEmployeeDetails, getSupervisorsByDepartment, getAllEmployees, createEmployee, createDraftEmployee, getAllDraftEmployee, getMyDraftEmployee, getDraftEmployeeDetails, restoreEmployee, getDeletedEmployees, getEmployeesUnderSupervisor, getEmployeesUnderTeamLead, getDepartmentHierarchy, getMultipleEmployees } from '../../core/controllers/Auth/Employee/EmployeeManagement.js';
+import { updateEmployeeDetails, deactivateEmployee, getEmployeeDetails, getSupervisorsByDepartment, getAllEmployees, createEmployee, createDraftEmployee, getAllDraftEmployee, getMyDraftEmployee, getDraftEmployeeDetails, restoreEmployee, getDeletedEmployees, getEmployeesUnderSupervisor, getEmployeesUnderTeamLead, getDepartmentHierarchy, getMultipleEmployees, updateEmployeeContact } from '../../core/controllers/Auth/Employee/EmployeeManagement.js';
 import { deactivateEmployeeDraft, updateDraftEmployee, restoreEmployeeDraft, getDeletedEmployeeDrafts } from '../../core/controllers/Auth/Employee/draft.employee.controller.js';
 import { requireSubAdminOrHigher, canManageEmployee } from '../../middlewares/Auth/AdminMiddleware/roleMiddleware.js';
 import { checkPageAccess, checkPermission } from '../../middlewares/Auth/AdminMiddleware/rbac.middleware.js';
@@ -22,6 +22,7 @@ employeeManagementRouter.post('/get-multiple-employees', checkPageAccess('STAFF_
 employeeManagementRouter.get('/get-draft-employee/:userId', checkPageAccess('STAFF_LIST'), getDraftEmployeeDetails);
 
 employeeManagementRouter.put('/update-employee/:userId', checkPermission('UPDATE_STAFF'), canManageEmployee, updateEmployeeDetails);
+employeeManagementRouter.patch('/update-employee/:userId/contact', updateEmployeeContact);
 employeeManagementRouter.put('/update-draft-employee/:draftId', checkPermission('UPDATE_STAFF'), canManageEmployee, updateDraftEmployee);
 
 employeeManagementRouter.delete('/deactivate-draft-employee/:draftId', checkPermission('DELETE_STAFF'), deactivateEmployeeDraft);
