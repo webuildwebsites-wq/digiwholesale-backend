@@ -271,7 +271,7 @@ export const deleteTenant = async (req, res) => {
         const tenant = await Tenant.findByIdAndDelete(req.params.id);
         if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
 
-        // await Employee.deleteMany({ tenantId: tenant.tenantId });
+        await Employee.deleteMany({ tenantId: tenant.tenantId });
 
         return sendSuccessResponse(res, 200, null, `Tenant "${tenant.storeInformation?.storeName || tenant.businessName || tenant.tenantId}" and all associated employees deleted successfully`);
     } catch (err) {

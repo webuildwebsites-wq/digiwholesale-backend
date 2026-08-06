@@ -1,5 +1,6 @@
 import { sendSuccessResponse, sendErrorResponse } from '../../../../Utils/response/responseHandler.js';
 import { generateEmployeeCode, generateRandomPassword } from '../../../../Utils/Auth/customerAuthUtils.js';
+import { decryptPassword } from '../../../../Utils/Auth/passwordEncryption.js';
 import employeeSchema from '../../../../models/Auth/Employee.js';
 import Department from '../../../../models/Auth/Department.js';
 import Location from '../../../../models/Location/Location.js';
@@ -805,10 +806,14 @@ export const getAllEmployees = async (req, res) => {
 
     console.log("query : ", query)
 
-    const [users, total] = await Promise.all([
+    const isSuperAdmin = req.user.EmployeeType === 'SUPERADMIN';
+
+    const [rawUsers, total] = await Promise.all([
       employeeSchema
         .find(query)
-        .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret -profile')
+        .select(isSuperAdmin
+          ? '+encryptedPassword -passwordResetToken -passwordResetExpires -twoFactorSecret -profile'
+          : '-password -passwordResetToken -passwordResetExpires -twoFactorSecret -profile')
         .populate('createdBy supervisor', 'firstName lastName EmployeeType')
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -816,6 +821,17 @@ export const getAllEmployees = async (req, res) => {
         .lean(),
       employeeSchema.countDocuments(query)
     ]);
+
+    let users = rawUsers;
+
+    if (isSuperAdmin) {
+      users = rawUsers.map(u => {
+        const plain = u.encryptedPassword ? decryptPassword(u.encryptedPassword) : null;
+        const obj   = { ...u, password: plain ?? 'Unable to decrypt' };
+        delete obj.encryptedPassword;
+        return obj;
+      });
+    }
 
     const totalPages = Math.ceil(total / limit);
 
@@ -1067,17 +1083,28 @@ export const getEmployeeDetails = async (req, res) => {
       return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid user ID format');
     }
 
+    const isSuperAdmin = req.user.EmployeeType === 'SUPERADMIN';
     let query = { _id: userId, isActive: true, tenantId: req.user.tenantId };
 
     const user = await employeeSchema.findOne(query)
-      .select('-password -passwordResetToken -passwordResetExpires -twoFactorSecret')
-      .populate('createdBy supervisor', 'firstName lastName EmployeeType');
+      .select(isSuperAdmin
+        ? '+encryptedPassword -passwordResetToken -passwordResetExpires -twoFactorSecret'
+        : '-password -passwordResetToken -passwordResetExpires -twoFactorSecret')
+      .populate('createdBy supervisor', 'firstName lastName EmployeeType')
+      .lean();
 
     if (!user) {
       return sendErrorResponse(res, 404, 'USER_NOT_FOUND', 'Employee not found');
     }
 
-    return sendSuccessResponse(res, 200, { user }, 'Employee details retrieved successfully');
+    let userResult = user;
+    if (isSuperAdmin) {
+      const plain = user.encryptedPassword ? decryptPassword(user.encryptedPassword) : null;
+      userResult  = { ...user, password: plain ?? 'Unable to decrypt' };
+      delete userResult.encryptedPassword;
+    }
+
+    return sendSuccessResponse(res, 200, { user: userResult }, 'Employee details retrieved successfully');
 
   } catch (error) {
     console.error('Get employee details error:', error);

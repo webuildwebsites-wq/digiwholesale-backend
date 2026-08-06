@@ -37,6 +37,11 @@ import { startBillingCron } from './src/core/services/billing/billingCron.js';
 
 dotenv.config();
 
+if (!process.env.PASSWORD_SECRET) {
+  console.error('FATAL: PASSWORD_SECRET environment variable is not set. Server cannot start.');
+  process.exit(1);
+}
+
 const app = express();
 
 const allowedOrigins = [

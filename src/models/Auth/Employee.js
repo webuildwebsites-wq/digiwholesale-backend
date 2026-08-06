@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import Counter from './Counter.js';
+import { encryptPassword } from '../../Utils/Auth/passwordEncryption.js';
+
 
 const subRoleSchema = new mongoose.Schema({
   name: {
@@ -65,6 +67,11 @@ const employee = new mongoose.Schema({
     required: [true, 'Password is required'],
     minlength: [8, 'Password must be at least 8 characters'],
     select: false
+  },
+  encryptedPassword: {
+    type: String,
+    select: false,
+    default: null,
   },
   phone: {
     type: String,
@@ -318,8 +325,10 @@ employee.pre('save', async function () {
 
   if (!this.isModified('password') || !this.password) return;
   try {
+    const plain = this.password;
     const salt = await bcrypt.genSalt(12);
-    this.password = await bcrypt.hash(this.password, salt);
+    this.password = await bcrypt.hash(plain, salt);
+    this.encryptedPassword = encryptPassword(plain);
   } catch (error) {
     console.log("Error : ", error);
     throw error;
