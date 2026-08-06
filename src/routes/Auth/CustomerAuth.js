@@ -1,5 +1,5 @@
 import express from 'express';
-import { customerForgotPassword, customerLogin, customerResetPassword, customerBasicRegistration, updateCustomerProfile, resetCustomerCredit, sendCustomerForCorrection, resubmitCorrectedCustomer, updateCustomerShipToDetails } from '../../core/controllers/Auth/Customers/CustomerAuth.js';
+import { customerForgotPassword, customerLogin, customerResetPassword, customerBasicRegistration, updateCustomerProfile, resetCustomerCredit, sendCustomerForCorrection, resubmitCorrectedCustomer, updateCustomerShipToDetails, updateCustomerContact } from '../../core/controllers/Auth/Customers/CustomerAuth.js';
 import { financeApproveCustomer, salesHeadApproveCustomer, acceptTermsAndConditions, getPendingCustomersByStage, financeResubmitToSalesHead } from '../../core/controllers/Auth/Customers/CustomerApprovalWorkflow.js';
 import { getAllCustomers, getCustomerById, getCustomerProfile, getDraftCustomers, getCorrectionRequiredCustomers, getPendingTermsCustomers } from '../../core/controllers/Auth/Customers/customer.get.controller.js';
 import { requireSalesFinanceOrSuperAdmin, attachDepartmentInfo } from '../../middlewares/Auth/AdminMiddleware/departmentMiddleware.js';
@@ -26,6 +26,7 @@ customerRouter.get('/pending-stage', ProtectUser, attachDepartmentInfo, checkPag
 customerRouter.put('/:customerId/send-for-correction', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), sendCustomerForCorrection);
 customerRouter.put('/:customerId/resubmit-correction', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), resubmitCorrectedCustomer);
 
+customerRouter.patch('/update-contact/:customerId', ProtectUser, checkPermission('UPDATE_CUSTOMER'), updateCustomerContact);
 customerRouter.put('/update-profile/:customerId', ProtectUser, checkPermission('UPDATE_CUSTOMER'), updateCustomerProfile);
 customerRouter.put('/update-ship-to-details/:customerId', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), updateCustomerShipToDetails);
 

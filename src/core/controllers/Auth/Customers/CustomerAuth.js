@@ -608,6 +608,55 @@ export const customerResetPassword = async (req, res) => {
   }
 };
 
+export const updateCustomerContact = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const { businessEmail, mobileNo1 } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return sendErrorResponse(res, 400, 'INVALID_ID', 'Invalid customer ID format');
+    }
+
+    if (!businessEmail && !mobileNo1) {
+      return sendErrorResponse(res, 400, 'VALIDATION_ERROR', 'At least one of businessEmail or mobileNo1 is required');
+    }
+
+    const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
+
+    if (!customer) {
+      return sendErrorResponse(res, 404, 'NOT_FOUND', 'Customer not found');
+    }
+
+    if (businessEmail) {
+      const normalizedEmail = businessEmail.toLowerCase().trim();
+      const emailExists = await Customer.findOne({
+        businessEmail: normalizedEmail,
+        tenantId: req.user.tenantId,
+        _id: { $ne: customerId },
+      });
+      if (emailExists) {
+        return sendErrorResponse(res, 409, 'DUPLICATE_ERROR', `Email '${businessEmail}' is already taken by another customer`);
+      }
+      customer.businessEmail = normalizedEmail;
+    }
+
+    if (mobileNo1) {
+      customer.mobileNo1 = mobileNo1.trim();
+    }
+
+    await customer.save({ validateBeforeSave: false });
+
+    return sendSuccessResponse(res, 200, { customer }, 'Customer contact details updated successfully');
+  } catch (error) {
+    console.error('Update customer contact error:', error);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return sendErrorResponse(res, 409, 'DUPLICATE_ERROR', `${field} already exists`);
+    }
+    return sendErrorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to update customer contact details');
+  }
+};
+  
 export const updateCustomerProfile = async (req, res) => {
   try {
     const customerId = req.params.customerId;
