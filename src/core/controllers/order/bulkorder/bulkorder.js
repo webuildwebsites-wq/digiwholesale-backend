@@ -496,6 +496,25 @@ export const createBulkOrder = async (req, res) => {
 
         const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders, tenantId: req.user.tenantId });
 
+        if (!isDraft) {
+            const stockDeductions = [];
+            for (const order of bulkOrder.orders) {
+                for (const item of order.items) {
+                    if (item.orderType === "STOCK" && item.productId) {
+                        stockDeductions.push({
+                            updateOne: {
+                                filter: { _id: item.productId, tenantId: req.user.tenantId, qty: { $gte: item.qty } },
+                                update: { $inc: { qty: -item.qty } },
+                            },
+                        });
+                    }
+                }
+            }
+            if (stockDeductions.length > 0) {
+                await DigiProduct.bulkWrite(stockDeductions);
+            }
+        }
+
         sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
             console.error("Vendor email notification error:", err.message)
         );
