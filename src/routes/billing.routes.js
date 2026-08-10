@@ -28,7 +28,7 @@ billingRouter.post("/send-billing-cycle-challan/:customerId", async (req, res) =
 
         if (customer.billingMode === "Direct") {
             const latestOrder = await BulkOrder.findOne({
-                "customer.customerId": customerId,
+                "customer.customerId": new mongoose.Types.ObjectId(customerId),
             }).sort({ createdAt: -1 }).lean();
 
             if (!latestOrder) {

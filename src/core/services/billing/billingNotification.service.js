@@ -105,90 +105,85 @@ const buildInvoiceData = (bulkOrder, customer) => {
 };
 
 const sendChallanNotification = async ({ bulkOrder, customer, subject, emailSubject }) => {
-    try {
-        const challanHTML = generateDeliveryChallanHTML(buildChallanData(bulkOrder, customer));
-        const pdfBuffer   = await generatePDF(challanHTML);
-        const orderNumber = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
+    const challanHTML = generateDeliveryChallanHTML(buildChallanData(bulkOrder, customer));
+    const pdfBuffer   = await generatePDF(challanHTML);
+    const orderNumber = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
 
-        if (customer.businessEmail) {
-            sendEmail({
-                to:      customer.businessEmail,
-                subject: emailSubject || `Delivery Challan — ${orderNumber}`,
-                html:    `<p>Dear ${customer.ownerName || customer.shopName},</p><p>Please find your delivery challan attached.</p>`,
-                attachments: [{
-                    name:    `Challan-${orderNumber}.pdf`,
-                    content: pdfBuffer.toString("base64"),
-                }],
-            }).catch(err => console.error("Challan email error:", err.message));
-        }
+    if (!customer.businessEmail) {
+        throw new Error(`Customer has no businessEmail — challan cannot be sent`);
+    }
 
-        if (customer.mobileNo1) {
-            sendWhatsAppMedia({
-                phone:      `91${customer.mobileNo1}`,
-                message:    `Dear ${customer.ownerName || customer.shopName}, please find your Delivery Challan for Order ${orderNumber} attached.`,
-                fileBuffer: pdfBuffer,
-                fileName:   `Challan-${orderNumber}.pdf`,
-                mimeType:   "application/pdf",
-            }).catch(err => console.error("Challan WhatsApp media error:", err.message));
-        } else {
-            console.log(`Challan WhatsApp skipped — no mobileNo1 for customer: ${customer._id}`);
-        }
-    } catch (err) {
-        console.error("sendChallanNotification error:", err.message);
+    const emailResult = await sendEmail({
+        to:      customer.businessEmail,
+        subject: emailSubject || `Delivery Challan — ${orderNumber}`,
+        html:    `<p>Dear ${customer.ownerName || customer.shopName},</p><p>Please find your delivery challan attached.</p>`,
+        attachments: [{
+            name:    `Challan-${orderNumber}.pdf`,
+            content: pdfBuffer.toString("base64"),
+        }],
+    });
+
+    if (!emailResult.success) {
+        throw new Error(`Email delivery failed for challan to ${customer.businessEmail}`);
+    }
+
+    if (customer.mobileNo1) {
+        sendWhatsAppMedia({
+            phone:      `91${customer.mobileNo1}`,
+            message:    `Dear ${customer.ownerName || customer.shopName}, please find your Delivery Challan for Order ${orderNumber} attached.`,
+            fileBuffer: pdfBuffer,
+            fileName:   `Challan-${orderNumber}.pdf`,
+            mimeType:   "application/pdf",
+        }).catch(err => console.error("Challan WhatsApp media error:", err.message));
     }
 };
 
 const sendInvoiceNotification = async ({ bulkOrder, customer }) => {
-    try {
-        const invoiceData = buildInvoiceData(bulkOrder, customer);
-        const invoiceHTML = generatedorderInvoice(invoiceData);
-        const pdfBuffer   = await generatePDF(invoiceHTML);
-        const orderNumber = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
+    const invoiceData = buildInvoiceData(bulkOrder, customer);
+    const invoiceHTML = generatedorderInvoice(invoiceData);
+    const pdfBuffer   = await generatePDF(invoiceHTML);
+    const orderNumber = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
 
-        if (customer.businessEmail) {
-            sendEmail({
-                to:      customer.businessEmail,
-                subject: `Tax Invoice — ${orderNumber}`,
-                html:    `<p>Dear ${customer.ownerName || customer.shopName},</p><p>Please find your invoice attached for Order ${orderNumber}.</p>`,
-                attachments: [{
-                    name:    `Invoice-${orderNumber}.pdf`,
-                    content: pdfBuffer.toString("base64"),
-                }],
-            }).catch(err => console.error("Invoice email error:", err.message));
-        }
+    if (!customer.businessEmail) {
+        throw new Error(`Customer has no businessEmail — invoice cannot be sent`);
+    }
 
-        if (customer.mobileNo1) {
-            sendWhatsAppMedia({
-                phone:      `91${customer.mobileNo1}`,
-                message:    `Dear ${customer.ownerName || customer.shopName}, please find your Invoice for Order ${orderNumber} attached.`,
-                fileBuffer: pdfBuffer,
-                fileName:   `Invoice-${orderNumber}.pdf`,
-                mimeType:   "application/pdf",
-            }).catch(err => console.error("Invoice WhatsApp media error:", err.message));
-        } else {
-            console.log(`Invoice WhatsApp skipped — no mobileNo1 for customer: ${customer._id}`);
-        }
-    } catch (err) {
-        console.error("sendInvoiceNotification error:", err.message);
+    const emailResult = await sendEmail({
+        to:      customer.businessEmail,
+        subject: `Tax Invoice — ${orderNumber}`,
+        html:    `<p>Dear ${customer.ownerName || customer.shopName},</p><p>Please find your invoice attached for Order ${orderNumber}.</p>`,
+        attachments: [{
+            name:    `Invoice-${orderNumber}.pdf`,
+            content: pdfBuffer.toString("base64"),
+        }],
+    });
+
+    if (!emailResult.success) {
+        throw new Error(`Email delivery failed for invoice to ${customer.businessEmail}`);
+    }
+
+    if (customer.mobileNo1) {
+        sendWhatsAppMedia({
+            phone:      `91${customer.mobileNo1}`,
+            message:    `Dear ${customer.ownerName || customer.shopName}, please find your Invoice for Order ${orderNumber} attached.`,
+            fileBuffer: pdfBuffer,
+            fileName:   `Invoice-${orderNumber}.pdf`,
+            mimeType:   "application/pdf",
+        }).catch(err => console.error("Invoice WhatsApp media error:", err.message));
     }
 };
 
 export const handleOrderBillingNotification = async ({ bulkOrder, customer }) => {
-    try {
-        const billingMode = customer.billingMode;
+    const billingMode = customer.billingMode;
 
-        if (billingMode === "Direct") {
-            await sendInvoiceNotification({ bulkOrder, customer });
-            return;
-        }
+    if (billingMode === "Direct") {
+        await sendInvoiceNotification({ bulkOrder, customer });
+        return;
+    }
 
-        if (billingMode === "DC") {
-            console.log(`[Billing] DC mode — challan will be sent on billing cycle (7/15/end of month) for customer: ${customer._id}`);
-            return;
-        }
-
-    } catch (err) {
-        console.error("handleOrderBillingNotification error:", err.message);
+    if (billingMode === "DC") {
+        console.log(`[Billing] DC mode — challan will be sent on billing cycle for customer: ${customer._id}`);
+        return;
     }
 };
 
@@ -213,7 +208,7 @@ export const sendDCBillingCycleChallan = async (customerId) => {
         }
 
         const orders = await BulkOrder.find({
-            "customer.customerId": customerId,
+            "customer.customerId": new mongoose.Types.ObjectId(customerId),
             createdAt: { $gte: fromDate, $lte: now },
         }).lean();
 
