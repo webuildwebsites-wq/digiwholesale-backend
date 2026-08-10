@@ -3,6 +3,7 @@ import Customer from "../../../../models/Auth/Customer.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
+import VendorPurchase from "../../../../models/Purchase/VendorPurchase.model.js";
 import Employee from "../../../../models/Auth/Employee.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../../config/Email/emailService.js";
@@ -10,6 +11,7 @@ import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.
 import { handleOrderBillingNotification } from "../../../services/billing/billingNotification.service.js";
 import { sendWhatsAppMessage } from "../../../../Utils/whatsapp/whatsappService.js";
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
+import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
 import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
 
 const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumber }) => {
@@ -151,6 +153,107 @@ const LENS_CATEGORIES           = ["LENS", "CONTACT_LENS"];
 
 const generateOrderNumber = () => `BO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
+const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) => {
+    try {
+        const vendorItemsMap = new Map();
+
+        for (const order of bulkOrder.orders) {
+            for (const item of order.items) {
+                if (item.orderType !== "RX" || !item.rx?.vendor?.id) continue;
+
+                const vendorId   = item.rx.vendor.id.toString();
+                const vendorName = item.rx.vendor.name;
+
+                if (!vendorItemsMap.has(vendorId)) {
+                    vendorItemsMap.set(vendorId, { vendorId, vendorName, items: [], orderNumber: order.orderNumber, cgst: order.cgst, sgst: order.sgst });
+                }
+                vendorItemsMap.get(vendorId).items.push({
+                    productId:    item.productId   || null,
+                    isNewProduct: !item.productId,
+                    orderType:    "RX",
+                    itemName:     item.itemName    || "",
+                    category:     item.category    || "LENS",
+                    unit:         item.unit        || "PIECE",
+                    brand:        item.brand       || "",
+                    code:         item.code        || "",
+                    price:        item.price       ?? 0,
+                    mrp:          item.mrp         ?? 0,
+                    gst:          item.gst         ?? 0,
+                    hsnSac:       item.hsnSac      || "",
+                    qty:          item.qty         ?? 1,
+                    sph:          item.sph,
+                    cyl:          item.cyl,
+                    axis:         item.axis,
+                    add:          item.add,
+                    index:        item.index,
+                    tint:         item.tint        || "",
+                    coating:      item.coating     || "",
+                    discountPercent: item.discountPercent ?? 0,
+                    discountAmount:  item.discountAmount  ?? 0,
+                    inwardStatus: "PENDING",
+                    qcStatus:     "PENDING",
+                    rx: {
+                        vendor:     item.rx.vendor,
+                        lab:        item.rx.lab,
+                        coating:    item.rx.coating,
+                        treatment:  item.rx.treatment,
+                        tint:       item.rx.tint,
+                        powers:     item.rx.powers     || [],
+                        prisms:     item.rx.prisms     || [],
+                        centration: item.rx.centration || [],
+                        resolved:   item.rx.resolved   || [],
+                        fitting:    item.rx.fitting    || {},
+                        lensData:   item.rx.lensData   || {},
+                        remarks:    item.rx.remarks    || "",
+                    },
+                });
+            }
+        }
+
+        if (vendorItemsMap.size === 0) return;
+
+        const vendorIds = [...vendorItemsMap.keys()].filter(id => mongoose.Types.ObjectId.isValid(id));
+        const vendors   = await Vendor.find({ _id: { $in: vendorIds } }).lean();
+        const vendorMap = new Map(vendors.map(v => [v._id.toString(), v]));
+
+        const poCreations = [];
+
+        for (const [vendorId, { vendorName, items, orderNumber, cgst, sgst }] of vendorItemsMap) {
+            const vendor = vendorMap.get(vendorId);
+            if (!vendor) {
+                console.warn(`[RX-PO] Vendor ${vendorId} not found in DB — skipping`);
+                continue;
+            }
+
+            poCreations.push(VendorPurchase.create({
+                vendor: {
+                    vendorId:   vendor._id,
+                    vendorName: vendor.name,
+                    email:      vendor.email    || "",
+                    mobile:     vendor.mobile   || "",
+                    address:    vendor.address  || "",
+                    gstNumber:  vendor.gstNumber || "",
+                },
+                orders: [{
+                    orderNumber: `RX-${orderNumber}-${vendorId.slice(-4).toUpperCase()}`,
+                    items,
+                    cgst: cgst || "0",
+                    sgst: sgst || "0",
+                    status: "Submitted",
+                }],
+                createdBy,
+                tenantId,
+                sourceCustomerOrderId: bulkOrder._id,
+            }));
+        }
+
+        const created = await Promise.all(poCreations);
+        console.log(`[RX-PO] Created ${created.length} vendor purchase order(s) for RX items`);
+    } catch (err) {
+        console.error("[RX-PO] Auto vendor PO creation error:", err.message);
+    }
+};
+
 const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
     try {
         const vendorItemsMap = new Map();
@@ -159,9 +262,13 @@ const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
             for (const item of order.items) {
                 if (item.orderType !== "RX") continue;
 
-                const vendorId = item.rx?.vendor?.id?.toString();
+                const vendorId   = item.rx?.vendor?.id?.toString();
                 const vendorName = item.rx?.vendor?.name;
-                if (!vendorId) continue;
+
+                if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+                    console.warn(`[RX-EMAIL] Skipping item "${item.itemName}" — missing or invalid vendor id: ${vendorId}`);
+                    continue;
+                }
 
                 if (!vendorItemsMap.has(vendorId)) {
                     vendorItemsMap.set(vendorId, { vendorName, items: [] });
@@ -170,48 +277,79 @@ const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
             }
         }
 
-        if (vendorItemsMap.size === 0) return;
 
-        const vendorIds = [...vendorItemsMap.keys()].filter(id => mongoose.Types.ObjectId.isValid(id));
-        const vendors = await Vendor.find({ _id: { $in: vendorIds } }).lean();
-        const vendorEmailMap = new Map(vendors.map(v => [v._id.toString(), { email: v.email, mobile: v.mobile }]));
 
-        const orderDate = new Date(bulkOrder.createdAt).toLocaleDateString("en-IN");
+        const vendorIds = [...vendorItemsMap.keys()];
+        const vendors   = await Vendor.find({ _id: { $in: vendorIds } }).lean();
+        const vendorContactMap = new Map(vendors.map(v => [v._id.toString(), { email: v.email, mobile: v.mobile, name: v.name }]));
+
+        const orderDate   = new Date(bulkOrder.createdAt).toLocaleDateString("en-IN");
         const orderNumber = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
-
-        const shipTo = bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName;
+        const shipTo      = bulkOrder.customer.customerShipToBranchName || bulkOrder.customer.customerName;
 
         const emailPromises = [];
 
         for (const [vendorId, { vendorName, items }] of vendorItemsMap) {
-            const vendorContact = vendorEmailMap.get(vendorId);
-            if (!vendorContact?.email) {
-                console.warn(`No email found for vendor ${vendorId} (${vendorName}), skipping.`);
+            const vendorContact = vendorContactMap.get(vendorId);
+
+            if (!vendorContact) {
+                console.warn(`[RX-EMAIL] Vendor ${vendorId} (${vendorName}) not found in DB — skipping`);
                 continue;
             }
 
-            const html = VendorRxOrderTemplate({
-                vendorName,
-                orderNumber,
-                orderDate,
-                customer: {
-                    name:  customer.ownerName || customer.shopName,
-                    phone: customer.mobileNo1 || "",
-                },
-                shipTo,
-                items,
-            });
+            if (!vendorContact.email) {
+                console.warn(`[RX-EMAIL] Vendor ${vendorId} (${vendorName}) has no email — skipping email`);
+            } else {
+                const html = VendorRxOrderTemplate({
+                    vendorName:  vendorContact.name || vendorName,
+                    orderNumber,
+                    orderDate,
+                    customer: {
+                        name:  customer.ownerName || customer.shopName,
+                        phone: customer.mobileNo1 || "",
+                    },
+                    shipTo,
+                    items,
+                });
 
-            emailPromises.push(
-                sendEmail({
-                    to:      vendorContact.email,
-                    subject: `RX Order ${orderNumber} — DigiOptics`,
-                    html,
-                }).catch(err => console.error(`Failed to send email to vendor ${vendorId}:`, err.message))
-            );
+                const vendorPO = await VendorPurchase.findOne({
+                    sourceCustomerOrderId: bulkOrder._id,
+                    "vendor.vendorId": vendorId,
+                }).lean();
+
+                const attachments = [];
+                if (vendorPO) {
+                    try {
+                        const excelBuffer = generatePurchaseOrderExcel(vendorPO);
+                        attachments.push({
+                            name:    `RX-Order-${orderNumber}.xlsx`,
+                            content: excelBuffer.toString("base64"),
+                        });
+                    } catch (excelErr) {
+                        console.error(`[RX-EMAIL] Excel generation failed for vendor ${vendorId}:`, excelErr.message);
+                    }
+                }
+
+                console.log(`[RX-EMAIL] Sending RX order email to vendor: ${vendorContact.email}`);
+
+                emailPromises.push(
+                    sendEmail({
+                        to:          vendorContact.email,
+                        subject:     `RX Order ${orderNumber} — DigiOptics`,
+                        html,
+                        attachments,
+                    }).then(result => {
+                        if (result.success) {
+                            console.log(`[RX-EMAIL] Email sent successfully to vendor ${vendorContact.email}`);
+                        } else {
+                            console.error(`[RX-EMAIL] Email failed for vendor ${vendorContact.email}`);
+                        }
+                    }).catch(err => console.error(`[RX-EMAIL] Email error for vendor ${vendorId}:`, err.message))
+                );
+            }
 
             if (vendorContact.mobile) {
-                const whatsappMsg = `Hello ${vendorName} 👋,
+                const whatsappMsg = `Hello ${vendorContact.name || vendorName} 👋,
 
 A new *RX Order* has been assigned to you on *DigiOptics Wholesale*.
 
@@ -228,14 +366,15 @@ Thank you,
 
                 emailPromises.push(
                     sendWhatsAppMessage({ to: vendorContact.mobile, message: whatsappMsg })
-                        .catch(err => console.error(`Failed to send WhatsApp to vendor ${vendorId}:`, err.message))
+                        .catch(err => console.error(`[RX-EMAIL] WhatsApp error for vendor ${vendorId}:`, err.message))
                 );
             }
         }
 
         await Promise.all(emailPromises);
+        console.log(`[RX-EMAIL] Vendor notifications dispatched for ${vendorItemsMap.size} vendor(s)`);
     } catch (err) {
-        console.error("sendVendorRxOrderEmails error:", err.message);
+        console.error("[RX-EMAIL] sendVendorRxOrderEmails error:", err.message);
     }
 };
 
@@ -497,6 +636,16 @@ export const createBulkOrder = async (req, res) => {
         const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders, tenantId: req.user.tenantId });
 
         if (!isDraft) {
+            await createRxVendorPurchaseOrders({
+                bulkOrder,
+                tenantId:  req.user.tenantId,
+                createdBy: req.user._id,
+            }).catch(err => console.error("RX vendor PO creation error:", err.message));
+
+            sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
+                console.error("Vendor email notification error:", err.message)
+            );
+
             const stockDeductions = [];
             for (const order of bulkOrder.orders) {
                 for (const item of order.items) {
@@ -514,10 +663,6 @@ export const createBulkOrder = async (req, res) => {
                 await DigiProduct.bulkWrite(stockDeductions);
             }
         }
-
-        sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
-            console.error("Vendor email notification error:", err.message)
-        );
 
         if (!isDraft) {
             handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
@@ -687,6 +832,43 @@ export const updateOrderStatus = async (req, res) => {
         }
 
         await bulkOrder.save();
+
+        if (status === "Delivered") {
+            const deliveredRxItems = ordersToUpdate.flatMap(o => o.items).filter(item => item.orderType === "RX");
+
+            if (deliveredRxItems.length > 0) {
+                const directProductIds = deliveredRxItems
+                    .filter(item => item.productId)
+                    .map(item => item.productId);
+
+                let allRxProductIds = [...directProductIds];
+
+                if (directProductIds.length < deliveredRxItems.length) {
+                    const linkedPOs = await VendorPurchase.find({
+                        sourceCustomerOrderId: bulkOrder._id,
+                        tenantId: req.user.tenantId,
+                    }).lean();
+
+                    const poProductIds = linkedPOs
+                        .flatMap(po => po.orders.flatMap(o => o.items))
+                        .filter(item => item.productId && item.qcStatus === "PASSED")
+                        .map(item => item.productId);
+
+                    allRxProductIds = [...new Set([
+                        ...allRxProductIds.map(id => id.toString()),
+                        ...poProductIds.map(id => id.toString()),
+                    ])];
+                }
+
+                if (allRxProductIds.length > 0) {
+                    await DigiProduct.updateMany(
+                        { _id: { $in: allRxProductIds }, tenantId: req.user.tenantId },
+                        { $set: { qty: 0 } }
+                    );
+                    console.log(`[Delivered] Set qty=0 for ${allRxProductIds.length} RX product(s)`);
+                }
+            }
+        }
 
         invalidatePDFs(orderId, req.user.tenantId).catch(err => console.error("PDF invalidation error:", err.message));
 

@@ -315,7 +315,7 @@ export const createPurchaseQC = async (req, res) => {
             });
         }
 
-        if (notifyVendor && vendor) {
+        if (notifyVendor && vendor && failedItems.length > 0) {
             const totalPassed = qcItems.reduce((s, i) => s + (i.passedQty || 0), 0);
             const totalFailed = qcItems.reduce((s, i) => s + (i.failedQty || 0), 0);
 
