@@ -202,28 +202,55 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
   const customerMap = new Map(customers.map(c => [c._id.toString(), c]));
 
   const ordersWithTotalPrice = orders.map((bulkOrder) => {
-    const custId = bulkOrder.customer?.customerId?.toString();
+    const custId   = bulkOrder.customer?.customerId?.toString();
     const custData = custId ? customerMap.get(custId) : null;
+
+    const grandTotal = Number(
+      bulkOrder.orders.reduce((sum, order) => {
+        const orderTotal = order.items.reduce((s, item) => {
+          const price      = Number(item.price || 0);
+          const qty        = Number(item.qty || 0);
+          const gstPercent = Number(item.gst || 0);
+          const discount   = Number(item.discountAmount || 0);
+          const base       = price * qty - discount;
+          return s + base + (base * gstPercent) / 100;
+        }, 0);
+        return sum + orderTotal;
+      }, 0).toFixed(2)
+    );
+
+    const advanceAmount   = Number(bulkOrder.advanceAmount   || 0);
+    const shippingCharges = Number(bulkOrder.shippingCharges || 0);
+    const otherCharges    = Number(bulkOrder.otherCharges    || 0);
+    const nowPayable      = Number((grandTotal + shippingCharges + otherCharges - advanceAmount).toFixed(2));
 
     return {
       ...bulkOrder,
       customer: {
         ...bulkOrder.customer,
-        billingMode: custData?.billingMode || null,
+        billingMode:  custData?.billingMode  || null,
         billingCycle: custData?.billingCycle || null,
       },
       orders: bulkOrder.orders.map((order) => ({
         ...order,
         totalOrderPrice: Number(
-          order.items
-            .reduce((sum, item) => {
-              const price = Number(item.price || 0);
-              const gstPercent = Number(item.gst || 0);
-              return sum + price + (price * gstPercent) / 100;
-            }, 0)
-            .toFixed(2),
+          order.items.reduce((sum, item) => {
+            const price      = Number(item.price || 0);
+            const qty        = Number(item.qty   || 0);
+            const gstPercent = Number(item.gst   || 0);
+            const discount   = Number(item.discountAmount || 0);
+            const base       = price * qty - discount;
+            return sum + base + (base * gstPercent) / 100;
+          }, 0).toFixed(2)
         ),
       })),
+      summary: {
+        grandTotal,
+        advanceAmount,
+        shippingCharges,
+        otherCharges,
+        nowPayable,
+      },
     };
   });
 

@@ -555,7 +555,7 @@ const validateItemByCategory = (item, product) => {
 
 export const createBulkOrder = async (req, res) => {
     try {
-        const { customerId, customerShipToId, orders, isDraft } = req.body;
+        const { customerId, customerShipToId, orders, isDraft, advanceAmount, shippingCharges, otherCharges } = req.body;
 
         if (!customerId) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "customerId is required");
@@ -736,7 +736,14 @@ export const createBulkOrder = async (req, res) => {
             customerShipToBranchName: shipToBranchName,
         };
 
-        const bulkOrder = await BulkOrder.create({ customer: customerDoc, orders, tenantId: req.user.tenantId });
+        const bulkOrder = await BulkOrder.create({
+            customer:        customerDoc,
+            orders,
+            advanceAmount:   Number(advanceAmount   || 0),
+            shippingCharges: Number(shippingCharges || 0),
+            otherCharges:    Number(otherCharges    || 0),
+            tenantId:        req.user.tenantId,
+        });
 
         if (!isDraft) {
             await createRxVendorPurchaseOrders({

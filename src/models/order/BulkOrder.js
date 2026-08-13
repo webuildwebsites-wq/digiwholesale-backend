@@ -256,11 +256,14 @@ const bulkOrderSchema = new mongoose.Schema(
             },
         },
 
-        invoiceUrl:    { type: String, default: null },
-        challanUrl:    { type: String, default: null },
-        invoiceGenAt:  { type: Date,   default: null },
-        challanGenAt:  { type: Date,   default: null },
-        tenantId:      { type: String, trim: true, uppercase: true, default: null, index: true },
+        invoiceUrl:      { type: String, default: null },
+        challanUrl:      { type: String, default: null },
+        invoiceGenAt:    { type: Date,   default: null },
+        challanGenAt:    { type: Date,   default: null },
+        advanceAmount:   { type: Number, default: 0, min: 0 },
+        shippingCharges: { type: Number, default: 0, min: 0 },
+        otherCharges:    { type: Number, default: 0, min: 0 },
+        tenantId:        { type: String, trim: true, uppercase: true, default: null, index: true },
     },
     { timestamps: true }
 );
