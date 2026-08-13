@@ -111,7 +111,8 @@ const vendorPurchaseSchema = new mongoose.Schema(
         isReplacement:  { type: Boolean, default: false },
         replacementFor: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseReturn", default: null },
         originalPurchaseOrderId: { type: mongoose.Schema.Types.ObjectId, ref: "VendorPurchase", default: null },
-        sourceCustomerOrderId:   { type: mongoose.Schema.Types.ObjectId, ref: "bulkOrders", default: null },
+        sourceCustomerOrderId:   { type: mongoose.Schema.Types.ObjectId, ref: "bulkOrders",        default: null },
+        sourceProposalId:        { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseProposal",  default: null },
         tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
     },
     { timestamps: true }

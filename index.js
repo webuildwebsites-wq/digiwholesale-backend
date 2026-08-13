@@ -34,6 +34,7 @@ import purchaseReturnRouter from './src/routes/Purchase/purchaseReturn.routes.js
 import billingRouter from './src/routes/billing.routes.js';
 import tenantRouter from './src/routes/tenant.routes.js';
 import { startBillingCron } from './src/core/services/billing/billingCron.js';
+import purchaseProposalRouter from './src/routes/Purchase/purchaseProposal.routes.js';
 
 dotenv.config();
 
@@ -160,6 +161,9 @@ try {
 
   // SETTINGS
   app.use("/api/settings", settingRouter);
+
+  // PROPOSAL
+  app.use("/api/vendor-proposal", purchaseProposalRouter);
 
   // Purchase module
   app.use("/api/purchase", purchaseRouter);
