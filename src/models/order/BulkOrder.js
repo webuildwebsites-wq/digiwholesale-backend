@@ -108,6 +108,17 @@ const BulkOrderItemSchema = new mongoose.Schema(
 
         photos: { type: [String], default: [] },
 
+        vendor: {
+            id:   { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", default: null },
+            name: { type: String, default: null },
+        },
+
+        orderSource: {
+            type:    String,
+            enum:    ["INHOUSE", "ORDER"],
+            default: "INHOUSE",
+        },
+
         rx: {
             vendor: {
                 id: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },

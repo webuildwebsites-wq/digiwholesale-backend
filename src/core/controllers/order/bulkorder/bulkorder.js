@@ -254,6 +254,109 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
     }
 };
 
+const createStockVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) => {
+    try {
+        const vendorItemsMap = new Map();
+
+        for (const order of bulkOrder.orders) {
+            for (const item of order.items) {
+                if (item.orderType !== "STOCK") continue;
+                if (!item.vendor?.id) continue;
+
+                const vendorId   = item.vendor.id.toString();
+                const vendorName = item.vendor.name;
+
+                if (!mongoose.Types.ObjectId.isValid(vendorId)) continue;
+
+                if (!vendorItemsMap.has(vendorId)) {
+                    vendorItemsMap.set(vendorId, {
+                        vendorId,
+                        vendorName,
+                        items:       [],
+                        orderNumber: order.orderNumber,
+                        cgst:        order.cgst,
+                        sgst:        order.sgst,
+                    });
+                }
+
+                vendorItemsMap.get(vendorId).items.push({
+                    productId:       item.productId   || null,
+                    isNewProduct:    false,
+                    orderType:       "STOCK",
+                    itemName:        item.itemName    || "",
+                    category:        item.category    || "",
+                    unit:            item.unit        || "PIECE",
+                    brand:           item.brand       || "",
+                    code:            item.code        || "",
+                    color:           item.color       || "",
+                    size:            item.size        || "",
+                    shape:           item.shape       || "",
+                    material:        item.material    || "",
+                    dimensions:      item.dimensions  || "",
+                    price:           item.price       ?? 0,
+                    mrp:             item.mrp         ?? 0,
+                    gst:             item.gst         ?? 0,
+                    hsnSac:          item.hsnSac      || "",
+                    qty:             item.qty         ?? 1,
+                    sph:             item.sph,
+                    cyl:             item.cyl,
+                    axis:            item.axis,
+                    add:             item.add,
+                    index:           item.index,
+                    tint:            item.tint        || "",
+                    coating:         item.coating     || "",
+                    discountPercent: item.discountPercent ?? 0,
+                    discountAmount:  item.discountAmount  ?? 0,
+                    inwardStatus:    "PENDING",
+                    qcStatus:        "PENDING",
+                });
+            }
+        }
+
+        if (vendorItemsMap.size === 0) return;
+
+        const vendorIds = [...vendorItemsMap.keys()];
+        const vendors   = await Vendor.find({ _id: { $in: vendorIds } }).lean();
+        const vendorMap = new Map(vendors.map(v => [v._id.toString(), v]));
+
+        const poCreations = [];
+
+        for (const [vendorId, { vendorName, items, orderNumber, cgst, sgst }] of vendorItemsMap) {
+            const vendor = vendorMap.get(vendorId);
+            if (!vendor) {
+                console.warn(`[STOCK-PO] Vendor ${vendorId} not found — skipping`);
+                continue;
+            }
+
+            poCreations.push(VendorPurchase.create({
+                vendor: {
+                    vendorId:   vendor._id,
+                    vendorName: vendor.name,
+                    email:      vendor.email     || "",
+                    mobile:     vendor.mobile    || "",
+                    address:    vendor.address   || "",
+                    gstNumber:  vendor.gstNumber || "",
+                },
+                orders: [{
+                    orderNumber: `STOCK-${orderNumber}-${vendorId.slice(-4).toUpperCase()}`,
+                    items,
+                    cgst: cgst || "0",
+                    sgst: sgst || "0",
+                    status: "Submitted",
+                }],
+                createdBy,
+                tenantId,
+                sourceCustomerOrderId: bulkOrder._id,
+            }));
+        }
+
+        const created = await Promise.all(poCreations);
+        console.log(`[STOCK-PO] Created ${created.length} vendor purchase order(s) for STOCK items`);
+    } catch (err) {
+        console.error("[STOCK-PO] Auto vendor PO creation error:", err.message);
+    }
+};
+
 const sendVendorRxOrderEmails = async ({ bulkOrder, customer }) => {
     try {
         const vendorItemsMap = new Map();
@@ -642,6 +745,12 @@ export const createBulkOrder = async (req, res) => {
                 createdBy: req.user._id,
             }).catch(err => console.error("RX vendor PO creation error:", err.message));
 
+            await createStockVendorPurchaseOrders({
+                bulkOrder,
+                tenantId:  req.user.tenantId,
+                createdBy: req.user._id,
+            }).catch(err => console.error("STOCK vendor PO creation error:", err.message));
+
             sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
                 console.error("Vendor email notification error:", err.message)
             );
@@ -649,7 +758,7 @@ export const createBulkOrder = async (req, res) => {
             const stockDeductions = [];
             for (const order of bulkOrder.orders) {
                 for (const item of order.items) {
-                    if (item.orderType === "STOCK" && item.productId) {
+                    if (item.orderType === "STOCK" && item.productId && !item.vendor?.id) {
                         stockDeductions.push({
                             updateOne: {
                                 filter: { _id: item.productId, tenantId: req.user.tenantId, qty: { $gte: item.qty } },

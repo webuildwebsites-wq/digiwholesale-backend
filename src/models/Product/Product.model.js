@@ -119,6 +119,15 @@ const productSchema = new mongoose.Schema(
     },
 
     qty: { type: Number, default: 0, min: 0 },
+    orderSource: {
+      type: String,
+      enum: ["INHOUSE", "ORDER"],
+      default: "INHOUSE",
+    },
+    vendor: {
+      id:   { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", default: null },
+      name: { type: String, default: null },
+    },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
     tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
   },
