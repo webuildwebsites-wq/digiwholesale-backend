@@ -1147,3 +1147,35 @@ export const getPublicOrderStatus = async (req, res) => {
         return sendErrorResponse(res, 500, "PUBLIC_ORDER_ERROR", error.message || "Something went wrong");
     }
 };
+
+export const updateOrderTracking = async (req, res) => {
+    try {
+        const { orderId }                   = req.params;
+        const { trackingId, trackingLink }  = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(orderId)) {
+            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
+        }
+
+        if (!trackingId && !trackingLink) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "At least one of trackingId or trackingLink is required");
+        }
+
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId });
+        if (!bulkOrder) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
+        }
+
+        for (const order of bulkOrder.orders) {
+            if (trackingId   !== undefined) order.trackingId   = trackingId   || null;
+            if (trackingLink !== undefined) order.trackingLink = trackingLink || null;
+        }
+
+        await bulkOrder.save();
+
+        return sendSuccessResponse(res, 200, { bulkOrder }, "Tracking details updated successfully");
+    } catch (error) {
+        console.error("Update Order Tracking Error:", error);
+        return sendErrorResponse(res, 500, "UPDATE_TRACKING_ERROR", error.message || "Something went wrong");
+    }
+};

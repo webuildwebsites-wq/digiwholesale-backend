@@ -210,6 +210,9 @@ const BulkOrderOrderSchema = new mongoose.Schema(
 
         remarks: { type: String, default: null },
 
+        trackingId:   { type: String, default: null, trim: true },
+        trackingLink: { type: String, default: null, trim: true },
+
         statusHistory: {
             type: [
                 {

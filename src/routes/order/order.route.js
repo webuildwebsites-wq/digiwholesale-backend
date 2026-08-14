@@ -1,7 +1,7 @@
 import express from "express";
 import { getOrder, listOrders, cancelOrder, deleteOrder, suggestionsOrders, getRxOrders, getDraftOrders, getTintOptions, getFrameTypes, getProductBrands, getProductCategories, getProductTreatments, getProductIndexes, getProductTypes, getProductCoatings, getProductNames } from "../../core/controllers/order/order.controller.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
-import { createBulkOrder, getBulkOrderChallan, getBulkOrderInvoice, updateOrderStatus, updateBulkDraftOrder, getPublicOrderStatus } from "../../core/controllers/order/bulkorder/bulkorder.js";
+import { createBulkOrder, getBulkOrderChallan, getBulkOrderInvoice, updateOrderStatus, updateBulkDraftOrder, getPublicOrderStatus, updateOrderTracking } from "../../core/controllers/order/bulkorder/bulkorder.js";
 import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
 
 const orderRouter = express.Router();
@@ -23,7 +23,8 @@ orderRouter.get("/product-names", getProductNames);
 orderRouter.post("/create-bulk-orders", checkPermission("ADD_ORDER"), createBulkOrder);
 orderRouter.get("/bulk-orders/:orderId/challan", checkPageAccess("ALL_ORDERS"), getBulkOrderChallan);
 orderRouter.get("/bulk-orders/:orderId/invoice", checkPageAccess("ALL_ORDERS"), getBulkOrderInvoice);
-orderRouter.patch("/bulk-orders/:orderId/status", checkPermission("UPDATE_ORDER"), updateOrderStatus);
+orderRouter.patch("/bulk-orders/:orderId/status",    checkPermission("UPDATE_ORDER"), updateOrderStatus);
+orderRouter.patch("/bulk-orders/:orderId/tracking",  checkPermission("UPDATE_ORDER"), updateOrderTracking);
 
 orderRouter.get("/get-all-orders", checkPageAccess("ALL_ORDERS"), listOrders);
 orderRouter.get("/draft-orders", checkPageAccess("DRAFTS"), getDraftOrders);
