@@ -1121,6 +1121,8 @@ export const getPublicOrderStatus = async (req, res) => {
                 status:                order.status,
                 estimatedDeliveryDate: order.estimatedDeliveryDate || null,
                 remarks:               order.remarks || null,
+                trackingId:            order.trackingId   || null,
+                trackingLink:          order.trackingLink || null,
                 totalItems:            order.items.length,
                 statusHistory: (order.statusHistory || []).map(h => ({
                     from:          h.from,
