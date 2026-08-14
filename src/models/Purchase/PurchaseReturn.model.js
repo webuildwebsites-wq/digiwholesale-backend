@@ -10,7 +10,7 @@ const returnItemSchema = new mongoose.Schema(
         unit:                  String,
         qty:                   Number,
         reason:                String,
-        condition:             { type: String, enum: ["DAMAGED", "WRONG_ITEM", "QUALITY_ISSUE", "OTHER"], default: "QUALITY_ISSUE" },
+        condition:             { type: String, enum: ["DAMAGED", "SHRINKAGE"], default: "SHRINKAGE" },
         damagedInventoryAdded: { type: Boolean, default: false },
         itemStatus:            { type: String, enum: ["Pending", "VendorNotified", "Replaced", "Closed"], default: "Pending" },
         itemRemarks:           { type: String, default: null },

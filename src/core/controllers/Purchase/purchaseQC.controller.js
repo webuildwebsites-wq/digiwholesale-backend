@@ -160,7 +160,7 @@ export const createPurchaseQC = async (req, res) => {
         const passedItems = [];
 
         for (const entry of items) {
-            const { itemId, passedQty, failedQty, failureReason, remarks: itemRemark, photos } = entry;
+            const { itemId, passedQty, failedQty, failureReason, remarks: itemRemark, photos, condition } = entry;
 
             const found           = allPurchaseItems.find(({ item }) => item._id.toString() === itemId.toString());
             const { order, item } = found;
@@ -211,7 +211,7 @@ export const createPurchaseQC = async (req, res) => {
                     failedQty:     failed,
                     failureReason: failureReason || "",
                     remarks:       itemRemark    || "",
-                    condition:     "QUALITY_ISSUE",
+                    condition:     ["DAMAGED", "SHRINKAGE"].includes(condition) ? condition : "SHRINKAGE",
                     photos:        itemPhotos,
                 });
             }

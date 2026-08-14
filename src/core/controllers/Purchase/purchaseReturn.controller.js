@@ -110,3 +110,127 @@ export const updateItemStatus = async (req, res) => {
         return sendErrorResponse(res, 500, "UPDATE_ITEM_STATUS_ERROR", error.message);
     }
 };
+
+export const getShrinkageItems = async (req, res) => {
+    try {
+        const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const skip  = (page - 1) * limit;
+
+        const filter = {
+            tenantId:        req.user.tenantId,
+            "items.condition": "SHRINKAGE",
+
+        };
+
+        if (req.query.vendorId && mongoose.Types.ObjectId.isValid(req.query.vendorId)) {
+            filter.vendorId = new mongoose.Types.ObjectId(req.query.vendorId);
+        }
+        if (req.query.purchaseOrderId && mongoose.Types.ObjectId.isValid(req.query.purchaseOrderId)) {
+            filter.purchaseOrderId = new mongoose.Types.ObjectId(req.query.purchaseOrderId);
+        }
+        if (req.query.fromDate || req.query.toDate) {
+            filter.createdAt = {};
+            if (req.query.fromDate) filter.createdAt.$gte = new Date(req.query.fromDate);
+            if (req.query.toDate) {
+                const end = new Date(req.query.toDate);
+                end.setHours(23, 59, 59, 999);
+                filter.createdAt.$lte = end;
+            }
+        }
+
+        const [returns, total] = await Promise.all([
+            PurchaseReturn.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean()
+                .then(docs => docs.map(doc => ({
+                    ...doc,
+                    items: doc.items.filter(i => i.condition === "SHRINKAGE"),
+                }))),
+            PurchaseReturn.countDocuments(filter),
+        ]);
+
+        const totalShrinkageQty = returns.reduce(
+            (sum, r) => sum + r.items.reduce((s, i) => s + (i.qty || 0), 0), 0
+        );
+
+        return sendSuccessResponse(res, 200, {
+            returns,
+            totalShrinkageQty,
+            pagination: {
+                currentPage:  page,
+                totalPages:   Math.ceil(total / limit),
+                totalRecords: total,
+                hasNext: page < Math.ceil(total / limit),
+                hasPrev: page > 1,
+            },
+        }, "Shrinkage items retrieved successfully");
+
+    } catch (error) {
+        console.error("Get Shrinkage Items Error:", error);
+        return sendErrorResponse(res, 500, "GET_SHRINKAGE_ERROR", error.message);
+    }
+};
+
+export const getDamagedItems = async (req, res) => {
+    try {
+        const page  = Math.max(parseInt(req.query.page)  || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const skip  = (page - 1) * limit;
+
+        const filter = {
+            tenantId:          req.user.tenantId,
+            "items.condition": "DAMAGED",
+        };
+
+        if (req.query.vendorId && mongoose.Types.ObjectId.isValid(req.query.vendorId)) {
+            filter.vendorId = new mongoose.Types.ObjectId(req.query.vendorId);
+        }
+        if (req.query.purchaseOrderId && mongoose.Types.ObjectId.isValid(req.query.purchaseOrderId)) {
+            filter.purchaseOrderId = new mongoose.Types.ObjectId(req.query.purchaseOrderId);
+        }
+        if (req.query.fromDate || req.query.toDate) {
+            filter.createdAt = {};
+            if (req.query.fromDate) filter.createdAt.$gte = new Date(req.query.fromDate);
+            if (req.query.toDate) {
+                const end = new Date(req.query.toDate);
+                end.setHours(23, 59, 59, 999);
+                filter.createdAt.$lte = end;
+            }
+        }
+
+        const [returns, total] = await Promise.all([
+            PurchaseReturn.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean()
+                .then(docs => docs.map(doc => ({
+                    ...doc,
+                    items: doc.items.filter(i => i.condition === "DAMAGED"),
+                }))),            PurchaseReturn.countDocuments(filter),
+        ]);
+
+        const totalDamagedQty = returns.reduce(
+            (sum, r) => sum + r.items.reduce((s, i) => s + (i.qty || 0), 0), 0
+        );
+
+        return sendSuccessResponse(res, 200, {
+            returns,
+            totalDamagedQty,
+            pagination: {
+                currentPage:  page,
+                totalPages:   Math.ceil(total / limit),
+                totalRecords: total,
+                hasNext: page < Math.ceil(total / limit),
+                hasPrev: page > 1,
+            },
+        }, "Damaged items retrieved successfully");
+
+    } catch (error) {
+        console.error("Get Damaged Items Error:", error);
+        return sendErrorResponse(res, 500, "GET_DAMAGED_ERROR", error.message);
+    }
+};
