@@ -130,26 +130,21 @@ export async function deleteOrderService(orderId, tenantId) {
 }
 
 export async function listOrdersService({ customerId, status, page = 1, limit = 20, search, fromDate, toDate, tenantId }) {
-  const STATUS_MAP = {
-    PENDING: ["Processing"],
-    CONFIRMED: ["Confirmed"],
-    PROCESSING: ["Processing"],
-    COMPLETED: ["Completed"],
-    CANCELLED: ["Cancelled"],
-    SUBMITTED: ["Submitted"],
-    DRAFT: ["Draft"],
-    DELIVERABLE: ["Deliverable"],
-  };
+  const VALID_STATUSES = [
+    "Draft", "Submitted", "Processing", "QC",
+    "ReadyToDispatch", "Dispatched", "Delivered", "Completed", "Cancelled",
+  ];
+
   const filter = {};
   if (tenantId) filter.tenantId = tenantId;
   if (customerId) filter["customer.customerId"] = customerId;
 
   if (status) {
-    const key = status.toUpperCase();
-    if (!STATUS_MAP[key]) {
-      throw { statusCode: 400, code: "INVALID_VALUE", message: `Invalid status. Allowed: ${Object.keys(STATUS_MAP).join(", ")}` };
+    const matched = VALID_STATUSES.find(s => s.toLowerCase() === status.toLowerCase());
+    if (!matched) {
+      throw { statusCode: 400, code: "INVALID_VALUE", message: `Invalid status. Allowed: ${VALID_STATUSES.join(", ")}` };
     }
-    filter["orders"] = { $elemMatch: { status: { $in: STATUS_MAP[key] } } };
+    filter["orders"] = { $elemMatch: { status: matched } };
   }
 
   if (search && search.trim()) {
