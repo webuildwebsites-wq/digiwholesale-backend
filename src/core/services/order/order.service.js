@@ -546,7 +546,7 @@ export async function getProductNamesService({ brand, category, search = "", lim
   const total = await DigiProduct.countDocuments(filter);
 
   const data = await DigiProduct.find(filter, {
-    _id: 1, productName: 1, brand: 1, category: 1, coating: 1,
+    _id: 1, productCode: 1, productName: 1, brand: 1, category: 1, coating: 1,
     price: 1, mrp: 1, gst: 1, qty: 1, createdAt: 1, updatedAt: 1, __v: 1,
   }).sort({ productName: 1 }).skip(skip).limit(parseInt(limit)).lean();
 
