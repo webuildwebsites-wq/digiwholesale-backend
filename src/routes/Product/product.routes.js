@@ -1,5 +1,5 @@
 import express from "express";
-import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames, bulkUploadProducts } from "../../core/controllers/Product/Product.controller.js";
+import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames, bulkUploadProducts, getFrameSunglassProducts } from "../../core/controllers/Product/Product.controller.js";
 import { digiupload } from "../uploads/multer.js";
 import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
@@ -12,7 +12,8 @@ router.get("/", checkPageAccess('INVENTORY'), getProducts);
 // Suggestions — must be before /:id to avoid route conflict
 router.get("/suggestion", checkPageAccess('INVENTORY'), suggestionProduct);
 // GET /api/digi/product/names?search=E&page=1&limit=100&brand=ZEISS&category=LENS
-router.get("/names",checkPageAccess('INVENTORY'), getDigiProductNames);
+router.get("/names", checkPageAccess('INVENTORY'), getDigiProductNames);
+router.get("/frames-sunglasses", checkPageAccess('INVENTORY'), getFrameSunglassProducts);
 // Inventory by product code — must be before /inventory/:productId
 router.get("/inventory/productCode/:productCode",checkPageAccess('INVENTORY'), getInventoryByProductCode);
 // Inventory by product ID

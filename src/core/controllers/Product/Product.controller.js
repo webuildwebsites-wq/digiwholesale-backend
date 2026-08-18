@@ -73,7 +73,7 @@ export const createProduct = async (req, res) => {
       category: p.category.trim().toUpperCase(),
       productName: p.productName.trim().toUpperCase(),
       brand: p.brand?.trim()?.toUpperCase() || "",
-      color: p.color?.trim() || "",
+      colors: Array.isArray(p.colors) ? p.colors : [],
       size: p.size?.trim() || "",
       type: p.type?.trim() || "",
       shape: p.shape?.trim() || "",
@@ -517,6 +517,48 @@ export const getDigiProductNames = async (req, res) => {
   }
 };
 
+export const getFrameSunglassProducts = async (req, res) => {
+  try {
+    const page  = Number(req.query.page)  || 1;
+    const limit = Number(req.query.limit) || 20;
+    const skip  = (page - 1) * limit;
+    const { search, brand, isActive } = req.query;
+
+    const filter = {
+      tenantId: req.user.tenantId,
+      category: { $in: ["FRAME", "SUNGLASS"] },
+    };
+
+    if (brand)  filter.brand = { $regex: brand.trim(), $options: "i" };
+    if (isActive !== undefined) filter.isActive = isActive === "true";
+
+    if (search) {
+      const regex = { $regex: search.trim(), $options: "i" };
+      filter.$or = [
+        { productName: regex },
+        { productCode: regex },
+        { brand:       regex },
+      ];
+    }
+
+    const [products, total] = await Promise.all([
+      DigiProduct.find(filter).sort({ productName: 1 }).skip(skip).limit(limit),
+      DigiProduct.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success:      true,
+      page,
+      limit,
+      totalPages:   Math.ceil(total / limit),
+      totalProducts: total,
+      hasMore:      page * limit < total,
+      products,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 // get vendors data by date range or by keyword
 export const filterProducts = async (req, res) => {

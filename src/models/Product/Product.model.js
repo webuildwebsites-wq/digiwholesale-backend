@@ -31,10 +31,19 @@ const productSchema = new mongoose.Schema(
       default: "",
     },
 
-    color: {
-      type: String,
-      uppercase: true,
-    },
+    colors: [
+      {
+        color: {
+          type: String,
+          trim: true,
+        },
+        qty: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+      },
+    ],
 
     size: {
       type: String,
@@ -125,7 +134,7 @@ const productSchema = new mongoose.Schema(
       default: "INHOUSE",
     },
     vendor: {
-      id:   { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", default: null },
+      id: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", default: null },
       name: { type: String, default: null },
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
