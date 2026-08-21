@@ -88,6 +88,15 @@ const whatsappConfigSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const featureFlagsSchema = new mongoose.Schema(
+    {
+        // E-com frames-sunglasses catalogue page visibility for this wholesaler.
+        // Only Platform Owner can set this to true. Defaults to false (hidden).
+        ecomFramesSunglasses: { type: Boolean, default: false },
+    },
+    { _id: false }
+);
+
 const tenantSchema = new mongoose.Schema(
     {
         tenantId: {
@@ -104,6 +113,7 @@ const tenantSchema = new mongoose.Schema(
         documents:        { type: documentsSchema,        default: () => ({}) },
         subscription:     { type: subscriptionSchema,     default: () => ({}) },
         whatsappConfig:   { type: whatsappConfigSchema,   default: () => ({}) },
+        featureFlags:     { type: featureFlagsSchema,     default: () => ({}) },
 
         status: {
             type:    String,

@@ -278,3 +278,85 @@ export const deleteTenant = async (req, res) => {
         return sendErrorResponse(res, 500, "DELETE_TENANT_ERROR", err.message);
     }
 };
+
+// ─── WHOLESALER SETTINGS (Platform Owner only) ────────────────────────────────
+
+/** Keys the platform owner is allowed to toggle via the settings endpoint. */
+const ALLOWED_FEATURE_FLAGS = ["ecomFramesSunglasses"];
+
+/**
+ * GET /api/tenants/:id/settings
+ * Returns the featureFlags block for a specific tenant.
+ */
+export const getTenantSettings = async (req, res) => {
+    try {
+        const tenant = await Tenant.findById(req.params.id).select("tenantId storeInformation.storeName featureFlags").lean();
+        if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
+
+        return sendSuccessResponse(res, 200, {
+            tenantId:    tenant.tenantId,
+            storeName:   tenant.storeInformation?.storeName || null,
+            featureFlags: tenant.featureFlags || {},
+        }, "Tenant settings retrieved successfully");
+    } catch (err) {
+        return sendErrorResponse(res, 500, "GET_TENANT_SETTINGS_ERROR", err.message);
+    }
+};
+
+/**
+ * PATCH /api/tenants/:id/settings
+ * Allows the Platform Owner to toggle feature flags for a wholesaler.
+ * Only keys present in ALLOWED_FEATURE_FLAGS are accepted.
+ */
+export const updateTenantSettings = async (req, res) => {
+    try {
+        const { featureFlags } = req.body;
+
+        if (!featureFlags || typeof featureFlags !== "object" || Array.isArray(featureFlags)) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Request body must contain a 'featureFlags' object");
+        }
+
+        // Build a safe $set update using only whitelisted keys
+        const setPayload = {};
+        const rejected   = [];
+
+        for (const [key, value] of Object.entries(featureFlags)) {
+            if (!ALLOWED_FEATURE_FLAGS.includes(key)) {
+                rejected.push(key);
+                continue;
+            }
+            if (typeof value !== "boolean") {
+                return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Feature flag '${key}' must be a boolean (true or false)`);
+            }
+            setPayload[`featureFlags.${key}`] = value;
+        }
+
+        if (Object.keys(setPayload).length === 0) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR",
+                `No valid feature flags provided. Allowed flags: ${ALLOWED_FEATURE_FLAGS.join(", ")}`);
+        }
+
+        const tenant = await Tenant.findByIdAndUpdate(
+            req.params.id,
+            { $set: setPayload },
+            { new: true, runValidators: true }
+        ).select("tenantId storeInformation.storeName featureFlags");
+
+        if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
+
+        const response = {
+            tenantId:     tenant.tenantId,
+            storeName:    tenant.storeInformation?.storeName || null,
+            featureFlags: tenant.featureFlags,
+        };
+
+        if (rejected.length > 0) {
+            response.warning = `Unknown flags ignored: ${rejected.join(", ")}`;
+        }
+
+        return sendSuccessResponse(res, 200, response, "Tenant feature flags updated successfully");
+    } catch (err) {
+        return sendErrorResponse(res, 500, "UPDATE_TENANT_SETTINGS_ERROR", err.message);
+    }
+};
+
