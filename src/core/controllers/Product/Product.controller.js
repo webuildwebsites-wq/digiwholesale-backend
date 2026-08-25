@@ -45,20 +45,30 @@ export const createProduct = async (req, res) => {
     }
 
 
-    // Attach images to correct product index
+    // Attach color images to correct product index and color index
     if (req.files?.length) {
 
       await Promise.all(
         products.map(async (product, index) => {
 
-          const file = req.files.find(
-            (f) => f.fieldname === `productImage_${index}`
-          );
+          // Specific image for each color in the product
+          if (Array.isArray(product.colors)) {
+            await Promise.all(
+              product.colors.map(async (colorObj, cIndex) => {
+                const colorFile = req.files.find(
+                  (f) =>
+                    f.fieldname === `productColorImage_${index}_${cIndex}` ||
+                    f.fieldname === `productColorImage_${cIndex}`
+                );
 
-          if (file) {
-            const imagePath = await uploadToGCSProduct(file);
-
-            product.image = imagePath; // store filePath (not signed URL)
+                if (colorFile) {
+                  const colorImagePath = await uploadToGCSProduct(colorFile);
+                  colorObj.productColorImage = colorImagePath;
+                } else if (!colorObj.productColorImage) {
+                  colorObj.productColorImage = "";
+                }
+              })
+            );
           }
 
         })
@@ -73,7 +83,13 @@ export const createProduct = async (req, res) => {
       category: p.category.trim().toUpperCase(),
       productName: p.productName.trim().toUpperCase(),
       brand: p.brand?.trim()?.toUpperCase() || "",
-      colors: Array.isArray(p.colors) ? p.colors : [],
+      colors: Array.isArray(p.colors)
+        ? p.colors.map((c) => ({
+            color: c.color?.trim() || "",
+            qty: Number(c.qty) || 0,
+            productColorImage: c.productColorImage || "",
+          }))
+        : [],
       size: p.size?.trim() || "",
       type: p.type?.trim() || "",
       shape: p.shape?.trim() || "",
@@ -91,7 +107,6 @@ export const createProduct = async (req, res) => {
       hsnSac: p.hsnSac?.trim() || "",
       mrp: Number(p.mrp),
       qty: Number(p.qty),
-      image: p.image || "",
       tenantId: req.user.tenantId,
     }));
 
