@@ -45,6 +45,9 @@ export const createProduct = async (req, res) => {
     }
 
 
+    console.log("=== CREATE PRODUCT REQUEST ===");
+    console.log("req.files received:", req.files?.map(f => ({ fieldname: f.fieldname, size: f.size, originalname: f.originalname })));
+
     // Attach color images to correct product index and color index
     if (req.files?.length) {
 
@@ -62,7 +65,9 @@ export const createProduct = async (req, res) => {
                 );
 
                 if (colorFile) {
+                  console.log(`Uploading file for field: ${colorFile.fieldname} (size: ${colorFile.size} bytes)`);
                   const colorImagePath = await uploadToGCSProduct(colorFile);
+                  console.log(`Uploaded to GCS: ${colorFile.fieldname} -> ${colorImagePath}`);
                   colorObj.productColorImage = colorImagePath;
                 } else if (!colorObj.productColorImage) {
                   colorObj.productColorImage = "";
@@ -107,6 +112,11 @@ export const createProduct = async (req, res) => {
       hsnSac: p.hsnSac?.trim() || "",
       mrp: Number(p.mrp),
       qty: Number(p.qty),
+      vendor: p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)
+        ? { id: p.vendor, name: null }
+        : typeof p.vendor === "object" && p.vendor !== null
+        ? p.vendor
+        : { id: null, name: null },
       tenantId: req.user.tenantId,
     }));
 
