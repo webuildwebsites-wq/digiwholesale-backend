@@ -35,6 +35,10 @@ import billingRouter from './src/routes/billing.routes.js';
 import tenantRouter from './src/routes/tenant.routes.js';
 import { startBillingCron } from './src/core/services/billing/billingCron.js';
 import purchaseProposalRouter from './src/routes/Purchase/purchaseProposal.routes.js';
+import paymentRouter from './src/routes/Accounting/payment.routes.js';
+import ledgerRouter from './src/routes/Accounting/ledger.routes.js';
+import accountRouter from './src/routes/Accounting/account.routes.js';
+import agingRouter from './src/routes/Accounting/aging.routes.js';
 
 dotenv.config();
 
@@ -171,6 +175,17 @@ try {
   app.use("/api/purchase-qc", purchaseQCRouter);
   app.use("/api/purchase-return", purchaseReturnRouter);
   app.use("/api/billing", billingRouter);
+
+  // UNIFIED ACCOUNTING & PAYMENT MODULE (REST API v1 & standard aliases)
+  app.use("/api/v1/payments", paymentRouter);
+  app.use("/api/v1/ledgers", ledgerRouter);
+  app.use("/api/v1/accounts", accountRouter);
+  app.use("/api/v1/reports/aging", agingRouter);
+
+  app.use("/api/payments", paymentRouter);
+  app.use("/api/ledgers", ledgerRouter);
+  app.use("/api/accounts", accountRouter);
+  app.use("/api/reports/aging", agingRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);

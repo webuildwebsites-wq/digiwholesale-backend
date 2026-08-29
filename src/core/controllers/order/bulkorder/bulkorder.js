@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 import Customer from "../../../../models/Auth/Customer.js";
+import CustomerLedger from "../../../../models/Accounting/CustomerLedger.model.js";
+import LedgerTransaction from "../../../../models/Accounting/LedgerTransaction.model.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
@@ -553,6 +555,181 @@ const validateItemByCategory = (item, product) => {
     return null;
 };
 
+
+/**
+ * Helper to automatically apply credit limit validation, creditUsed addition,
+ * and ledger transaction entry on new confirmed order.
+ */
+export const applyOrderToCustomerCreditAndLedger = async ({ bulkOrder, customerId, userId, tenantId, reqBody }) => {
+    try {
+        const freshCustomer = await Customer.findById(customerId);
+        if (!freshCustomer) return;
+
+        let grandTotal = 0;
+        if (reqBody?.grossTotalWithCharges && Number(reqBody.grossTotalWithCharges) > 0) {
+            grandTotal = Number(reqBody.grossTotalWithCharges);
+        } else if (reqBody?.grossTotal && Number(reqBody.grossTotal) > 0) {
+            grandTotal = Number(reqBody.grossTotal) + Number(bulkOrder.shippingCharges || 0) + Number(bulkOrder.otherCharges || 0);
+        } else {
+            let subtotal = 0;
+            let totalGst = 0;
+            for (const ord of bulkOrder.orders) {
+                if (ord.grossTotalWithCharges && Number(ord.grossTotalWithCharges) > 0) {
+                    grandTotal += Number(ord.grossTotalWithCharges);
+                } else if (ord.totalOrderPrice && Number(ord.totalOrderPrice) > 0) {
+                    grandTotal += Number(ord.totalOrderPrice);
+                } else if (Array.isArray(ord.items)) {
+                    for (const it of ord.items) {
+                        const price = Number(it.price || 0);
+                        const qty = Number(it.qty || 1);
+                        const discount = Number(it.discountAmount || 0);
+                        const taxable = Math.max(0, (price * qty) - discount);
+                        const gst = Number(it.gst || 0);
+                        subtotal += taxable;
+                        totalGst += taxable * (gst / 100);
+                    }
+                }
+            }
+            if (grandTotal === 0) {
+                grandTotal = subtotal + totalGst + Number(bulkOrder.shippingCharges || 0) + Number(bulkOrder.otherCharges || 0);
+            }
+        }
+
+        const advancePaid = Number(bulkOrder.advanceAmount || reqBody?.advanceAmount || 0);
+
+        const existingCreditUsed = Number(freshCustomer.creditUsed || 0);
+        const existingAdvance = Number(freshCustomer.customerBalance || 0);
+
+        const unpaidAmount = Math.max(0, grandTotal - advancePaid);
+        let absorbedFromAdvance = 0;
+        let remainingAdvance = existingAdvance;
+        let newCreditUsedToAdd = 0;
+
+        if (unpaidAmount > 0) {
+            if (existingAdvance > 0) {
+                absorbedFromAdvance = Math.min(unpaidAmount, existingAdvance);
+                remainingAdvance = existingAdvance - absorbedFromAdvance;
+                newCreditUsedToAdd = unpaidAmount - absorbedFromAdvance;
+            } else {
+                newCreditUsedToAdd = unpaidAmount;
+            }
+        } else {
+            const excess = advancePaid - grandTotal;
+            remainingAdvance = existingAdvance + Math.max(0, excess);
+            newCreditUsedToAdd = 0;
+        }
+
+        const finalCreditUsed = existingCreditUsed + newCreditUsedToAdd;
+        const finalBalance = finalCreditUsed > 0 ? finalCreditUsed : -remainingAdvance;
+
+        // 1. Update Customer Model in MongoDB
+        await Customer.findByIdAndUpdate(freshCustomer._id, {
+            $set: {
+                creditUsed: finalCreditUsed,
+                customerBalance: remainingAdvance
+            }
+        });
+
+        // 2. Update or create Customer Ledger
+        let ledger = await CustomerLedger.findOne({ customerId: freshCustomer._id });
+        if (!ledger) {
+            ledger = new CustomerLedger({
+                ledgerCode: `CUST-LED-${freshCustomer._id.toString().slice(-6).toUpperCase()}`,
+                customerId: freshCustomer._id,
+                creditLimit: Number(freshCustomer.creditLimit || 0),
+                creditDays: Number(freshCustomer.creditDays || 30),
+                creditUsed: finalCreditUsed,
+                advanceAmount: remainingAdvance,
+                currentBalance: finalBalance,
+                branchId: freshCustomer.branchId || null,
+                tenantId,
+                createdBy: userId
+            });
+        } else {
+            ledger.creditUsed = finalCreditUsed;
+            ledger.advanceAmount = remainingAdvance;
+            ledger.currentBalance = finalBalance;
+        }
+        await ledger.save();
+
+        // 3. Post Sales Invoice in LedgerTransaction
+        const orderRef = bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString();
+        await LedgerTransaction.create([{
+            entityType: 'Customer',
+            ledgerId: ledger._id,
+            partyId: freshCustomer._id,
+            transactionDate: new Date(),
+            voucherType: 'Sales Invoice',
+            voucherId: bulkOrder._id,
+            referenceNumber: orderRef,
+            debit: grandTotal,
+            credit: advancePaid + absorbedFromAdvance,
+            runningBalance: finalBalance,
+            narration: `Sales Invoice for Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}, Advance Paid: ₹${advancePaid.toLocaleString()}${absorbedFromAdvance > 0 ? (', Absorbed from Advance: ₹' + absorbedFromAdvance.toLocaleString()) : ''}, Added to Credit Used: ₹${newCreditUsedToAdd.toLocaleString()}`,
+            branchId: ledger.branchId || null,
+            tenantId,
+            createdBy: userId
+        }]);
+
+        console.log(`[Order Credit Sync Complete] Order #${orderRef}: GrandTotal=₹${grandTotal}, AdvancePaid=₹${advancePaid}, AbsorbedAdv=₹${absorbedFromAdvance}, AddedToCredit=₹${newCreditUsedToAdd}, NewCreditUsed=₹${finalCreditUsed}, AdvanceBalance=₹${remainingAdvance}`);
+    } catch (err) {
+        console.error("[Order Credit Sync Error]:", err.message);
+    }
+};
+
+export const revertOrderCreditOnCancellation = async ({ bulkOrder, customerId, cancelledOrders, userId, tenantId }) => {
+    try {
+        let cancelledTotal = 0;
+        for (const ord of cancelledOrders) {
+            if (ord.totalOrderPrice !== undefined && ord.totalOrderPrice !== null) {
+                cancelledTotal += Number(ord.totalOrderPrice);
+            } else if (Array.isArray(ord.items)) {
+                cancelledTotal += ord.items.reduce((sum, it) => sum + (Number(it.price || 0) * Number(it.qty || 1)), 0);
+            }
+        }
+
+        if (cancelledTotal <= 0) return;
+
+        const customer = await Customer.findById(customerId);
+        if (!customer) return;
+
+        const currentCreditUsed = Number(customer.creditUsed || 0);
+        const newCreditUsed = Math.max(0, currentCreditUsed - cancelledTotal);
+        const newBalance = newCreditUsed > 0 ? newCreditUsed : -(customer.customerBalance || 0);
+
+        await Customer.findByIdAndUpdate(customerId, {
+            $set: { creditUsed: newCreditUsed }
+        });
+
+        const ledger = await CustomerLedger.findOne({ customerId });
+        if (ledger) {
+            ledger.creditUsed = newCreditUsed;
+            ledger.currentBalance = newBalance;
+            await ledger.save();
+
+            const orderRef = cancelledOrders[0]?.orderNumber || bulkOrder._id.toString();
+            await LedgerTransaction.create([{
+                entityType: 'Customer',
+                ledgerId: ledger._id,
+                partyId: customerId,
+                transactionDate: new Date(),
+                voucherType: 'Credit Note',
+                voucherId: bulkOrder._id,
+                referenceNumber: `CN-${orderRef}`,
+                debit: 0,
+                credit: cancelledTotal,
+                runningBalance: newBalance,
+                narration: `Order #${orderRef} Cancelled. Reversed ₹${cancelledTotal.toLocaleString()} from Credit Used.`,
+                branchId: ledger.branchId || null,
+                tenantId,
+                createdBy: userId
+            }]);
+        }
+    } catch (err) {
+        console.error("[Order Cancellation Reversal Error]:", err.message);
+    }
+};
+
 export const createBulkOrder = async (req, res) => {
     try {
         const { customerId, customerShipToId, orders, isDraft, advanceAmount, shippingCharges, otherCharges } = req.body;
@@ -948,6 +1125,17 @@ export const updateOrderStatus = async (req, res) => {
         }
 
         await bulkOrder.save();
+
+        if (status === "Cancelled") {
+            await revertOrderCreditOnCancellation({
+                bulkOrder,
+                customerId: bulkOrder.customer?.customerId,
+                cancelledOrders: ordersToUpdate,
+                userId: req.user._id,
+                tenantId: req.user.tenantId,
+            }).catch(err => console.error("Order cancellation credit revert error:", err.message));
+        }
+
 
         if (status === "Delivered") {
             const deliveredRxItems = ordersToUpdate.flatMap(o => o.items).filter(item => item.orderType === "RX");
