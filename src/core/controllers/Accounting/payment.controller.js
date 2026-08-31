@@ -6,10 +6,8 @@ import LedgerTransaction from '../../../models/Accounting/LedgerTransaction.mode
 import Customer from '../../../models/Auth/Customer.js';
 import Vendor from '../../../models/Vendor.model.js';
 import BulkOrder from '../../../models/order/BulkOrder.js';
-import Sale from '../../../models/SALES/Sale.model.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../../Utils/response/responseHandler.js';
 
-// Helper to safely execute a transaction with fallback if replica set is not configured
 const runInTransaction = async (workFn) => {
   let session = null;
   try {
@@ -38,9 +36,6 @@ const runInTransaction = async (workFn) => {
   }
 };
 
-/**
- * 1. Execute Customer Payment Inflow (Adjusts Credit Used first, remaining to Advance)
- */
 export const executeCustomerPayment = async (req, res) => {
   try {
     const {
@@ -65,7 +60,6 @@ export const executeCustomerPayment = async (req, res) => {
     }
 
     const result = await runInTransaction(async (session) => {
-      // 1. Fetch or initialize customer ledger
       let ledger = await CustomerLedger.findOne({ customerId }).session(session);
       if (!ledger) {
         ledger = new CustomerLedger({
@@ -88,7 +82,6 @@ export const executeCustomerPayment = async (req, res) => {
         throw new Error(`Customer Ledger is currently ${ledger.ledgerStatus}. Transactions not permitted.`);
       }
 
-      // 2. Process Invoice Allocations if any provided
       let totalAllocated = 0;
       const processedAllocations = [];
 
@@ -112,14 +105,11 @@ export const executeCustomerPayment = async (req, res) => {
       }
 
       const grossAmount = Number(amount);
-      const isCheque = paymentMode === 'CHEQUE';
-      const initialStatus = isCheque ? 'RECEIVED' : 'COMPLETED';
+      const initialStatus = 'COMPLETED';
 
-      // 3. Outstanding Credit Used & Advance Settlement Formula
-      // Credit Used represents the actual receivable / udhari
       const existingCreditUsed = Number(
-        (ledger.creditUsed !== undefined && ledger.creditUsed !== null) 
-          ? ledger.creditUsed 
+        (ledger.creditUsed !== undefined && ledger.creditUsed !== null)
+          ? ledger.creditUsed
           : (customer.creditUsed || (ledger.currentBalance > 0 ? ledger.currentBalance : 0) || 0)
       );
 
@@ -137,15 +127,12 @@ export const executeCustomerPayment = async (req, res) => {
         if (grossAmount <= existingCreditUsed) {
           adjustedFromCreditUsed = grossAmount;
           remainingCreditUsed = existingCreditUsed - grossAmount;
-          // Entire payment absorbed into existing credit used, advance unchanged
         } else {
           adjustedFromCreditUsed = existingCreditUsed;
           remainingCreditUsed = 0;
-          const excess = grossAmount - existingCreditUsed;
-          newAdvanceAmount = existingAdvance + excess;
+          newAdvanceAmount = existingAdvance + (grossAmount - existingCreditUsed);
         }
       } else {
-        // Credit used is already 0, entire payment added to advance
         newAdvanceAmount = existingAdvance + grossAmount;
       }
 
@@ -153,7 +140,6 @@ export const executeCustomerPayment = async (req, res) => {
 
       const paymentNumber = `CPAY-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
 
-      // 4. Create Payment Record
       const payment = new Payment({
         paymentNumber,
         type: 'CUSTOMER_INFLOW',
@@ -180,47 +166,47 @@ export const executeCustomerPayment = async (req, res) => {
 
       await payment.save({ session });
 
-      // 5. Instant Ledger & Customer Model Impact for non-cheque payments
-      if (!isCheque) {
-        ledger.creditUsed = remainingCreditUsed;
-        ledger.advanceAmount = newAdvanceAmount;
-        ledger.currentBalance = newCurrentBalance;
-        await ledger.save({ session });
+      ledger.creditUsed = remainingCreditUsed;
+      ledger.advanceAmount = newAdvanceAmount;
+      ledger.currentBalance = newCurrentBalance;
+      await ledger.save({ session });
 
-        // Update MongoDB Customer document in sync
-        await Customer.findByIdAndUpdate(customerId, {
-          $set: {
-            creditUsed: remainingCreditUsed,
-            customerBalance: newAdvanceAmount
-          }
-        }, { session });
-
-        let narration = `Payment received via ${paymentMode}.`;
-        if (adjustedFromCreditUsed > 0 && newAdvanceAmount > existingAdvance) {
-          narration += ` ₹${adjustedFromCreditUsed.toLocaleString()} adjusted against Credit Used. ₹${(newAdvanceAmount - existingAdvance).toLocaleString()} added to Advance.`;
-        } else if (adjustedFromCreditUsed > 0) {
-          narration += ` ₹${adjustedFromCreditUsed.toLocaleString()} adjusted against Credit Used. Remaining Due: ₹${remainingCreditUsed.toLocaleString()}.`;
-        } else {
-          narration += ` ₹${grossAmount.toLocaleString()} added to Advance Khata. Total Advance: ₹${newAdvanceAmount.toLocaleString()}.`;
+      await Customer.findByIdAndUpdate(customerId, {
+        $set: {
+          creditUsed: remainingCreditUsed,
+          customerBalance: newAdvanceAmount
         }
+      }, { session });
 
-        await LedgerTransaction.create([{
-          entityType: 'Customer',
-          ledgerId: ledger._id,
-          partyId: customerId,
-          transactionDate: new Date(),
-          voucherType: 'Receipt',
-          voucherId: payment._id,
-          referenceNumber: payment.paymentNumber,
-          credit: grossAmount,
-          debit: 0,
-          runningBalance: newCurrentBalance,
-          narration,
-          branchId: payment.branchId,
-          tenantId,
-          createdBy: userId
-        }], { session });
+      let narration = `Payment received via ${paymentMode}.`;
+      if (paymentMode === 'CHEQUE') {
+        narration = `Cheque #${paymentDetails.chequeNumber || 'N/A'} received (Bank: ${paymentDetails.bankName || '—'}, Date: ${paymentDetails.chequeDate || '—'}). ₹${grossAmount.toLocaleString()} credited.`;
+        if (adjustedFromCreditUsed > 0) narration += ` Adjusted against Credit Used: ₹${adjustedFromCreditUsed.toLocaleString()}.`;
+        if (newAdvanceAmount > existingAdvance) narration += ` Added to Advance: ₹${(newAdvanceAmount - existingAdvance).toLocaleString()}.`;
+      } else if (adjustedFromCreditUsed > 0 && newAdvanceAmount > existingAdvance) {
+        narration += ` ₹${adjustedFromCreditUsed.toLocaleString()} adjusted against Credit Used. ₹${(newAdvanceAmount - existingAdvance).toLocaleString()} added to Advance.`;
+      } else if (adjustedFromCreditUsed > 0) {
+        narration += ` ₹${adjustedFromCreditUsed.toLocaleString()} adjusted against Credit Used. Remaining Due: ₹${remainingCreditUsed.toLocaleString()}.`;
+      } else {
+        narration += ` ₹${grossAmount.toLocaleString()} added to Advance Khata. Total Advance: ₹${newAdvanceAmount.toLocaleString()}.`;
       }
+
+      await LedgerTransaction.create([{
+        entityType: 'Customer',
+        ledgerId: ledger._id,
+        partyId: customerId,
+        transactionDate: new Date(),
+        voucherType: 'Receipt',
+        voucherId: payment._id,
+        referenceNumber: payment.paymentNumber,
+        credit: grossAmount,
+        debit: 0,
+        runningBalance: newCurrentBalance,
+        narration,
+        branchId: payment.branchId,
+        tenantId,
+        createdBy: userId
+      }], { session });
 
       return payment;
     });
@@ -232,9 +218,7 @@ export const executeCustomerPayment = async (req, res) => {
   }
 };
 
-/**
- * 2. Cheque Clearance & Bounce Lifecycle Handler
- */
+
 export const updateChequeStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -264,42 +248,7 @@ export const updateChequeStatus = async (req, res) => {
         payment.paymentDetails.clearanceDate = clearanceDate ? new Date(clearanceDate) : new Date();
         await payment.save({ session });
 
-        // Apply ledger credit on clearance
         if (ledger) {
-          const grossAmount = Number(payment.grossAmount);
-          const currentCreditUsed = Number(ledger.creditUsed || customer?.creditUsed || 0);
-          const currentAdvance = Number(ledger.advanceAmount || customer?.customerBalance || 0);
-
-          let adjustedFromCreditUsed = 0;
-          let remainingCreditUsed = currentCreditUsed;
-          let newAdvance = currentAdvance;
-
-          if (currentCreditUsed > 0) {
-            if (grossAmount <= currentCreditUsed) {
-              adjustedFromCreditUsed = grossAmount;
-              remainingCreditUsed = currentCreditUsed - grossAmount;
-            } else {
-              adjustedFromCreditUsed = currentCreditUsed;
-              remainingCreditUsed = 0;
-              newAdvance += (grossAmount - currentCreditUsed);
-            }
-          } else {
-            newAdvance += grossAmount;
-          }
-
-          const newBalance = remainingCreditUsed > 0 ? remainingCreditUsed : -newAdvance;
-
-          ledger.creditUsed = remainingCreditUsed;
-          ledger.advanceAmount = newAdvance;
-          ledger.currentBalance = newBalance;
-          await ledger.save({ session });
-
-          if (customer) {
-            await Customer.findByIdAndUpdate(customer._id, {
-              $set: { creditUsed: remainingCreditUsed, customerBalance: newAdvance }
-            }, { session });
-          }
-
           await LedgerTransaction.create([{
             entityType: 'Customer',
             ledgerId: ledger._id,
@@ -307,11 +256,11 @@ export const updateChequeStatus = async (req, res) => {
             transactionDate: payment.paymentDetails.clearanceDate,
             voucherType: 'Receipt',
             voucherId: payment._id,
-            referenceNumber: payment.paymentNumber,
-            credit: grossAmount,
+            referenceNumber: `CLR-${payment.paymentNumber}`,
+            credit: 0,
             debit: 0,
-            runningBalance: newBalance,
-            narration: `Cheque #${payment.paymentDetails.chequeNumber || ''} cleared in bank. Adjusted: ₹${adjustedFromCreditUsed}, Advance: ₹${newAdvance}`,
+            runningBalance: Number(ledger.currentBalance || 0),
+            narration: `Cheque #${payment.paymentDetails?.chequeNumber || ''} cleared in bank on ${new Date(payment.paymentDetails.clearanceDate).toLocaleDateString()}. Amount: ₹${Number(payment.grossAmount).toLocaleString()}.`,
             branchId: payment.branchId,
             tenantId,
             createdBy: userId
@@ -335,21 +284,30 @@ export const updateChequeStatus = async (req, res) => {
           }
         }
 
-        // Apply bounce penalty debit: ₹500 and re-debit cheque gross amount if previously cleared
         if (ledger) {
+          const grossAmount = Number(payment.grossAmount);
           const bounceCharge = 500;
-          const newCreditUsed = Number(ledger.creditUsed || 0) + bounceCharge;
+
+          const restoredCreditUsed = Math.min(
+            Number(ledger.creditUsed || 0) + Number(payment.paymentDetails?.adjustedFromCreditUsed || grossAmount),
+            Number(ledger.creditUsed || 0) + grossAmount
+          );
+          const advanceReduction = Math.max(0, Number(ledger.advanceAmount || 0) - (Number(payment.paymentDetails?.advanceCredited || 0)));
+          const newCreditUsed = restoredCreditUsed + bounceCharge;
+          const newAdvance = advanceReduction;
+          const newBalance = newCreditUsed > 0 ? newCreditUsed : -newAdvance;
+
           ledger.creditUsed = newCreditUsed;
-          ledger.currentBalance = newCreditUsed > 0 ? newCreditUsed : -(ledger.advanceAmount || 0);
+          ledger.advanceAmount = newAdvance;
+          ledger.currentBalance = newBalance;
           await ledger.save({ session });
 
           if (customer) {
             await Customer.findByIdAndUpdate(customer._id, {
-              $inc: { creditUsed: bounceCharge }
+              $set: { creditUsed: newCreditUsed, customerBalance: newAdvance }
             }, { session });
           }
 
-          // 1. Post Bounce Penalty debit entry
           await LedgerTransaction.create([{
             entityType: 'Customer',
             ledgerId: ledger._id,
@@ -357,11 +315,11 @@ export const updateChequeStatus = async (req, res) => {
             transactionDate: new Date(),
             voucherType: 'Debit Note',
             voucherId: payment._id,
-            referenceNumber: `CHG-${payment.paymentNumber}`,
-            debit: bounceCharge,
+            referenceNumber: `BNC-${payment.paymentNumber}`,
+            debit: grossAmount + bounceCharge,
             credit: 0,
-            runningBalance: ledger.currentBalance,
-            narration: `Cheque Bounce Penalty Fee (Cheque #${payment.paymentDetails?.chequeNumber || 'N/A'}). Reason: ${payment.paymentDetails.bounceReason}`,
+            runningBalance: newBalance,
+            narration: `Cheque #${payment.paymentDetails?.chequeNumber || 'N/A'} bounced (${payment.paymentDetails.bounceReason}). ₹${grossAmount.toLocaleString()} reversed + ₹${bounceCharge} penalty debited.`,
             branchId: payment.branchId,
             tenantId,
             createdBy: userId
@@ -383,9 +341,6 @@ export const updateChequeStatus = async (req, res) => {
   }
 };
 
-/**
- * 3. Execute Vendor Payout Outflow
- */
 export const executeVendorPayment = async (req, res) => {
   try {
     const {
@@ -488,9 +443,7 @@ export const executeVendorPayment = async (req, res) => {
   }
 };
 
-/**
- * 4. Get Payments / Vouchers List
- */
+
 export const getPaymentsList = async (req, res) => {
   try {
     const { type, paymentMode, status, partyId, startDate, endDate, page = 1, limit = 50 } = req.query;
@@ -542,9 +495,7 @@ export const getPaymentsList = async (req, res) => {
   }
 };
 
-/**
- * 5. Get Payment Detail
- */
+
 export const getPaymentDetail = async (req, res) => {
   try {
     const { id } = req.params;
@@ -565,9 +516,7 @@ export const getPaymentDetail = async (req, res) => {
 
 export const getPaymentById = getPaymentDetail;
 
-/**
- * 6. Adjust Customer Pending Due (creditUsed) directly from Available Advance (customerBalance)
- */
+
 export const adjustDueFromAdvance = async (req, res) => {
   try {
     const { customerId, amount } = req.body;
