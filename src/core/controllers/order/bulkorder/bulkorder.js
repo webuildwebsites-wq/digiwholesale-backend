@@ -926,7 +926,7 @@ export const createBulkOrder = async (req, res) => {
             await applyOrderToCustomerCreditAndLedger({
                 bulkOrder,
                 customerId: customer._id,
-                userId:     req.user._id,
+                userId:     req.user.id || req.user._id,
                 tenantId:   req.user.tenantId,
                 reqBody:    req.body,
             }).catch(err => console.error("Customer credit/ledger sync error on order create:", err.message));
