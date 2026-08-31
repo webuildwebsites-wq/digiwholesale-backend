@@ -923,6 +923,14 @@ export const createBulkOrder = async (req, res) => {
         });
 
         if (!isDraft) {
+            await applyOrderToCustomerCreditAndLedger({
+                bulkOrder,
+                customerId: customer._id,
+                userId:     req.user._id,
+                tenantId:   req.user.tenantId,
+                reqBody:    req.body,
+            }).catch(err => console.error("Customer credit/ledger sync error on order create:", err.message));
+
             await createRxVendorPurchaseOrders({
                 bulkOrder,
                 tenantId:  req.user.tenantId,

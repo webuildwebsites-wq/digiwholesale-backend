@@ -4,11 +4,9 @@ import VendorLedger from '../../../models/Accounting/VendorLedger.model.js';
 import LedgerTransaction from '../../../models/Accounting/LedgerTransaction.model.js';
 import Customer from '../../../models/Auth/Customer.js';
 import Vendor from '../../../models/Vendor.model.js';
-import BulkOrder from '../../../models/order/BulkOrder.js';
 import VendorPurchase from '../../../models/Purchase/VendorPurchase.model.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../../Utils/response/responseHandler.js';
 
-// Helper to safely extract integer days from creditDays (number, string, or object)
 const parseCreditDays = (cd) => {
   if (!cd) return 0;
   if (typeof cd === 'number') return cd;
@@ -30,7 +28,7 @@ const parseCreditDays = (cd) => {
 export const getCustomerLedgerStatement = async (req, res) => {
   try {
     const { customerId } = req.params;
-    const { startDate, endDate, voucherType, page, limit } = req.query;
+    const { startDate, endDate, page, limit } = req.query;
 
     if (!mongoose.Types.ObjectId.isValid(customerId)) {
       return sendErrorResponse(res, 400, 'INVALID_CUSTOMER_ID', 'Invalid customer ID.');
@@ -102,10 +100,6 @@ export const getCustomerLedgerStatement = async (req, res) => {
         { partyId: customerId, entityType: 'Customer' }
       ]
     };
-
-    if (voucherType) {
-      query.voucherType = voucherType;
-    }
 
     if (startDate || endDate) {
       query.transactionDate = {};
@@ -198,7 +192,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
 export const getVendorLedgerStatement = async (req, res) => {
   try {
     const { vendorId } = req.params;
-    const { startDate, endDate, voucherType, page, limit } = req.query;
+    const { startDate, endDate, page, limit } = req.query;
 
     if (!mongoose.Types.ObjectId.isValid(vendorId)) {
       return sendErrorResponse(res, 400, 'INVALID_VENDOR_ID', 'Invalid vendor ID.');
@@ -249,10 +243,6 @@ export const getVendorLedgerStatement = async (req, res) => {
         { partyId: vendorId, entityType: 'Vendor' }
       ]
     };
-
-    if (voucherType) {
-      query.voucherType = voucherType;
-    }
 
     if (startDate || endDate) {
       query.transactionDate = {};
@@ -357,7 +347,8 @@ export const getCustomerLedgersList = async (req, res) => {
     }
 
     const customers = await Customer.find(customerQuery)
-      .select('shopName ownerName mobileNo1 mobileNo2 mobile businessEmail address branchId tenantId creditLimit creditDays creditUsed customerBalance customerCode serialNumber GSTNo gstNumber')
+      .select('shopName ownerName mobileNo1 mobileNo2 mobile businessEmail address branchId tenantId creditLimit creditDays creditUsed customerBalance customerCode serialNumber GSTNo gstNumber createdAt')
+      .sort({ createdAt: -1 })
       .lean();
 
     const ledgers = [];
@@ -541,7 +532,6 @@ export const upsertCustomerLedger = async (req, res) => {
       customerType,
       creditLimit,
       creditDays,
-      creditUsed,
       interestRate,
       openingBalance,
       openingBalanceType,
@@ -573,7 +563,6 @@ export const upsertCustomerLedger = async (req, res) => {
     if (customerType) ledger.customerType = customerType;
     if (creditLimit !== undefined) ledger.creditLimit = Number(creditLimit);
     if (creditDays !== undefined) ledger.creditDays = Number(creditDays);
-    if (creditUsed !== undefined) ledger.creditUsed = Number(creditUsed);
     if (interestRate !== undefined) ledger.interestRate = Number(interestRate);
     if (openingBalance !== undefined) ledger.openingBalance = Number(openingBalance);
     if (openingBalanceType) ledger.openingBalanceType = openingBalanceType;
@@ -584,12 +573,10 @@ export const upsertCustomerLedger = async (req, res) => {
 
     await ledger.save();
 
-    // Update customer model directly
-    if (creditLimit !== undefined || creditDays !== undefined || creditUsed !== undefined) {
+    if (creditLimit !== undefined || creditDays !== undefined) {
       const custUpdate = {};
       if (creditLimit !== undefined) custUpdate.creditLimit = Number(creditLimit);
       if (creditDays !== undefined) custUpdate['creditDays.name'] = `${creditDays} Days`;
-      if (creditUsed !== undefined) custUpdate.creditUsed = Number(creditUsed);
       await Customer.findByIdAndUpdate(customerId, { $set: custUpdate });
     }
 
