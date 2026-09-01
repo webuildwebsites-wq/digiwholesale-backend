@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import Vendor from "../../../models/Vendor.model.js";
 import DigiProduct from "../../../models/Product/Product.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
+import VendorLedger from "../../../models/Accounting/VendorLedger.model.js";
+import LedgerTransaction from "../../../models/Accounting/LedgerTransaction.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../config/Email/emailService.js";
 import VendorPurchaseOrderTemplate from "../../../Utils/Mail/VendorPurchaseOrderTemplate.js";
@@ -71,6 +73,70 @@ const validatePurchaseItem = (item, product) => {
     }
 
     return null;
+};
+
+const deriveVendorPurchaseTotal = (orders) => {
+    let total = 0;
+    for (const ord of orders) {
+        if (ord.totalOrderPrice && Number(ord.totalOrderPrice) > 0) {
+            total += Number(ord.totalOrderPrice);
+        } else if (Array.isArray(ord.items)) {
+            for (const it of ord.items) {
+                const price   = Number(it.price || 0);
+                const qty     = Number(it.qty   || 1);
+                const disc    = Number(it.discountAmount || 0);
+                const taxable = Math.max(0, price * qty - disc);
+                total += taxable + taxable * (Number(it.gst || 0) / 100);
+            }
+        }
+    }
+    return total;
+};
+
+const applyPurchaseToVendorLedger = async ({ vendorPurchase, vendorId, userId, tenantId }) => {
+    try {
+        const grandTotal = deriveVendorPurchaseTotal(vendorPurchase.orders);
+        if (grandTotal <= 0) return;
+
+        let ledger = await VendorLedger.findOne({ vendorId });
+        if (!ledger) {
+            ledger = new VendorLedger({
+                ledgerCode:         `VEND-LED-${vendorId.toString().slice(-6).toUpperCase()}`,
+                vendorId,
+                vendorCategory:     'Manufacturer',
+                paymentTerms:       0,
+                openingBalance:     0,
+                currentOutstanding: grandTotal,
+                branchId:           null,
+                tenantId,
+                createdBy:          userId,
+            });
+        } else {
+            ledger.currentOutstanding = Number(ledger.currentOutstanding || 0) + grandTotal;
+        }
+        await ledger.save();
+
+        const orderRef = vendorPurchase.orders[0]?.orderNumber || vendorPurchase._id.toString();
+
+        await LedgerTransaction.create({
+            entityType:      'Vendor',
+            ledgerId:        ledger._id,
+            partyId:         vendorId,
+            transactionDate: vendorPurchase.createdAt || new Date(),
+            voucherType:     'Purchase Invoice',
+            voucherId:       vendorPurchase._id,
+            referenceNumber: orderRef,
+            debit:           0,
+            credit:          grandTotal,
+            runningBalance:  Number(ledger.currentOutstanding),
+            narration:       `Purchase Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}. Vendor: ${vendorPurchase.vendor.vendorName}.`,
+            branchId:        null,
+            tenantId,
+            createdBy:       userId,
+        });
+    } catch (err) {
+        console.error("[Vendor Ledger Sync Error]:", err.message);
+    }
 };
 
 export const createVendorPurchaseItems = async (req, res) => {
@@ -224,9 +290,16 @@ export const createVendorPurchaseItems = async (req, res) => {
         const vendorPurchase = await VendorPurchase.create({
             vendor:    vendorDoc,
             orders,
-            createdBy: req.user._id,
+            createdBy: req.user.id || req.user._id,
             tenantId:  req.user.tenantId,
         });
+
+        applyPurchaseToVendorLedger({
+            vendorPurchase,
+            vendorId:  vendor._id,
+            userId:    req.user.id || req.user._id,
+            tenantId:  req.user.tenantId,
+        }).catch(err => console.error("Vendor ledger sync error on purchase create:", err.message));
 
         if (vendor.email) {
             const html = VendorPurchaseOrderTemplate({

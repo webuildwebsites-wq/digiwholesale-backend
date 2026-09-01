@@ -451,7 +451,7 @@ export const getPaymentsList = async (req, res) => {
 
     const query = {};
     if (tenantId) {
-      query.$or = [{ tenantId }, { tenantId: null }, { tenantId: { $exists: false } }];
+      query.tenantId = tenantId;
     }
 
     if (type) query.type = type;
