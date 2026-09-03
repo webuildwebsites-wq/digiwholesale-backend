@@ -13,9 +13,7 @@ export const getAgingReport = async (req, res) => {
     const tenantId = req.user?.tenantId || null;
     const now = new Date();
 
-    const tenantFilter = tenantId 
-      ? { $or: [{ tenantId }, { tenantId: null }, { tenantId: { $exists: false } }] } 
-      : {};
+    const tenantFilter = tenantId ? { tenantId } : {};
 
     if (entityType === 'Customer' || entityType === 'Receivables') {
       const customers = await Customer.find(tenantFilter).lean();
