@@ -4,28 +4,39 @@ import Customer from "../../models/Auth/Customer.js";
 import generatePDF from "./pdfService.js";
 import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../Utils/templates/deliveryChallanTemplate.js";
 
-const uploadPDFToGCS = (buffer, fileName) => {
-    return new Promise((resolve, reject) => {
-        const blob       = bucket.file(`pdfs/${fileName}`);
-        const blobStream = blob.createWriteStream({
-            resumable: false,
-            metadata:  { contentType: "application/pdf" },
+const uploadPDFToGCS = async (buffer, fileName) => {
+    try {
+        if (!bucket || !process.env.GOOGLE_CLOUD_BUCKET_NAME) {
+            return null;
+        }
+        return await new Promise((resolve) => {
+            const blob       = bucket.file(`pdfs/${fileName}`);
+            const blobStream = blob.createWriteStream({
+                resumable: false,
+                metadata:  { contentType: "application/pdf" },
+            });
+            blobStream.on("error", (err) => {
+                console.warn("[PDF] GCS upload skipped (local dev/no credentials):", err.message);
+                resolve(null);
+            });
+            blobStream.on("finish", () => {
+                resolve(`https://storage.googleapis.com/${bucket.name}/pdfs/${fileName}`);
+            });
+            blobStream.end(buffer);
         });
-        blobStream.on("error", reject);
-        blobStream.on("finish", () => {
-            resolve(`https://storage.googleapis.com/${bucket.name}/pdfs/${fileName}`);
-        });
-        blobStream.end(buffer);
-    });
+    } catch (err) {
+        console.warn("[PDF] GCS upload skipped:", err.message);
+        return null;
+    }
 };
 
 const buildChallanData = (bulkOrder, customer) => ({
     billNumber:     bulkOrder.orders[0]?.orderNumber,
     orderDate:      bulkOrder.createdAt,
     deliveryDate:   bulkOrder.createdAt,
-    companyName:    process.env.COMPANY_NAME    || "DigiOptics",
-    companyAddress: process.env.COMPANY_ADDRESS || "WeWork Eldeco Centre, New Delhi",
-    companyEmail:   process.env.COMPANY_EMAIL   || "sid@digibysr.com",
+    companyName:    process.env.COMPANY_NAME    || "DigiOptics Wholesale",
+    companyAddress: process.env.COMPANY_ADDRESS || "WeWork Eldeco Centre, Block A, Malviya Nagar, New Delhi",
+    companyEmail:   process.env.COMPANY_EMAIL   || "support@digioptics.com",
     companyPhone:   process.env.COMPANY_PHONE   || "+91 9650560526",
     companyGstin:   process.env.COMPANY_GSTIN   || "GST9876543210",
     customerName:   bulkOrder.customer.customerName,
@@ -78,10 +89,10 @@ const buildInvoiceData = (bulkOrder, customer) => {
         irnNo:         "",
         placeOfSupply: billTo.state || "",
         company: {
-            name:         "DigiOptics",
+            name:         "DigiOptics Wholesale",
             addressLine1: "WeWork Eldeco Centre, Block A, Shivalik Colony",
             addressLine2: "Malviya Nagar, New Delhi, Delhi 110017",
-            city:         "",
+            city:         "New Delhi",
             gstin:        process.env.COMPANY_GSTIN || "GST9876543210",
             stateCode:    "",
         },
@@ -120,27 +131,29 @@ const buildInvoiceData = (bulkOrder, customer) => {
 
 export const generateAndStoreChallan = async (orderId, tenantId) => {
     try {
-        const [bulkOrder, customerDoc] = await Promise.all([
-            BulkOrder.findOne({ _id: orderId, tenantId }).lean(),
-            BulkOrder.findOne({ _id: orderId, tenantId }).lean().then(bo =>
-                bo ? Customer.findOne({ _id: bo.customer.customerId, tenantId }).lean() : null
-            ),
-        ]);
-
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, ...(tenantId ? { tenantId } : {}) }).lean();
         if (!bulkOrder) throw new Error("BulkOrder not found");
 
-        const customer   = customerDoc;
+        const customerDoc = await Customer.findOne({ _id: bulkOrder.customer?.customerId }).lean();
+        const customer    = customerDoc;
         const challanHTML = generateDeliveryChallanHTML(buildChallanData(bulkOrder, customer));
-        const pdfBuffer  = await generatePDF(challanHTML);
-        const fileName   = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
-        const url        = await uploadPDFToGCS(pdfBuffer, fileName);
+        const pdfBuffer   = await generatePDF(challanHTML);
+        const fileName    = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
+        
+        let url = null;
+        try {
+            url = await uploadPDFToGCS(pdfBuffer, fileName);
+            if (url) {
+                await BulkOrder.findOneAndUpdate({ _id: orderId }, {
+                    challanUrl:   url,
+                    challanGenAt: new Date(),
+                });
+                console.log(`[PDF] Challan stored: ${url}`);
+            }
+        } catch (uploadErr) {
+            console.warn("[PDF] GCS Challan upload skipped:", uploadErr.message);
+        }
 
-        await BulkOrder.findOneAndUpdate({ _id: orderId, tenantId }, {
-            challanUrl:   url,
-            challanGenAt: new Date(),
-        });
-
-        console.log(`[PDF] Challan stored: ${url}`);
         return { url, buffer: pdfBuffer };
     } catch (err) {
         console.error("[PDF] generateAndStoreChallan error:", err.message);
@@ -150,21 +163,28 @@ export const generateAndStoreChallan = async (orderId, tenantId) => {
 
 export const generateAndStoreInvoice = async (orderId, tenantId) => {
     try {
-        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId }).lean();
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, ...(tenantId ? { tenantId } : {}) }).lean();
         if (!bulkOrder) throw new Error("BulkOrder not found");
 
-        const customer   = await Customer.findOne({ _id: bulkOrder.customer.customerId, tenantId }).lean();
+        const customer    = await Customer.findOne({ _id: bulkOrder.customer?.customerId }).lean();
         const invoiceHTML = generatedorderInvoice(buildInvoiceData(bulkOrder, customer));
-        const pdfBuffer  = await generatePDF(invoiceHTML);
-        const fileName   = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
-        const url        = await uploadPDFToGCS(pdfBuffer, fileName);
+        const pdfBuffer   = await generatePDF(invoiceHTML);
+        const fileName    = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
+        
+        let url = null;
+        try {
+            url = await uploadPDFToGCS(pdfBuffer, fileName);
+            if (url) {
+                await BulkOrder.findOneAndUpdate({ _id: orderId }, {
+                    invoiceUrl:   url,
+                    invoiceGenAt: new Date(),
+                });
+                console.log(`[PDF] Invoice stored: ${url}`);
+            }
+        } catch (uploadErr) {
+            console.warn("[PDF] GCS Invoice upload skipped:", uploadErr.message);
+        }
 
-        await BulkOrder.findOneAndUpdate({ _id: orderId, tenantId }, {
-            invoiceUrl:   url,
-            invoiceGenAt: new Date(),
-        });
-
-        console.log(`[PDF] Invoice stored: ${url}`);
         return { url, buffer: pdfBuffer };
     } catch (err) {
         console.error("[PDF] generateAndStoreInvoice error:", err.message);
