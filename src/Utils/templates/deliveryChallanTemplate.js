@@ -3,331 +3,473 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const logoBase64 = readFileSync(
-  join(__dirname, '../../../public/DigiOptics.png'),
-).toString('base64');
-const logoDataUrl = `data:image/png;base64,${logoBase64}`;
+let logoDataUrl = '';
+try {
+    const logoBase64 = readFileSync(
+        join(__dirname, '../../../public/DigiOptics.png'),
+    ).toString('base64');
+    logoDataUrl = `data:image/png;base64,${logoBase64}`;
+} catch {
+    logoDataUrl = '';
+}
 
+/**
+ * 1. SALE / DELIVERY CHALLAN HTML TEMPLATE
+ * Designed in DigiOptics Wholesale Enterprise Aesthetic
+ */
 export const generateDeliveryChallanHTML = (data) => {
-  const {
-    billNumber,
-    orderDate,
-    deliveryDate,
-    companyName,
-    companyAddress,
-    companyEmail,
-    companyPhone,
-    companyGstin,
-    customerName,
-    customerAddress,
-    customerPhone,
-    orders = [],
-  } = data;
+    const {
+        billNumber,
+        orderDate,
+        deliveryDate,
+        companyName = 'DigiOptics Wholesale',
+        companyAddress = 'WeWork Eldeco Centre, Block A, Shivalik Colony, Malviya Nagar, New Delhi 110017',
+        companyEmail = 'support@digioptics.com',
+        companyPhone = '+91 9650560526',
+        companyGstin = 'GST9876543210',
+        customerName,
+        customerAddress,
+        customerPhone,
+        orders = [],
+    } = data;
 
-  const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN') : '-');
-  const fmtTime = (d) =>
-    d
-      ? new Date(d).toLocaleTimeString('en-IN', {
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      : '-';
-  const fmtNum = (n) => Number(n || 0).toFixed(2);
+    const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-');
+    const fmtTime = (d) =>
+        d
+            ? new Date(d).toLocaleTimeString('en-IN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+            })
+            : '-';
+    const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  let allItems = [];
-  let totalCgst = 0;
-  let totalSgst = 0;
-  let totalIgst = 0;
-  let subTotal = 0;
-  let totalDiscount = 0;
+    let allItems = [];
+    let totalCgst = 0;
+    let totalSgst = 0;
+    let totalIgst = 0;
+    let subTotal = 0;
+    let totalDiscount = 0;
+    let totalQty = 0;
 
-  for (const order of orders) {
-    const cgstRate = parseFloat(order.cgst || 0);
-    const sgstRate = parseFloat(order.sgst || 0);
+    for (const order of orders) {
+        const cgstRate = parseFloat(order.cgst || 0);
+        const sgstRate = parseFloat(order.sgst || 0);
 
-    for (const item of order.items) {
-      const price = Number(item.price || 0);
-      const qty = Number(item.qty || 0);
-      const discAmt = Number(item.discountAmount || 0);
-      const baseAmount = price * qty;
-      const amount = baseAmount - discAmt;
+        for (const item of order.items || []) {
+            const price = Number(item.price || 0);
+            const qty = Number(item.qty || 0);
+            const discAmt = Number(item.discountAmount || 0);
+            const baseAmount = price * qty;
+            const amount = baseAmount - discAmt;
 
-      const cgstAmt = (amount * cgstRate) / 100;
-      const sgstAmt = (amount * sgstRate) / 100;
+            const cgstAmt = (amount * cgstRate) / 100;
+            const sgstAmt = (amount * sgstRate) / 100;
 
-      subTotal += amount;
-      totalCgst += cgstAmt;
-      totalSgst += sgstAmt;
-      totalDiscount += discAmt;
+            subTotal += amount;
+            totalCgst += cgstAmt;
+            totalSgst += sgstAmt;
+            totalDiscount += discAmt;
+            totalQty += qty;
 
-      const powers = item.rx?.powers || [];
-      const rPower = powers.find((p) => p.side === 'R');
-      const lPower = powers.find((p) => p.side === 'L');
+            const powers = item.rx?.powers || [];
+            const rPower = powers.find((p) => p.side === 'R');
+            const lPower = powers.find((p) => p.side === 'L');
 
-      allItems.push({
-        itemName: item.itemName || '-',
-        type: item.orderType || '-',
-        sph: item.sph ?? rPower?.sph ?? '-',
-        cyl: item.cyl ?? rPower?.cyl ?? '-',
-        axis: item.axis ?? rPower?.axis ?? '-',
-        add: item.add ?? rPower?.add ?? '-',
-        qty,
-        price,
-        discAmt,
-        amount,
-      });
+            allItems.push({
+                itemName: item.itemName || '-',
+                type: item.orderType || '-',
+                sph: item.sph ?? rPower?.sph ?? '-',
+                cyl: item.cyl ?? rPower?.cyl ?? '-',
+                axis: item.axis ?? rPower?.axis ?? '-',
+                add: item.add ?? rPower?.add ?? '-',
+                qty,
+                price,
+                discAmt,
+                amount,
+            });
+        }
     }
-  }
 
-  const grandTotal = subTotal + totalCgst + totalSgst + totalIgst;
+    const grandTotal = subTotal + totalCgst + totalSgst + totalIgst;
 
-  const itemRows = allItems
-    .map(
-      (item, i) => `
-        <tr style="background:${i % 2 === 0 ? '#ffffff' : '#ddeeff'}">
-            <td>${item.itemName}</td>
-            <td>${item.type}</td>
-            <td>${item.sph}</td>
-            <td>${item.cyl}</td>
-            <td>${item.axis}</td>
-            <td>${item.add}</td>
-            <td>${item.qty}</td>
-            <td>₹${fmtNum(item.price)}</td>
-            <td>₹${fmtNum(item.discAmt)}</td>
-            <td>₹${fmtNum(item.amount)}</td>
+    const itemRows = allItems
+        .map(
+            (item, i) => `
+        <tr style="background:${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+            <td style="text-align:center;color:#64748b;font-weight:600;">${i + 1}</td>
+            <td style="text-align:left;font-weight:700;color:#0f172a;">${item.itemName}</td>
+            <td style="text-align:center;">
+              <span class="type-pill ${item.type === 'RX' ? 'pill-rx' : 'pill-stock'}">${item.type}</span>
+            </td>
+            <td style="text-align:center;color:#334155;">${item.sph}</td>
+            <td style="text-align:center;color:#334155;">${item.cyl}</td>
+            <td style="text-align:center;color:#334155;">${item.axis}</td>
+            <td style="text-align:center;color:#334155;">${item.add}</td>
+            <td style="text-align:center;font-weight:700;color:#0f172a;">${item.qty}</td>
+            <td style="text-align:right;color:#334155;">₹${fmtNum(item.price)}</td>
+            <td style="text-align:right;color:#64748b;">${Number(item.discAmt) > 0 ? `₹${fmtNum(item.discAmt)}` : '-'}</td>
+            <td style="text-align:right;font-weight:700;color:#0f172a;">₹${fmtNum(item.amount)}</td>
         </tr>
     `,
-    )
-    .join('');
+        )
+        .join('');
 
-  return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Sale Challan</title>
+<title>Sale Challan - ${billNumber || 'DigiOptics'}</title>
 <style>
     @page {
-    size: A4;
-    margin: 24px;
-}
+        size: A4 portrait;
+        margin: 12mm 10mm;
+    }
 
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
 
-html,
-body {
-    height: 100%;
-}
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-size: 11.5px;
+        color: #1e293b;
+        background: #ffffff;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
 
-body {
-    font-family: Arial, sans-serif;
-    font-size: 12px;
-    color: #222;
-    min-height: 100vh;
-}
+    .wrap {
+        width: 100%;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        min-height: 100%;
+    }
 
-.wrap {
-    max-width: 800px;
-    margin: auto;
-    padding: 20px;
-    min-height: calc(100vh - 48px);
-    display: flex;
-    flex-direction: column;
-}
+    /* --- TOP HEADER --- */
+    .header-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 14px;
+        border-bottom: 2px solid #e2e8f0;
+        margin-bottom: 16px;
+    }
 
-.main-content {
-    flex: 1;
-}
+    .brand-section {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
 
-.top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 16px;
-}
+    .brand-logo {
+        height: 75px;
+        max-width: 320px;
+        object-fit: contain;
+        display: block;
+    }
 
-.top-left p {
-    margin-bottom: 3px;
-}
+    .brand-text h1 {
+        font-size: 18px;
+        font-weight: 800;
+        color: #0f172a;
+        letter-spacing: -0.3px;
+        line-height: 1.2;
+    }
 
-.top-left strong {
-    font-weight: bold;
-}
+    .brand-text p {
+        font-size: 10px;
+        font-weight: 700;
+        color: #0284c7;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+    }
 
-.top-center {
-    text-align: center;
-}
+    .document-badge {
+        text-align: right;
+    }
 
-.challan-title {
-    font-size: 14px;
-    font-weight: bold;
-    margin-top: 4px;
-}
+    .badge-title {
+        display: inline-block;
+        background: linear-gradient(135deg, #0284c7, #0369a1);
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 6px 14px;
+        border-radius: 20px;
+        box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2);
+    }
 
-.top-right {
-    text-align: right;
-}
+    .badge-number {
+        margin-top: 5px;
+        font-size: 11px;
+        font-weight: 700;
+        color: #475569;
+    }
 
-.top-right p {
-    margin-bottom: 3px;
-}
+    /* --- METADATA & PARTIES GRID --- */
+    .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 16px;
+    }
 
-.customer-details {
-    margin-top: 8px;
-}
+    .info-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px 14px;
+    }
 
-.customer-details p {
-    margin-bottom: 2px;
-}
+    .card-label {
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: #0284c7;
+        margin-bottom: 6px;
+        border-bottom: 1px dashed #cbd5e1;
+        padding-bottom: 4px;
+    }
 
-.divider {
-    border: none;
-    border-top: 1.5px solid #bbb;
-    margin: 14px 0;
-}
+    .party-name {
+        font-size: 13px;
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: 4px;
+    }
 
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 20px;
-}
+    .info-line {
+        font-size: 11px;
+        color: #475569;
+        line-height: 1.4;
+        margin-bottom: 2px;
+    }
 
-thead tr {
-    background: #cce0f5;
-}
+    .meta-pills {
+        display: flex;
+        gap: 12px;
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        border-radius: 6px;
+        padding: 8px 12px;
+        margin-bottom: 16px;
+        justify-content: space-between;
+    }
 
-th {
-    padding: 8px 6px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 11px;
-    border: 1px solid #b0c8e0;
-}
+    .meta-pill-item {
+        font-size: 11px;
+    }
 
-td {
-    padding: 7px 6px;
-    text-align: center;
-    border: 1px solid #d0dce8;
-    font-size: 11px;
-}
+    .meta-pill-item strong {
+        color: #166534;
+        font-weight: 700;
+    }
 
-td:first-child {
-    text-align: left;
-}
+    /* --- TABLE STYLING --- */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 16px;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #e2e8f0;
+    }
 
-.tax-box {
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    padding: 14px;
-    margin-bottom: 20px;
-}
+    thead tr {
+        background: #1b6496;
+        color: #ffffff;
+    }
 
-.tax-box .tax-title {
-    font-weight: bold;
-    font-size: 12px;
-    margin-bottom: 10px;
-}
+    th {
+        padding: 8px 6px;
+        font-weight: 700;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border: none;
+        border-right: 1px solid rgba(255, 255, 255, 0.15);
+    }
 
-.tax-row {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 8px;
-}
+    th:last-child {
+        border-right: none;
+    }
 
-.tax-row .tax-col {
-    flex: 1;
-}
+    td {
+        padding: 6px 6px;
+        border-bottom: 1px solid #e2e8f0;
+        border-right: 1px solid #f1f5f9;
+        font-size: 10.5px;
+        vertical-align: middle;
+    }
 
-.tax-row .tax-col .label {
-    font-weight: bold;
-    font-size: 11px;
-    margin-bottom: 3px;
-}
+    td:last-child {
+        border-right: none;
+    }
 
-.tax-row .tax-col .val {
-    font-size: 12px;
-}
+    .type-pill {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+    }
 
-.tax-divider {
-    border: none;
-    border-top: 1px solid #ddd;
-    margin: 8px 0;
-}
+    .pill-rx {
+        background: #fef3c7;
+        color: #b45309;
+        border: 1px solid #fde68a;
+    }
 
-.footer {
-    margin-top: auto;
-    padding-top: 12px;
-    font-size: 10px;
-    color: #444;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    border-top: 1px solid #ddd;
-}
+    .pill-stock {
+        background: #e0f2fe;
+        color: #0369a1;
+        border: 1px solid #bae6fd;
+    }
 
-.footer ul {
-    padding-left: 14px;
-}
+    /* --- TAX & SUMMARY BOX --- */
+    .summary-section {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: 14px;
+        margin-bottom: 16px;
+        page-break-inside: avoid;
+    }
 
-.footer ul li {
-    margin-bottom: 3px;
-}
+    .terms-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px 14px;
+    }
 
-.footer .sig {
-    font-style: italic;
-    font-size: 10px;
-}
+    .terms-card h4 {
+        font-size: 10.5px;
+        font-weight: 800;
+        text-transform: uppercase;
+        color: #475569;
+        margin-bottom: 6px;
+    }
+
+    .terms-card ul {
+        padding-left: 14px;
+        font-size: 10px;
+        color: #64748b;
+        line-height: 1.4;
+    }
+
+    .terms-card ul li {
+        margin-bottom: 4px;
+    }
+
+    .totals-card {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .totals-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 12px;
+        font-size: 11px;
+        color: #334155;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .totals-row.grand {
+        background: linear-gradient(135deg, #0284c7, #0369a1);
+        color: #ffffff;
+        font-weight: 800;
+        font-size: 13px;
+        padding: 8px 12px;
+        border-bottom: none;
+    }
+
+    /* --- FOOTER --- */
+    .footer {
+        margin-top: auto;
+        padding-top: 10px;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 9.5px;
+        color: #94a3b8;
+    }
+
+    .footer-stamp {
+        font-style: italic;
+        font-weight: 500;
+    }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-    <div class="top">
-        <div class="top-left">
-            <p><strong>Bill Number:</strong> ${billNumber}</p>
-            <p><strong>Company Name:</strong> ${companyName}</p>
-            <p><strong>Address:</strong> ${companyAddress}</p>
-            <p><strong>Email:</strong> ${companyEmail}</p>
-            <p><strong>Phone:</strong> ${companyPhone}</p>
-            <p><strong>GSTIN:</strong> ${companyGstin}</p>
+    <!-- TOP HEADER -->
+    <div class="header-bar">
+        <div class="brand-section">
+            ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : ''}
+           
         </div>
-
-        <div class="top-center">
-            <img src="${logoDataUrl}" alt="DigiOptics" style="height:48px;object-fit:contain;" />
-            <div class="challan-title">Sale Challan</div>
-        </div>
-
-        <div class="top-right">
-            <p><strong>Date of Order:</strong> ${fmt(orderDate)}</p>
-            <p><strong>Time of Order:</strong> ${fmtTime(orderDate)}</p>
-            <p><strong>Date of Delivery:</strong> ${fmt(deliveryDate)}</p>
-            <div class="customer-details">
-                <p><strong>CUSTOMER DETAILS:</strong></p>
-                <p><strong>Name:</strong> ${customerName}</p>
-                <p><strong>Address:</strong> ${customerAddress || '-'}</p>
-                <p><strong>Phone:</strong> ${customerPhone || '-'}</p>
-            </div>
+        <div class="document-badge">
+            <div class="badge-title">Sale Challan</div>
+            <div class="badge-number">Challan / Ref #: <strong>${billNumber || '—'}</strong></div>
         </div>
     </div>
 
-    <hr class="divider" />
+    <!-- METADATA DATES STRIP -->
+    <div class="meta-pills">
+        <div class="meta-pill-item">📅 Order Date: <strong>${fmt(orderDate)} (${fmtTime(orderDate)})</strong></div>
+        <div class="meta-pill-item">🚚 Delivery Date: <strong>${fmt(deliveryDate)}</strong></div>
+        <div class="meta-pill-item">📦 Total Items / Qty: <strong>${allItems.length} items (${totalQty} pcs)</strong></div>
+    </div>
 
+    <!-- PARTIES INFO -->
+    <div class="info-grid">
+        <div class="info-card">
+            <div class="card-label">Dispatch From (Supplier)</div>
+            <div class="party-name">${companyName}</div>
+            <div class="info-line">${companyAddress}</div>
+            <div class="info-line">📞 ${companyPhone} | ✉️ ${companyEmail}</div>
+            <div class="info-line" style="margin-top:4px;"><strong>GSTIN:</strong> ${companyGstin}</div>
+        </div>
+
+        <div class="info-card">
+            <div class="card-label">Deliver To (Customer)</div>
+            <div class="party-name">${customerName || 'Customer'}</div>
+            <div class="info-line">${customerAddress || '—'}</div>
+            <div class="info-line">📞 ${customerPhone || '—'}</div>
+        </div>
+    </div>
+
+    <!-- ITEM TABLE -->
     <table>
         <thead>
             <tr>
-                <th>Product Name</th>
-                <th>Type</th>
-                <th>Spl.</th>
-                <th>Cyl.</th>
-                <th>Axis</th>
-                <th>Add</th>
-                <th>Qty.</th>
-                <th>Price</th>
-                <th>Disc.</th>
-                <th>Amount</th>
+                <th style="width:4%;text-align:center;">#</th>
+                <th style="width:26%;text-align:left;">Product / Lens Description</th>
+                <th style="width:9%;text-align:center;">Type</th>
+                <th style="width:7%;text-align:center;">SPH</th>
+                <th style="width:7%;text-align:center;">CYL</th>
+                <th style="width:7%;text-align:center;">AXIS</th>
+                <th style="width:7%;text-align:center;">ADD</th>
+                <th style="width:6%;text-align:center;">Qty</th>
+                <th style="width:9%;text-align:right;">Rate</th>
+                <th style="width:8%;text-align:right;">Disc</th>
+                <th style="width:10%;text-align:right;">Amount</th>
             </tr>
         </thead>
         <tbody>
@@ -335,35 +477,52 @@ td:first-child {
         </tbody>
     </table>
 
-    <div class="tax-box">
-        <div class="tax-title">TAX SUMMARY</div>
-        <div class="tax-row">
-            <div class="tax-col"><div class="label">Sub-Total</div><div class="val">${fmtNum(subTotal)}</div></div>
-            <div class="tax-col"><div class="label">Add. Discount</div><div class="val">${fmtNum(totalDiscount)}</div></div>
-            <div class="tax-col"><div class="label">SGST</div><div class="val">${fmtNum(totalSgst)}</div></div>
-            <div class="tax-col"><div class="label">CGST</div><div class="val">${fmtNum(totalCgst)}</div></div>
-            <div class="tax-col"><div class="label">IGST</div><div class="val">${fmtNum(totalIgst)}</div></div>
+    <!-- SUMMARY SECTION -->
+    <div class="summary-section">
+        <div class="terms-card">
+            <h4>Terms & Conditions</h4>
+            <ul>
+                <li>Goods once delivered and accepted cannot be taken back or exchanged.</li>
+                <li>Any discrepancies must be reported within 24 hours of delivery.</li>
+                <li>Interest @ 24% p.a. will be levied if payment is delayed beyond credit terms.</li>
+                <li>Subject to local jurisdiction only.</li>
+            </ul>
         </div>
-        <hr class="tax-divider" />
-        <div class="tax-row">
-            <div class="tax-col"><div class="label">Grand Total</div><div class="val">${fmtNum(grandTotal)}</div></div>
-            <div class="tax-col"><div class="label">Advanced Paid</div><div class="val">0.00</div></div>
-            <div class="tax-col"><div class="label">Balance Due</div><div class="val">${fmtNum(grandTotal)}</div></div>
-            <div class="tax-col"><div class="label">Payment Method</div><div class="val">-</div></div>
+
+        <div class="totals-card">
+            <div class="totals-row">
+                <span>Sub-Total</span>
+                <span>₹${fmtNum(subTotal)}</span>
+            </div>
+            ${totalDiscount > 0 ? `
+            <div class="totals-row">
+                <span>Total Discount</span>
+                <span style="color:#e11d48;">-₹${fmtNum(totalDiscount)}</span>
+            </div>` : ''}
+            <div class="totals-row">
+                <span>SGST</span>
+                <span>₹${fmtNum(totalSgst)}</span>
+            </div>
+            <div class="totals-row">
+                <span>CGST</span>
+                <span>₹${fmtNum(totalCgst)}</span>
+            </div>
+            ${totalIgst > 0 ? `
+            <div class="totals-row">
+                <span>IGST</span>
+                <span>₹${fmtNum(totalIgst)}</span>
+            </div>` : ''}
+            <div class="totals-row grand">
+                <span>Grand Total</span>
+                <span>₹${fmtNum(grandTotal)}</span>
+            </div>
         </div>
     </div>
 
+    <!-- FOOTER -->
     <div class="footer">
-        <div class="footer-tc">
-            <strong>Terms &amp; Conditions</strong>
-            <ul>
-                <li>Goods once sold will not be taken back or exchanged</li>
-                <li>24% interest will be charged, if the payment is made past the delivery date</li>
-            </ul>
-        </div>
-        <div class="sig">
-            No signature required as this is a system generated invoice
-        </div>
+        <div class="footer-stamp">This is an authenticated computer-generated delivery challan.</div>
+        <div>Generated on: ${fmt(new Date())}</div>
     </div>
 
 </div>
@@ -371,38 +530,81 @@ td:first-child {
 </html>`;
 };
 
+/**
+ * 2. SALE TAX INVOICE HTML TEMPLATE
+ * Designed in DigiOptics Wholesale Enterprise Aesthetic
+ */
 export const generatedorderInvoice = (data) => {
-  const {invoiceNo,invoiceDate,irnNo,placeOfSupply,company = {},billTo = {},shipTo = {},items = [],totalQty = 0,grossAmount = 0,discountAmount = 0,taxableAmount = 0,cgstAmount = 0,sgstAmount = 0,igstAmount = 0,grandTotal = 0, qrCode = '',} = data;
-  const itemRows = items
-    .map(
-      (item, idx) => `
-        <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f9f9f9'};">
-            <td style="font-size:11px;padding:5px 4px;">
-                <b>${item.orderNo || ''}</b><br/>
-                ${item.dcNo ? `( DC No :<br/>${item.dcNo} )<br/>` : ''}
-                ${item.orderDate || ''}
+    const {
+        invoiceNo,
+        invoiceDate,
+        irnNo,
+        placeOfSupply,
+        company = {},
+        billTo = {},
+        shipTo = {},
+        items = [],
+        totalQty = 0,
+        grossAmount = 0,
+        discountAmount = 0,
+        taxableAmount = 0,
+        cgstAmount = 0,
+        sgstAmount = 0,
+        igstAmount = 0,
+        grandTotal = 0,
+        qrCode = '',
+    } = data;
+
+    const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const itemRows = items
+        .map(
+            (item, idx) => `
+        <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+            <td style="font-size:10px;padding:6px 5px;text-align:center;color:#64748b;">${idx + 1}</td>
+            <td style="font-size:10.5px;padding:6px 6px;">
+                <strong style="color:#0284c7;">${item.orderNo || '—'}</strong>
+                ${item.dcNo ? `<div style="font-size:9.5px;color:#64748b;">(DC: ${item.dcNo})</div>` : ''}
+                <div style="font-size:9.5px;color:#94a3b8;">${item.orderDate || ''}</div>
             </td>
-            <td style="font-size:11px;padding:5px 4px;text-align:center;">${item.referenceNo || ''}</td>
-            <td style="font-size:11px;padding:5px 4px;text-align:left;">${item.materialDescription || ''}</td>
-            <td style="font-size:11px;padding:5px 4px;text-align:center;">${item.hsn || ''}</td>
-            <td style="font-size:11px;padding:5px 4px;text-align:center;">${item.quantity || ''}</td>
-            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.unitRate || 0).toFixed(2)}</td>
-            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.value || 0).toFixed(2)}</td>
-            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.discount || 0).toFixed(2)}</td>
-            <td style="font-size:11px;padding:5px 4px;text-align:right;">${Number(item.netValue || 0).toFixed(2)}</td>
+            <td style="font-size:10px;padding:6px 5px;text-align:center;font-family:monospace;font-weight:600;color:#334155;">
+                ${item.referenceNo || '—'}
+            </td>
+            <td style="font-size:10.5px;padding:6px 6px;text-align:left;font-weight:700;color:#0f172a;">
+                ${item.materialDescription || '—'}
+            </td>
+            <td style="font-size:10px;padding:6px 5px;text-align:center;color:#64748b;">
+                ${item.hsn || '—'}
+            </td>
+            <td style="font-size:11px;padding:6px 5px;text-align:center;font-weight:700;color:#0f172a;">
+                ${item.quantity || 0}
+            </td>
+            <td style="font-size:10.5px;padding:6px 6px;text-align:right;color:#334155;">
+                ₹${fmtNum(item.unitRate)}
+            </td>
+            <td style="font-size:10.5px;padding:6px 6px;text-align:right;color:#334155;">
+                ₹${fmtNum(item.value)}
+            </td>
+            <td style="font-size:10px;padding:6px 5px;text-align:center;color:#64748b;">
+                ${Number(item.discount) > 0 ? `${item.discount}%` : '-'}
+            </td>
+            <td style="font-size:11px;padding:6px 6px;text-align:right;font-weight:700;color:#0f172a;">
+                ₹${fmtNum(item.netValue)}
+            </td>
         </tr>
     `,
-    )
-    .join('');
+        )
+        .join('');
 
-  return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8"/>
+<title>Tax Invoice - ${invoiceNo || 'DigiOptics'}</title>
 <style>
 @page {
-    size: A4;
-    margin: 12px;
+    size: A4 portrait;
+    margin: 12mm 10mm;
 }
 * {
     box-sizing: border-box;
@@ -410,188 +612,285 @@ export const generatedorderInvoice = (data) => {
     padding: 0;
 }
 body {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 12px;
-    color: #000;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 11.5px;
+    color: #1e293b;
+    background: #ffffff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
 }
 .invoice-container {
     width: 100%;
-    border: 2px solid #000;
+    max-width: 800px;
+    margin: 0 auto;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    overflow: hidden;
 }
-.title {
-    text-align: center;
-    font-size: 18px;
-    font-weight: bold;
-    border-bottom: 2px solid #000;
-    padding: 6px 8px;
+
+/* TITLE HEADER */
+.title-header {
+    background: linear-gradient(135deg, #1b6496, #0284c7);
+    color: #ffffff;
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.title-main {
+    font-size: 16px;
+    font-weight: 800;
     letter-spacing: 1px;
+    text-transform: uppercase;
 }
-table {
-    width: 100%;
-    border-collapse: collapse;
+.title-sub {
+    font-size: 10.5px;
+    font-weight: 600;
+    opacity: 0.9;
 }
-td, th {
-    border: 1px solid #000;
-    padding: 4px 6px;
-    vertical-align: top;
+
+/* SUPPLIER & METADATA SECTION */
+.header-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    border-bottom: 1px solid #e2e8f0;
 }
-.header-table td {
-    padding: 6px 8px;
-    vertical-align: top;
-}
-.header-table .company-cell {
-    width: 60%;
-    border-right: 1px solid #000;
-    border-bottom: 1px solid #000;
-}
-.header-table .meta-cell {
-    width: 40%;
-    border-bottom: 1px solid #000;
-    padding: 6px 8px;
+.company-cell {
+    padding: 12px 16px;
+    border-right: 1px solid #e2e8f0;
 }
 .company-name {
     font-size: 15px;
-    font-weight: bold;
+    font-weight: 800;
+    color: #0f172a;
     margin-bottom: 4px;
-}
-.meta-row {
     display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.company-info {
+    font-size: 10.5px;
+    color: #475569;
+    line-height: 1.4;
+}
+.meta-cell {
+    padding: 12px 16px;
+    background: #f8fafc;
+}
+.meta-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.meta-table td {
+    padding: 2.5px 0;
+    font-size: 10.5px;
+    border: none;
+}
+.meta-table td.label {
+    font-weight: 700;
+    color: #475569;
+    width: 38%;
+}
+.meta-table td.val {
+    color: #0f172a;
+    font-weight: 600;
+}
+
+/* BILL TO & SHIP TO */
+.parties-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid #e2e8f0;
+}
+.party-box {
+    padding: 10px 16px;
+}
+.party-box:first-child {
+    border-right: 1px solid #e2e8f0;
+}
+.party-heading {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #0284c7;
+    letter-spacing: 0.5px;
     margin-bottom: 4px;
-    font-size: 12px;
 }
-.meta-label {
-    font-weight: bold;
-    white-space: nowrap;
-    min-width: 110px;
+.party-title {
+    font-size: 12.5px;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 2px;
 }
-.address-section table {
-    border-top: none;
+.party-text {
+    font-size: 10.5px;
+    color: #475569;
+    line-height: 1.35;
 }
-.address-section th {
-    background: #d9d9d9;
-    font-weight: bold;
-    font-size: 12px;
-    padding: 5px 8px;
-    border: 1px solid #000;
-}
-.address-section td {
-    padding: 8px;
-    vertical-align: top;
-    min-height: 100px;
-    font-size: 12px;
-    width: 50%;
-}
-.address-name {
-    font-size: 13px;
-    font-weight: bold;
-    margin-bottom: 4px;
-}
+
+/* TABLE */
 .item-table {
-    border-top: none;
+    width: 100%;
+    border-collapse: collapse;
 }
 .item-table th {
-    background: #d9d9d9;
-    font-weight: bold;
-    font-size: 11px;
+    background: #1b6496;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 7px 5px;
     text-align: center;
-    padding: 5px 4px;
-    border: 1px solid #000;
+    border: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.15);
 }
-.item-table tbody tr td {
-    border: 1px solid #000;
+.item-table th:last-child {
+    border-right: none;
 }
-.summary-table td {
+.item-table td {
+    border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #f1f5f9;
+}
+.item-table td:last-child {
+    border-right: none;
+}
+
+/* SUMMARY */
+.summary-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    border-bottom: 1px solid #e2e8f0;
+    page-break-inside: avoid;
+}
+.words-box {
+    padding: 12px 16px;
+    border-right: 1px solid #e2e8f0;
+    background: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+.words-title {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 4px;
+}
+.words-val {
     font-size: 12px;
-    padding: 4px 8px;
-    border: 1px solid #000;
+    font-weight: 700;
+    color: #0f172a;
 }
+.summary-table-box {
+    padding: 0;
+}
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4.5px 14px;
+    font-size: 10.5px;
+    color: #334155;
+    border-bottom: 1px solid #f1f5f9;
+}
+.summary-row.grand {
+    background: linear-gradient(135deg, #1b6496, #0284c7);
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 12.5px;
+    padding: 7px 14px;
+    border-bottom: none;
+}
+
+/* FOOTER NOTE */
 .footer-note {
     text-align: center;
-    font-style: italic;
-    font-size: 11px;
+    font-size: 9.5px;
+    color: #64748b;
     padding: 8px;
-    border-top: 1px solid #000;
+    background: #f8fafc;
 }
 </style>
 </head>
 <body>
 <div class="invoice-container">
 
-    <div class="title">TAX INVOICE</div>
-
-    <table class="header-table" style="border:none;border-bottom:1px solid #000;">
-        <tr>
-            <td class="company-cell">
-                <div class="company-name">DigiOptics</div>
-                <div>WeWork Eldeco Centre, Block A</div>
-                <div>Shivalik Colony, Malviya Nagar</div>
-                <div>New Delhi, Delhi 110017</div>
-                ${company.gstin ? `<div style="margin-top:6px;">GST No. : ${company.gstin}</div>` : ''}
-                ${company.stateCode ? `<div>State Code : ${company.stateCode}</div>` : ''}
-            </td>
-            <td class="meta-cell">
-                <table style="border:none;width:100%;">
-                    <tr>
-                        <td style="border:none;font-weight:bold;white-space:nowrap;padding:3px 4px;">Invoice No</td>
-                        <td style="border:none;padding:3px 4px;">: ${invoiceNo || ''}</td>
-                    </tr>
-                    <tr>
-                        <td style="border:none;font-weight:bold;padding:3px 4px;">IRN No</td>
-                        <td style="border:none;padding:3px 4px;">: ${irnNo || ''}</td>
-                    </tr>
-                    <tr>
-                        <td style="border:none;font-weight:bold;padding:3px 4px;">Invoice<br/>Date</td>
-                        <td style="border:none;padding:3px 4px;">: ${invoiceDate || ''}</td>
-                    </tr>
-                    <tr>
-                        <td style="border:none;font-weight:bold;padding:3px 4px;">Place of<br/>Supply</td>
-                        <td style="border:none;padding:3px 4px;">: ${placeOfSupply || ''}</td>
-                    </tr>
-                </table>
-            </td>
-        </tr>
-    </table>
-
-    <div class="address-section">
-        <table>
-            <tr>
-                <th style="width:50%;">Bill To</th>
-                <th style="width:50%;">Ship To</th>
-            </tr>
-            <tr>
-                <td style="width:50%;min-height:110px;">
-                    <div class="address-name">${billTo.name || ''}</div>
-                    ${billTo.branchName ? `<div>${billTo.branchName}</div>` : ''}
-                    ${billTo.address ? `<div>${billTo.address}</div>` : ''}
-                    ${(billTo.city || billTo.state || billTo.pincode) ? `<div>${[billTo.city, billTo.state, billTo.pincode].filter(Boolean).join(', ')}</div>` : ''}
-                    ${billTo.contactName ? `<div><b>Contact:</b> ${billTo.contactName}</div>` : ''}
-                    ${billTo.contactNumber ? `<div><b>Ph:</b> ${billTo.contactNumber}</div>` : ''}
-                    ${billTo.gstin ? `<div style="margin-top:4px;">GSTIN ${billTo.gstin}</div>` : ''}
-                </td>
-                <td style="width:50%;min-height:110px;">
-                    <div class="address-name">${shipTo.name || ''}</div>
-                    ${shipTo.branchName ? `<div>${shipTo.branchName}</div>` : ''}
-                    ${shipTo.address ? `<div>${shipTo.address}</div>` : ''}
-                    ${(shipTo.city || shipTo.state || shipTo.pincode) ? `<div>${[shipTo.city, shipTo.state, shipTo.pincode].filter(Boolean).join(', ')}</div>` : ''}
-                    ${shipTo.contactName ? `<div><b>Contact:</b> ${shipTo.contactName}</div>` : ''}
-                    ${shipTo.contactNumber ? `<div><b>Ph:</b> ${shipTo.contactNumber}</div>` : ''}
-                </td>
-            </tr>
-        </table>
+    <!-- TITLE HEADER -->
+    <div class="title-header">
+        <div class="title-main">TAX INVOICE</div>
+        <div class="title-sub">ORIGINAL FOR RECIPIENT</div>
     </div>
 
+    <!-- SUPPLIER & METADATA -->
+    <div class="header-grid">
+        <div class="company-cell">
+            <div class="company-name" style="margin-bottom: 8px;">
+                ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" style="height:70px;max-width:300px;object-fit:contain;display:block;" />` : ''}
+            </div>
+            <div class="company-info">WeWork Eldeco Centre, Block A, Shivalik Colony</div>
+            <div class="company-info">Malviya Nagar, New Delhi, Delhi 110017</div>
+            ${company.gstin ? `<div class="company-info" style="margin-top:4px;"><strong>GSTIN:</strong> ${company.gstin}</div>` : ''}
+            ${company.stateCode ? `<div class="company-info"><strong>State Code:</strong> ${company.stateCode}</div>` : ''}
+        </div>
+        <div class="meta-cell">
+            <table class="meta-table">
+                <tr>
+                    <td class="label">Invoice No</td>
+                    <td class="val">: ${invoiceNo || '—'}</td>
+                </tr>
+                <tr>
+                    <td class="label">Invoice Date</td>
+                    <td class="val">: ${invoiceDate || '—'}</td>
+                </tr>
+                ${irnNo ? `
+                <tr>
+                    <td class="label">IRN No</td>
+                    <td class="val" style="font-family:monospace;font-size:9.5px;">: ${irnNo}</td>
+                </tr>` : ''}
+                <tr>
+                    <td class="label">Place of Supply</td>
+                    <td class="val">: ${placeOfSupply || '—'}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- PARTIES -->
+    <div class="parties-grid">
+        <div class="party-box">
+            <div class="party-heading">Bill To (Buyer)</div>
+            <div class="party-title">${billTo.name || '—'}</div>
+            ${billTo.branchName ? `<div class="party-text"><strong>${billTo.branchName}</strong></div>` : ''}
+            ${billTo.address ? `<div class="party-text">${billTo.address}</div>` : ''}
+            ${(billTo.city || billTo.state || billTo.pincode) ? `<div class="party-text">${[billTo.city, billTo.state, billTo.pincode].filter(Boolean).join(', ')}</div>` : ''}
+            ${billTo.contactNumber ? `<div class="party-text">📞 ${billTo.contactNumber}</div>` : ''}
+            ${billTo.gstin ? `<div class="party-text" style="margin-top:3px;"><strong>GSTIN:</strong> ${billTo.gstin}</div>` : ''}
+        </div>
+        <div class="party-box">
+            <div class="party-heading">Ship To (Consignee)</div>
+            <div class="party-title">${shipTo.name || '—'}</div>
+            ${shipTo.branchName ? `<div class="party-text"><strong>${shipTo.branchName}</strong></div>` : ''}
+            ${shipTo.address ? `<div class="party-text">${shipTo.address}</div>` : ''}
+            ${(shipTo.city || shipTo.state || shipTo.pincode) ? `<div class="party-text">${[shipTo.city, shipTo.state, shipTo.pincode].filter(Boolean).join(', ')}</div>` : ''}
+            ${shipTo.contactNumber ? `<div class="party-text">📞 ${shipTo.contactNumber}</div>` : ''}
+        </div>
+    </div>
+
+    <!-- ITEM TABLE -->
     <table class="item-table">
         <thead>
             <tr>
-                <th style="width:13%;">Order No</th>
-                <th style="width:9%;">Reference No</th>
-                <th style="width:32%;text-align:left;">Material Description</th>
-                <th style="width:8%;">HSN</th>
-                <th style="width:7%;">Quantity</th>
-                <th style="width:9%;">Unit rate</th>
-                <th style="width:9%;">Value</th>
-                <th style="width:7%;">Discount %</th>
-                <th style="width:9%;">Net value</th>
+                <th style="width:4%;">#</th>
+                <th style="width:14%;">Order / DC No</th>
+                <th style="width:10%;">Ref Code</th>
+                <th style="width:28%;text-align:left;">Material / Product Description</th>
+                <th style="width:7%;">HSN</th>
+                <th style="width:6%;">Qty</th>
+                <th style="width:9%;text-align:right;">Rate</th>
+                <th style="width:9%;text-align:right;">Value</th>
+                <th style="width:5%;">Disc</th>
+                <th style="width:8%;text-align:right;">Net Value</th>
             </tr>
         </thead>
         <tbody>
@@ -599,38 +898,50 @@ td, th {
         </tbody>
     </table>
 
-    <table class="summary-table">
-        <tr>
-            <td style="width:70%;border-right:1px solid #000;" rowspan="6">
-                <b>Amount in Words:</b><br/>${grandTotal}
-            </td>
-            <td style="width:20%;">Total Qty</td>
-            <td style="width:10%;text-align:right;">${totalQty}</td>
-        </tr>
-        <tr>
-            <td>Gross Amount</td>
-            <td style="text-align:right;">${grossAmount}</td>
-        </tr>
-        <tr>
-            <td>Discount</td>
-            <td style="text-align:right;">${discountAmount}</td>
-        </tr>
-        <tr>
-            <td>Taxable Amount</td>
-            <td style="text-align:right;">${taxableAmount}</td>
-        </tr>
-        <tr>
-            <td>CGST + SGST</td>
-            <td style="text-align:right;">${(Number(cgstAmount) + Number(sgstAmount)).toFixed(2)}</td>
-        </tr>
-        <tr>
-            <td><b>Grand Total</b></td>
-            <td style="text-align:right;"><b>${grandTotal}</b></td>
-        </tr>
-    </table>
+    <!-- SUMMARY SECTION -->
+    <div class="summary-grid">
+        <div class="words-box">
+            <div>
+                <div class="words-title">Amount in Words</div>
+                <div class="words-val">₹ ${fmtNum(grandTotal)} Only</div>
+            </div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:8px;">
+                Total Items: <strong>${items.length}</strong> | Total Pieces: <strong>${totalQty}</strong>
+            </div>
+        </div>
+        <div class="summary-table-box">
+            <div class="summary-row">
+                <span>Gross Taxable Amount</span>
+                <span>₹ ${fmtNum(grossAmount)}</span>
+            </div>
+            ${Number(discountAmount) > 0 ? `
+            <div class="summary-row">
+                <span>Discount</span>
+                <span style="color:#e11d48;">-₹ ${fmtNum(discountAmount)}</span>
+            </div>` : ''}
+            <div class="summary-row">
+                <span>Taxable Amount</span>
+                <span>₹ ${fmtNum(taxableAmount)}</span>
+            </div>
+            <div class="summary-row">
+                <span>CGST + SGST</span>
+                <span>₹ ${fmtNum(Number(cgstAmount) + Number(sgstAmount))}</span>
+            </div>
+            ${Number(igstAmount) > 0 ? `
+            <div class="summary-row">
+                <span>IGST</span>
+                <span>₹ ${fmtNum(igstAmount)}</span>
+            </div>` : ''}
+            <div class="summary-row grand">
+                <span>Grand Total</span>
+                <span>₹ ${fmtNum(grandTotal)}</span>
+            </div>
+        </div>
+    </div>
 
+    <!-- FOOTER NOTE -->
     <div class="footer-note">
-        This is a system-generated invoice. No signature required.
+        This is an authenticated computer-generated GST tax invoice. No signature required.
     </div>
 
 </div>

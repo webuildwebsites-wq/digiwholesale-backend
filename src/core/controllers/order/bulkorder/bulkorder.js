@@ -1010,13 +1010,17 @@ export const getBulkOrderChallan = async (req, res) => {
         const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
 
         if (bulkOrder.challanUrl) {
-            const { default: axios } = await import("axios");
-            const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer" });
-            const buffer   = Buffer.from(response.data);
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-            res.setHeader("Content-Length", buffer.length);
-            return res.end(buffer);
+            try {
+                const { default: axios } = await import("axios");
+                const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer", timeout: 4000 });
+                const buffer   = Buffer.from(response.data);
+                res.setHeader("Content-Type", "application/pdf");
+                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+                res.setHeader("Content-Length", buffer.length);
+                return res.end(buffer);
+            } catch (fetchErr) {
+                console.warn("[PDF] Failed to fetch stored challan from GCS, regenerating on the fly:", fetchErr.message);
+            }
         }
 
         const { url, buffer } = await generateAndStoreChallan(orderId, req.user.tenantId);
@@ -1046,13 +1050,17 @@ export const getBulkOrderInvoice = async (req, res) => {
         const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
 
         if (bulkOrder.invoiceUrl) {
-            const { default: axios } = await import("axios");
-            const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer" });
-            const buffer   = Buffer.from(response.data);
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-            res.setHeader("Content-Length", buffer.length);
-            return res.end(buffer);
+            try {
+                const { default: axios } = await import("axios");
+                const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer", timeout: 4000 });
+                const buffer   = Buffer.from(response.data);
+                res.setHeader("Content-Type", "application/pdf");
+                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+                res.setHeader("Content-Length", buffer.length);
+                return res.end(buffer);
+            } catch (fetchErr) {
+                console.warn("[PDF] Failed to fetch stored invoice from GCS, regenerating on the fly:", fetchErr.message);
+            }
         }
 
         const { url, buffer } = await generateAndStoreInvoice(orderId, req.user.tenantId);
