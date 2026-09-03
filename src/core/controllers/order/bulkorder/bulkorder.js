@@ -15,6 +15,7 @@ import { sendWhatsAppMessage } from "../../../../Utils/whatsapp/whatsappService.
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
 import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
 import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
+import { applyPurchaseToVendorLedger } from "../../Purchase/purchase.controller.js";
 
 const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumber }) => {
     try {
@@ -251,6 +252,15 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
 
         const created = await Promise.all(poCreations);
         console.log(`[RX-PO] Created ${created.length} vendor purchase order(s) for RX items`);
+
+        for (const po of created) {
+            await applyPurchaseToVendorLedger({
+                vendorPurchase: po,
+                vendorId: po.vendor.vendorId,
+                userId: createdBy,
+                tenantId,
+            }).catch(err => console.error("[RX-PO] Vendor ledger sync error:", err.message));
+        }
     } catch (err) {
         console.error("[RX-PO] Auto vendor PO creation error:", err.message);
     }
@@ -354,6 +364,15 @@ const createStockVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy 
 
         const created = await Promise.all(poCreations);
         console.log(`[STOCK-PO] Created ${created.length} vendor purchase order(s) for STOCK items`);
+
+        for (const po of created) {
+            await applyPurchaseToVendorLedger({
+                vendorPurchase: po,
+                vendorId: po.vendor.vendorId,
+                userId: createdBy,
+                tenantId,
+            }).catch(err => console.error("[STOCK-PO] Vendor ledger sync error:", err.message));
+        }
     } catch (err) {
         console.error("[STOCK-PO] Auto vendor PO creation error:", err.message);
     }
@@ -1282,6 +1301,30 @@ export const updateBulkDraftOrder = async (req, res) => {
         if (submitNow) {
             const customer = await Customer.findOne({ _id: bulkOrder.customer.customerId, tenantId: req.user.tenantId }).lean();
             if (customer) {
+                applyOrderToCustomerCreditAndLedger({
+                    bulkOrder,
+                    customerId: customer._id,
+                    userId: req.user.id || req.user._id,
+                    tenantId: req.user.tenantId,
+                    reqBody: req.body,
+                }).catch(err => console.error("Customer credit/ledger sync error on draft submit:", err.message));
+
+                createRxVendorPurchaseOrders({
+                    bulkOrder,
+                    tenantId: req.user.tenantId,
+                    createdBy: req.user._id,
+                }).catch(err => console.error("RX vendor PO creation error on draft submit:", err.message));
+
+                createStockVendorPurchaseOrders({
+                    bulkOrder,
+                    tenantId: req.user.tenantId,
+                    createdBy: req.user._id,
+                }).catch(err => console.error("STOCK vendor PO creation error on draft submit:", err.message));
+
+                sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
+                    console.error("Vendor email notification error on draft submit:", err.message)
+                );
+
                 handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
                     console.error("Billing notification error:", err.message)
                 );
