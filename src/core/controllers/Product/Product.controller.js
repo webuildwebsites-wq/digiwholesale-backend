@@ -706,6 +706,8 @@ export const bulkUploadProducts = async (req, res) => {
       hsnSac:       p.hsnSac?.trim() || "",
       qty:          Number(p.qty)    || 0,
       image:        p.image          || "",
+      orderSource:  p.orderSource    || (p.vendor?.id || p.vendor?.name ? "ORDER" : "INHOUSE"),
+      vendor:       p.vendor         || { id: null, name: null },
       createdBy:    userId,
       tenantId:     req.user.tenantId,
     }));

@@ -5,7 +5,8 @@ import {
   updateChequeStatus, 
   getPaymentsList, 
   getPaymentById,
-  adjustDueFromAdvance
+  adjustDueFromAdvance,
+  getPaymentReceipt
 } from '../../core/controllers/Accounting/payment.controller.js';
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
 
@@ -28,5 +29,8 @@ router.patch('/:id/cheque-status', updateChequeStatus);
 // Payment Listings & Details
 router.get('/', getPaymentsList);
 router.get('/:id', getPaymentById);
+
+// Download / View Payment Receipt PDF
+router.get('/:id/receipt', getPaymentReceipt);
 
 export default router;

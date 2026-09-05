@@ -7,6 +7,7 @@ import Customer from '../../../models/Auth/Customer.js';
 import Vendor from '../../../models/Vendor.model.js';
 import BulkOrder from '../../../models/order/BulkOrder.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../../Utils/response/responseHandler.js';
+import { generatePaymentReceiptPDF, sendPaymentReceiptEmail } from '../../services/paymentReceiptService.js';
 
 const runInTransaction = async (workFn) => {
   let session = null;
@@ -210,6 +211,11 @@ export const executeCustomerPayment = async (req, res) => {
 
       return payment;
     });
+
+    // Automatically send Payment Receipt confirmation email to customer
+    sendPaymentReceiptEmail({ paymentId: result._id, tenantId }).catch(err =>
+      console.error('[PaymentReceipt] Background email error:', err.message)
+    );
 
     return sendSuccessResponse(res, 201, result, 'Customer payment processed successfully.');
   } catch (error) {
@@ -627,6 +633,28 @@ export const adjustDueFromAdvance = async (req, res) => {
   } catch (error) {
     console.error('adjustDueFromAdvance error:', error);
     return sendErrorResponse(res, 500, 'ADJUST_ADVANCE_FAILED', error.message);
+  }
+};
+
+/**
+ * Downloads / Streams the Payment Receipt PDF for a given payment ID
+ */
+export const getPaymentReceipt = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || typeof id !== 'string' || !id.trim()) {
+      return sendErrorResponse(res, 400, 'INVALID_ID', 'Payment ID or reference number is required.');
+    }
+
+    const { buffer, fileName } = await generatePaymentReceiptPDF(id.trim(), req.user?.tenantId);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Length', buffer.length);
+    return res.end(buffer);
+  } catch (error) {
+    console.error('getPaymentReceipt error:', error);
+    return sendErrorResponse(res, 500, 'RECEIPT_GENERATION_FAILED', error.message);
   }
 };
 

@@ -114,7 +114,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
 
     const isPaginationRequested = Boolean(page && limit);
     let transactionsQuery = LedgerTransaction.find(query)
-      .sort({ transactionDate: 1, createdAt: 1 })
+      .sort({ transactionDate: -1, createdAt: -1 })
       .populate('createdBy', 'name username');
 
     if (isPaginationRequested) {
@@ -134,6 +134,13 @@ export const getCustomerLedgerStatement = async (req, res) => {
       totalCredit += Number(txn.credit || 0);
     });
 
+    const rawAddr = customer.address || customer.billToAddress;
+    const formattedAddr = typeof rawAddr === 'string'
+      ? rawAddr
+      : rawAddr && typeof rawAddr === 'object'
+      ? [rawAddr.address, rawAddr.city, rawAddr.state, rawAddr.zipCode, rawAddr.country].filter(Boolean).join(', ') || rawAddr.branchName || ''
+      : '';
+
     const statementSummary = {
       customer: {
         id: customer._id,
@@ -142,7 +149,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
         ownerName: customer.ownerName,
         mobile: customer.mobileNo1 || customer.mobile || customer.mobileNo2 || '—',
         email: customer.businessEmail || customer.emailId,
-        address: customer.address || customer.billToAddress,
+        address: formattedAddr,
         gstin: customer.gstNumber || customer.gstin || customer.GSTNo
       },
       ledgerMaster: {
@@ -273,7 +280,7 @@ export const getVendorLedgerStatement = async (req, res) => {
 
     const isPaginationRequested = Boolean(page && limit);
     let transactionsQuery = LedgerTransaction.find(query)
-      .sort({ transactionDate: 1, createdAt: 1 })
+      .sort({ transactionDate: -1, createdAt: -1 })
       .populate('createdBy', 'name username');
 
     if (isPaginationRequested) {
