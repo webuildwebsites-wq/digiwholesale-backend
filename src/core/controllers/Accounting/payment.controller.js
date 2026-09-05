@@ -353,19 +353,17 @@ export const executeVendorPayment = async (req, res) => {
       vendorId,
       branchId,
       grossAmount,
-      tdsDeducted = 0,
-      tdsSection = '194Q',
-      debitNoteDeducted = 0,
-      debitNoteIds = [],
+      amount,
       paymentMode,
       paymentDetails = {}
     } = req.body;
 
+    const payoutAmount = Number(grossAmount || amount || 0);
     const userId = req.user?.id || req.user?._id;
     const tenantId = req.user?.tenantId || null;
 
-    if (!vendorId || !grossAmount || grossAmount <= 0 || !paymentMode) {
-      return sendErrorResponse(res, 400, 'INVALID_INPUT', 'Vendor ID, gross amount, and payment mode are required.');
+    if (!vendorId || payoutAmount <= 0 || !paymentMode) {
+      return sendErrorResponse(res, 400, 'INVALID_INPUT', 'Vendor ID, payment amount, and payment mode are required.');
     }
 
     const vendor = await Vendor.findById(vendorId).lean();
@@ -373,7 +371,7 @@ export const executeVendorPayment = async (req, res) => {
       return sendErrorResponse(res, 404, 'VENDOR_NOT_FOUND', 'Vendor not found.');
     }
 
-    const netAmountPaid = Math.max(0, Number(grossAmount) - Number(tdsDeducted || 0) - Number(debitNoteDeducted || 0));
+    const netAmountPaid = payoutAmount;
 
     const result = await runInTransaction(async (session) => {
       let ledger = await VendorLedger.findOne({ vendorId }).session(session);
@@ -400,11 +398,11 @@ export const executeVendorPayment = async (req, res) => {
         partyModel: 'Vendor',
         partyName: vendor.firm || vendor.name || 'Vendor',
         paymentMode,
-        grossAmount: Number(grossAmount),
-        tdsDeducted: Number(tdsDeducted || 0),
-        tdsSection,
-        debitNoteDeducted: Number(debitNoteDeducted || 0),
-        debitNoteIds,
+        grossAmount: payoutAmount,
+        tdsDeducted: 0,
+        tdsSection: null,
+        debitNoteDeducted: 0,
+        debitNoteIds: [],
         netAmountPaid,
         paymentDetails: {
           ...paymentDetails,
@@ -418,7 +416,7 @@ export const executeVendorPayment = async (req, res) => {
 
       await payment.save({ session });
 
-      const newOutstanding = Number(ledger.currentOutstanding) - Number(grossAmount);
+      const newOutstanding = Number(ledger.currentOutstanding) - payoutAmount;
       ledger.currentOutstanding = newOutstanding;
       await ledger.save({ session });
 
@@ -430,10 +428,10 @@ export const executeVendorPayment = async (req, res) => {
         voucherType: 'Payment Voucher',
         voucherId: payment._id,
         referenceNumber: payment.paymentNumber,
-        debit: Number(grossAmount),
+        debit: payoutAmount,
         credit: 0,
         runningBalance: newOutstanding,
-        narration: `Payout issued via ${paymentMode}. Gross: ₹${Number(grossAmount).toLocaleString()}, TDS Deducted: ₹${Number(tdsDeducted).toLocaleString()}, Return Note: ₹${Number(debitNoteDeducted).toLocaleString()}, Net Paid: ₹${netAmountPaid.toLocaleString()}`,
+        narration: `Payout issued via ${paymentMode}. Amount Paid: ₹${payoutAmount.toLocaleString()}`,
         branchId: payment.branchId,
         tenantId,
         createdBy: userId

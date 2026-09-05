@@ -213,22 +213,6 @@ export const getVendorLedgerStatement = async (req, res) => {
 
     const inheritedTerms = parseInt(String(vendor.paymentTerms || 0).replace(/\D/g, ''), 10) || 0;
 
-    const purchases = await VendorPurchase.find({ 'vendor.vendorId': vendorId }).lean();
-    let liveOutstanding = 0;
-    purchases.forEach(pur => {
-      if (pur.orders && Array.isArray(pur.orders)) {
-        pur.orders.forEach(o => {
-          if (o.status !== 'Closed') liveOutstanding += Number(o.totalOrderPrice || 0);
-        });
-      }
-    });
-
-    const paidPayments = await Payment
-      .find({ partyId: vendorId, partyModel: 'Vendor', type: 'VENDOR_OUTFLOW', status: 'COMPLETED' })
-      .lean();
-    const totalPaid = paidPayments.reduce((s, p) => s + Number(p.grossAmount || 0), 0);
-    const computedOutstanding = Math.max(0, liveOutstanding - totalPaid);
-
     let ledger = await VendorLedger.findOne({ vendorId })
       .populate('branchId', 'name address')
       .populate('coaAccountId', 'accountCode accountName');
@@ -240,7 +224,7 @@ export const getVendorLedgerStatement = async (req, res) => {
         vendorCategory: 'Manufacturer',
         paymentTerms: inheritedTerms,
         openingBalance: 0,
-        currentOutstanding: computedOutstanding,
+        currentOutstanding: 0,
         branchId: null,
         tenantId: req.user?.tenantId || vendor.tenantId || null,
         createdBy: req.user?.id || req.user?._id
@@ -252,14 +236,31 @@ export const getVendorLedgerStatement = async (req, res) => {
         ledger.paymentTerms = inheritedTerms;
         needsSave = true;
       }
-      if (ledger.currentOutstanding !== computedOutstanding) {
-        ledger.currentOutstanding = computedOutstanding;
-        needsSave = true;
-      }
       if (needsSave) await ledger.save();
     }
 
+    const allTxnsBalance = await LedgerTransaction.find({
+      $or: [
+        { ledgerId: ledger._id },
+        { partyId: vendorId, entityType: 'Vendor' }
+      ]
+    }).sort({ transactionDate: 1, createdAt: 1 }).lean();
+
+    let computedOutstanding = Number(ledger.openingBalance || 0);
+    for (const t of allTxnsBalance) {
+      computedOutstanding += Number(t.credit || 0);
+      computedOutstanding -= Number(t.debit || 0);
+    }
+
+    // Sync to DB if different
+    if (ledger.currentOutstanding !== computedOutstanding) {
+      await VendorLedger.findByIdAndUpdate(ledger._id, { currentOutstanding: computedOutstanding });
+      ledger.currentOutstanding = computedOutstanding;
+    }
+
     const ledgerObj = ledger.toObject ? ledger.toObject() : ledger;
+    ledgerObj.currentOutstanding = computedOutstanding;
+
 
     const query = {
       $or: [
@@ -312,10 +313,6 @@ export const getVendorLedgerStatement = async (req, res) => {
       },
       ledgerMaster: {
         ledgerCode: ledgerObj.ledgerCode,
-        vendorCategory: ledgerObj.vendorCategory,
-        tdsApplicable: ledgerObj.tdsApplicable,
-        tdsSection: ledgerObj.tdsSection,
-        tdsPercentage: ledgerObj.tdsPercentage,
         paymentTerms: ledgerObj.paymentTerms || inheritedTerms,
         openingBalance: ledgerObj.openingBalance || 0,
         openingBalanceType: ledgerObj.openingBalanceType || 'Credit',
@@ -470,7 +467,7 @@ export const getCustomerLedgersList = async (req, res) => {
  */
 export const getVendorLedgersList = async (req, res) => {
   try {
-    const { search, status, category, page = 1, limit = 50 } = req.query;
+    const { search, status, page = 1, limit = 50 } = req.query;
     const tenantId = req.user?.tenantId || null;
 
     const vendorQuery = {};
@@ -482,7 +479,9 @@ export const getVendorLedgersList = async (req, res) => {
       vendorQuery.$or = [
         { name: { $regex: search, $options: 'i' } },
         { firm: { $regex: search, $options: 'i' } },
-        { mobile: { $regex: search, $options: 'i' } }
+        { mobile: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { gstNumber: { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -496,34 +495,39 @@ export const getVendorLedgersList = async (req, res) => {
 
       const vPaymentTerms = parseInt(String(v.paymentTerms || 0).replace(/\D/g, ''), 10) || 0;
 
-      const purchases = await VendorPurchase.find({ 'vendor.vendorId': v._id }).lean();
-      let liveOutstanding = 0;
-      purchases.forEach(pur => {
-        if (pur.orders && Array.isArray(pur.orders)) {
-          pur.orders.forEach(o => {
-            if (o.status !== 'Closed') {
-              liveOutstanding += Number(o.totalOrderPrice || 0);
-            }
-          });
-        }
-      });
-
       if (!l) {
         l = await VendorLedger.create({
           ledgerCode: `VEND-LED-${v._id.toString().slice(-6).toUpperCase()}`,
           vendorId: v._id,
-          vendorCategory: 'Manufacturer',
           paymentTerms: vPaymentTerms,
           openingBalance: 0,
-          currentOutstanding: liveOutstanding,
+          currentOutstanding: 0,
           branchId: null,
           tenantId,
           createdBy: req.user?.id || req.user?._id
         });
       } else {
+        const ledgerId = l._id;
+        const txns = await LedgerTransaction.find({
+          $or: [
+            { ledgerId },
+            { partyId: v._id, entityType: 'Vendor' }
+          ]
+        }).lean();
+
+        let syncedBalance = Number(l.openingBalance || 0);
+        txns.forEach(t => {
+          syncedBalance += Number(t.credit || 0);
+          syncedBalance -= Number(t.debit || 0);
+        });
+
         let needsUpdate = false;
         if ((!l.paymentTerms || l.paymentTerms === 0) && vPaymentTerms > 0) {
           l.paymentTerms = vPaymentTerms;
+          needsUpdate = true;
+        }
+        if (l.currentOutstanding !== syncedBalance) {
+          l.currentOutstanding = syncedBalance;
           needsUpdate = true;
         }
         if (needsUpdate) await l.save();
@@ -533,7 +537,7 @@ export const getVendorLedgersList = async (req, res) => {
       lObj.vendorId = v;
       lObj.paymentTerms = lObj.paymentTerms || vPaymentTerms;
 
-      if ((!status || lObj.ledgerStatus === status) && (!category || lObj.vendorCategory === category)) {
+      if (!status || lObj.ledgerStatus === status) {
         ledgers.push(lObj);
       }
     }
@@ -627,10 +631,6 @@ export const upsertVendorLedger = async (req, res) => {
     const {
       vendorId,
       coaAccountId,
-      vendorCategory,
-      tdsApplicable,
-      tdsSection,
-      tdsPercentage,
       gstin,
       pan,
       paymentTerms,
@@ -660,10 +660,6 @@ export const upsertVendorLedger = async (req, res) => {
     }
 
     if (coaAccountId && mongoose.Types.ObjectId.isValid(coaAccountId)) ledger.coaAccountId = coaAccountId;
-    if (vendorCategory) ledger.vendorCategory = vendorCategory;
-    if (tdsApplicable !== undefined) ledger.tdsApplicable = Boolean(tdsApplicable);
-    if (tdsSection !== undefined) ledger.tdsSection = tdsSection;
-    if (tdsPercentage !== undefined) ledger.tdsPercentage = Number(tdsPercentage);
     if (gstin) ledger.gstin = gstin;
     if (pan) ledger.pan = pan;
     if (paymentTerms !== undefined) ledger.paymentTerms = Number(paymentTerms);

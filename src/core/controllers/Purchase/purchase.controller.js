@@ -75,7 +75,7 @@ const validatePurchaseItem = (item, product) => {
     return null;
 };
 
-const deriveVendorPurchaseTotal = (orders) => {
+export const deriveVendorPurchaseTotal = (orders) => {
     let total = 0;
     for (const ord of orders) {
         if (ord.totalOrderPrice && Number(ord.totalOrderPrice) > 0) {
@@ -93,7 +93,7 @@ const deriveVendorPurchaseTotal = (orders) => {
     return total;
 };
 
-const applyPurchaseToVendorLedger = async ({ vendorPurchase, vendorId, userId, tenantId }) => {
+export const applyPurchaseToVendorLedger = async ({ vendorPurchase, vendorId, userId, tenantId }) => {
     try {
         const grandTotal = deriveVendorPurchaseTotal(vendorPurchase.orders);
         if (grandTotal <= 0) return;
@@ -106,14 +106,28 @@ const applyPurchaseToVendorLedger = async ({ vendorPurchase, vendorId, userId, t
                 vendorCategory:     'Manufacturer',
                 paymentTerms:       0,
                 openingBalance:     0,
-                currentOutstanding: grandTotal,
+                currentOutstanding: 0,
                 branchId:           null,
                 tenantId,
                 createdBy:          userId,
             });
-        } else {
-            ledger.currentOutstanding = Number(ledger.currentOutstanding || 0) + grandTotal;
+            await ledger.save();
         }
+
+        const existingTxns = await LedgerTransaction.find({
+            $or: [
+                { ledgerId: ledger._id },
+                { partyId: vendorId, entityType: 'Vendor' }
+            ]
+        }).lean();
+
+        let currentBalance = Number(ledger.openingBalance || 0);
+        for (const t of existingTxns) {
+            currentBalance += Number(t.credit || 0) - Number(t.debit || 0);
+        }
+        const newBalance = currentBalance + grandTotal;
+
+        ledger.currentOutstanding = newBalance;
         await ledger.save();
 
         const orderRef = vendorPurchase.orders[0]?.orderNumber || vendorPurchase._id.toString();
@@ -128,8 +142,8 @@ const applyPurchaseToVendorLedger = async ({ vendorPurchase, vendorId, userId, t
             referenceNumber: orderRef,
             debit:           0,
             credit:          grandTotal,
-            runningBalance:  Number(ledger.currentOutstanding),
-            narration:       `Purchase Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}. Vendor: ${vendorPurchase.vendor.vendorName}.`,
+            runningBalance:  newBalance,
+            narration:       `Purchase Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}. Vendor: ${vendorPurchase.vendor?.vendorName || ''}.`,
             branchId:        null,
             tenantId,
             createdBy:       userId,
@@ -523,6 +537,21 @@ export const deleteVendorPurchaseItems = async (req, res) => {
         const purchaseOrder = await VendorPurchase.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
         if (!purchaseOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
+        }
+
+        await LedgerTransaction.deleteMany({ voucherId: purchaseOrder._id, entityType: 'Vendor' });
+
+        const vendorId = purchaseOrder.vendor?.vendorId;
+        if (vendorId) {
+            const txns = await LedgerTransaction.find({
+                partyId: vendorId,
+                entityType: 'Vendor'
+            }).lean();
+            let synced = 0;
+            for (const t of txns) {
+                synced += Number(t.credit || 0) - Number(t.debit || 0);
+            }
+            await VendorLedger.findOneAndUpdate({ vendorId }, { currentOutstanding: synced });
         }
 
         return sendSuccessResponse(res, 200, null, "Purchase order deleted successfully");

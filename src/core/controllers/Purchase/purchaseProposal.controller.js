@@ -3,11 +3,14 @@ import PurchaseProposal from "../../../models/Purchase/PurchaseProposal.model.js
 import VendorPurchase   from "../../../models/Purchase/VendorPurchase.model.js";
 import Vendor           from "../../../models/Vendor.model.js";
 import DigiProduct      from "../../../models/Product/Product.model.js";
+import VendorLedger     from "../../../models/Accounting/VendorLedger.model.js";
+import LedgerTransaction from "../../../models/Accounting/LedgerTransaction.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail }            from "../../config/Email/emailService.js";
 import { sendWhatsAppMessage }  from "../../../Utils/whatsapp/whatsappService.js";
 import VendorProposalTemplate   from "../../../Utils/Mail/VendorProposalTemplate.js";
 import { generatePurchaseOrderExcel } from "../../../Utils/excel/generatePurchaseOrderExcel.js";
+
 
 const generateProposalNumber = () =>
     `PR-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -348,6 +351,55 @@ export const finalizePurchaseProposal = async (req, res) => {
         proposal.finalPurchaseOrderId = purchaseOrder._id;
         proposal.status               = "ORDERED";
         await proposal.save();
+
+        // ── Sync to Vendor Ledger ──────────────────────────────────────────────
+        try {
+            const orderRef  = purchaseOrder.orders[0]?.orderNumber || purchaseOrder._id.toString();
+            const qty       = proposal.requiredQty;
+            const gstRate   = quotedGst || 0;
+            const taxable   = price * qty;
+            const grandTotal = taxable + taxable * (gstRate / 100);
+
+            if (grandTotal > 0) {
+                let ledger = await VendorLedger.findOne({ vendorId: vendor._id });
+                if (!ledger) {
+                    ledger = await VendorLedger.create({
+                        ledgerCode:         `VEND-LED-${vendor._id.toString().slice(-6).toUpperCase()}`,
+                        vendorId:           vendor._id,
+                        vendorCategory:     'Manufacturer',
+                        paymentTerms:       0,
+                        openingBalance:     0,
+                        currentOutstanding: grandTotal,
+                        branchId:           null,
+                        tenantId:           req.user.tenantId,
+                        createdBy:          req.user._id,
+                    });
+                } else {
+                    ledger.currentOutstanding = Number(ledger.currentOutstanding || 0) + grandTotal;
+                    await ledger.save();
+                }
+
+                await LedgerTransaction.create({
+                    entityType:      'Vendor',
+                    ledgerId:        ledger._id,
+                    partyId:         vendor._id,
+                    transactionDate: purchaseOrder.createdAt || new Date(),
+                    voucherType:     'Purchase Invoice',
+                    voucherId:       purchaseOrder._id,
+                    referenceNumber: orderRef,
+                    debit:           0,
+                    credit:          grandTotal,
+                    runningBalance:  Number(ledger.currentOutstanding),
+                    narration:       `Purchase Order #${orderRef} (via RFQ ${proposal.proposalNumber}). Total: ₹${grandTotal.toLocaleString()}. Vendor: ${vendor.name}.`,
+                    branchId:        null,
+                    tenantId:        req.user.tenantId,
+                    createdBy:       req.user._id,
+                });
+            }
+        } catch (ledgerErr) {
+            console.error("[Proposal Ledger Sync Error]:", ledgerErr.message);
+        }
+        // ──────────────────────────────────────────────────────────────────────
 
         const excelBuffer = generatePurchaseOrderExcel(purchaseOrder.toObject());
 
