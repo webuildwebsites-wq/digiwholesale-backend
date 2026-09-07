@@ -2,11 +2,9 @@ import DigiProduct from "../../../models/Product/Product.model.js";
 import { uploadToGCSProduct } from "../../../Utils/uploads/uploadToGCS.js";
 import mongoose from "mongoose";
 
-
 //  CREATE PRODUCT
 export const createProduct = async (req, res) => {
   try {
-
     // Parse products from FormData
     let products = JSON.parse(req.body.products || "[]");
 
@@ -17,10 +15,15 @@ export const createProduct = async (req, res) => {
       });
     }
 
-
     // Validate required fields
     for (const p of products) {
-      if (!p.productCode || !p.productName || !p.category || p.price == null || p.mrp == null) {
+      if (
+        !p.productCode ||
+        !p.productName ||
+        !p.category ||
+        p.price == null ||
+        p.mrp == null
+      ) {
         return res.status(400).json({
           success: false,
           message: "Required fields missing in one of the products",
@@ -44,16 +47,20 @@ export const createProduct = async (req, res) => {
       });
     }
 
-
     console.log("=== CREATE PRODUCT REQUEST ===");
-    console.log("req.files received:", req.files?.map(f => ({ fieldname: f.fieldname, size: f.size, originalname: f.originalname })));
+    console.log(
+      "req.files received:",
+      req.files?.map((f) => ({
+        fieldname: f.fieldname,
+        size: f.size,
+        originalname: f.originalname,
+      })),
+    );
 
     // Attach color images to correct product index and color index
     if (req.files?.length) {
-
       await Promise.all(
         products.map(async (product, index) => {
-
           // Specific image for each color in the product
           if (Array.isArray(product.colors)) {
             await Promise.all(
@@ -61,26 +68,27 @@ export const createProduct = async (req, res) => {
                 const colorFile = req.files.find(
                   (f) =>
                     f.fieldname === `productColorImage_${index}_${cIndex}` ||
-                    f.fieldname === `productColorImage_${cIndex}`
+                    f.fieldname === `productColorImage_${cIndex}`,
                 );
 
                 if (colorFile) {
-                  console.log(`Uploading file for field: ${colorFile.fieldname} (size: ${colorFile.size} bytes)`);
+                  console.log(
+                    `Uploading file for field: ${colorFile.fieldname} (size: ${colorFile.size} bytes)`,
+                  );
                   const colorImagePath = await uploadToGCSProduct(colorFile);
-                  console.log(`Uploaded to GCS: ${colorFile.fieldname} -> ${colorImagePath}`);
+                  console.log(
+                    `Uploaded to GCS: ${colorFile.fieldname} -> ${colorImagePath}`,
+                  );
                   colorObj.productColorImage = colorImagePath;
                 } else if (!colorObj.productColorImage) {
                   colorObj.productColorImage = "";
                 }
-              })
+              }),
             );
           }
-
-        })
+        }),
       );
-
     }
-
 
     // Prepare documents
     const productDocs = products.map((p) => ({
@@ -112,11 +120,12 @@ export const createProduct = async (req, res) => {
       hsnSac: p.hsnSac?.trim() || "",
       mrp: Number(p.mrp),
       qty: Number(p.qty),
-      vendor: p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)
-        ? { id: p.vendor, name: null }
-        : typeof p.vendor === "object" && p.vendor !== null
-        ? p.vendor
-        : { id: null, name: null },
+      vendor:
+        p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)
+          ? { id: p.vendor, name: null }
+          : typeof p.vendor === "object" && p.vendor !== null
+            ? p.vendor
+            : { id: null, name: null },
       tenantId: req.user.tenantId,
     }));
 
@@ -127,7 +136,6 @@ export const createProduct = async (req, res) => {
       count: savedProducts.length,
       products: savedProducts,
     });
-
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -135,7 +143,6 @@ export const createProduct = async (req, res) => {
     });
   }
 };
-
 
 // Suggestions
 export const suggestionProduct = async (req, res) => {
@@ -167,24 +174,19 @@ export const suggestionProduct = async (req, res) => {
       success: true,
       data: products,
     });
-
   } catch (err) {
-
     console.error("product suggestions error:", err);
 
     return res.status(500).json({
       success: false,
       message: "Internal server error.",
     });
-
   }
 };
-
 
 //  GET ALL PRODUCTS - pagination (STORE WISE)
 export const getProducts = async (req, res) => {
   try {
-
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -208,7 +210,6 @@ export const getProducts = async (req, res) => {
       hasMore,
       products,
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -216,7 +217,6 @@ export const getProducts = async (req, res) => {
     });
   }
 };
-
 
 // get stores products data by category
 export const getProductsByCategory = async (req, res) => {
@@ -239,7 +239,6 @@ export const getProductsByCategory = async (req, res) => {
       success: true,
       data,
     });
-
   } catch (error) {
     console.error("Get by category error:", error);
     res.status(500).json({
@@ -249,11 +248,9 @@ export const getProductsByCategory = async (req, res) => {
   }
 };
 
-
 //  GET SINGLE PRODUCT
 export const getProductById = async (req, res) => {
   try {
-
     const product = await DigiProduct.findOne({
       _id: req.params.id,
       tenantId: req.user.tenantId,
@@ -270,7 +267,6 @@ export const getProductById = async (req, res) => {
       success: true,
       product,
     });
-
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -278,7 +274,6 @@ export const getProductById = async (req, res) => {
     });
   }
 };
-
 
 //  UPDATE PRODUCT
 export const updateProduct = async (req, res) => {
@@ -324,8 +319,7 @@ export const updateProduct = async (req, res) => {
 
     //  If image uploaded
     if (req.file) {
-      const imageUrl =
-        `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+      const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
 
       product.image = imageUrl;
     }
@@ -336,7 +330,6 @@ export const updateProduct = async (req, res) => {
       success: true,
       product,
     });
-
   } catch (error) {
     res.status(400).json({
       success: false,
@@ -345,11 +338,9 @@ export const updateProduct = async (req, res) => {
   }
 };
 
-
 //  DELETE PRODUCT
 export const deleteProduct = async (req, res) => {
   try {
-
     const product = await DigiProduct.findOneAndDelete({
       _id: req.params.id,
       tenantId: req.user.tenantId,
@@ -366,7 +357,6 @@ export const deleteProduct = async (req, res) => {
       success: true,
       message: "Product deleted successfully",
     });
-
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -375,26 +365,34 @@ export const deleteProduct = async (req, res) => {
   }
 };
 
-
 //  ADD INVENTORY
 export const addInventory = async (req, res) => {
   try {
     let { items } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ success: false, message: "Inventory data is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Inventory data is required" });
     }
 
     for (const item of items) {
       if (!item.productCode || !item.qty) {
-        return res.status(400).json({ success: false, message: "Product code and qty are required" });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "Product code and qty are required",
+          });
       }
       if (item.qty <= 0) {
-        return res.status(400).json({ success: false, message: "Quantity must be greater than 0" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Quantity must be greater than 0" });
       }
     }
 
-    const productCodes = items.map(i => i.productCode);
+    const productCodes = items.map((i) => i.productCode);
 
     const products = await DigiProduct.find({
       tenantId: req.user.tenantId,
@@ -402,13 +400,20 @@ export const addInventory = async (req, res) => {
     });
 
     if (products.length !== productCodes.length) {
-      const foundCodes = products.map(p => p.productCode);
-      const missing = productCodes.filter(c => !foundCodes.includes(c));
-      return res.status(404).json({ success: false, message: `Product not found: ${missing.join(", ")}` });
+      const foundCodes = products.map((p) => p.productCode);
+      const missing = productCodes.filter((c) => !foundCodes.includes(c));
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: `Product not found: ${missing.join(", ")}`,
+        });
     }
 
     const productMap = {};
-    products.forEach(p => { productMap[p.productCode] = p; });
+    products.forEach((p) => {
+      productMap[p.productCode] = p;
+    });
 
     for (const item of items) {
       const product = productMap[item.productCode];
@@ -417,19 +422,20 @@ export const addInventory = async (req, res) => {
       if (item.price) product.price = item.price;
     }
 
-    await Promise.all(products.map(p => p.save()));
+    await Promise.all(products.map((p) => p.save()));
 
     return res.status(200).json({
       success: true,
       message: `Updated quantity for ${products.length} product(s)`,
-      updated: products.map(p => ({ productCode: p.productCode, qty: p.qty })),
+      updated: products.map((p) => ({
+        productCode: p.productCode,
+        qty: p.qty,
+      })),
     });
-
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 // GET INVENTORY BY PROUDCT ID
 export const getInventoryByProductId = async (req, res) => {
@@ -445,7 +451,7 @@ export const getInventoryByProductId = async (req, res) => {
 
     const inventory = await DigiProduct.find({
       tenantId: req.user.tenantId,
-     _id : productId,
+      _id: productId,
     });
 
     if (!inventory) {
@@ -467,7 +473,6 @@ export const getInventoryByProductId = async (req, res) => {
     });
   }
 };
-
 
 // GET INVENTORY BY PROUDCT ID
 export const getInventoryByProductCode = async (req, res) => {
@@ -506,7 +511,6 @@ export const getInventoryByProductCode = async (req, res) => {
   }
 };
 
-
 export const getDigiProductNames = async (req, res) => {
   try {
     const { search = "" } = req.query;
@@ -544,9 +548,9 @@ export const getDigiProductNames = async (req, res) => {
 
 export const getFrameSunglassProducts = async (req, res) => {
   try {
-    const page  = Number(req.query.page)  || 1;
+    const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 20;
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
     const { search, brand, isActive } = req.query;
 
     const filter = {
@@ -554,7 +558,7 @@ export const getFrameSunglassProducts = async (req, res) => {
       category: { $in: ["FRAME", "SUNGLASS"] },
     };
 
-    if (brand)  filter.brand = { $regex: brand.trim(), $options: "i" };
+    if (brand) filter.brand = { $regex: brand.trim(), $options: "i" };
     if (isActive !== undefined) filter.isActive = isActive === "true";
 
     if (search) {
@@ -562,7 +566,7 @@ export const getFrameSunglassProducts = async (req, res) => {
       filter.$or = [
         { productName: regex },
         { productCode: regex },
-        { brand:       regex },
+        { brand: regex },
       ];
     }
 
@@ -572,12 +576,12 @@ export const getFrameSunglassProducts = async (req, res) => {
     ]);
 
     return res.status(200).json({
-      success:      true,
+      success: true,
       page,
       limit,
-      totalPages:   Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit),
       totalProducts: total,
-      hasMore:      page * limit < total,
+      hasMore: page * limit < total,
       products,
     });
   } catch (error) {
@@ -620,7 +624,7 @@ export const filterProducts = async (req, res) => {
         { type: regex },
       ];
     }
-    
+
     const productsData = await DigiProduct.find(query).sort({ createdAt: -1 });
 
     if (!productsData.length) {
@@ -635,7 +639,6 @@ export const filterProducts = async (req, res) => {
       total: productsData.length,
       products: productsData,
     });
-
   } catch (error) {
     console.error("Filter Products Error:", error);
     return res.status(500).json({
@@ -644,7 +647,6 @@ export const filterProducts = async (req, res) => {
     });
   }
 };
-
 
 export const bulkUploadProducts = async (req, res) => {
   const session = await mongoose.startSession();
@@ -660,14 +662,18 @@ export const bulkUploadProducts = async (req, res) => {
 
     for (const p of products) {
       if (!p.productName || !p.category || p.price == null || p.mrp == null) {
-        throw new Error("Missing required fields: productName, category, price, mrp");
+        throw new Error(
+          "Missing required fields: productName, category, price, mrp",
+        );
       }
       if (!p.productCode) {
-        throw new Error(`productCode is required for product: ${p.productName}`);
+        throw new Error(
+          `productCode is required for product: ${p.productName}`,
+        );
       }
     }
 
-    const allCodes = products.map(p => p.productCode.trim());
+    const allCodes = products.map((p) => p.productCode.trim());
 
     if (new Set(allCodes).size !== allCodes.length) {
       throw new Error("Duplicate productCode found in request");
@@ -679,37 +685,40 @@ export const bulkUploadProducts = async (req, res) => {
     }).session(session);
 
     if (existing.length > 0) {
-      throw new Error(`ProductCodes already exist: ${existing.map(e => e.productCode).join(", ")}`);
+      throw new Error(
+        `ProductCodes already exist: ${existing.map((e) => e.productCode).join(", ")}`,
+      );
     }
 
-    const docs = products.map(p => ({
-      productCode:  p.productCode.trim(),
-      productName:  p.productName.trim().toUpperCase(),
-      category:     p.category.trim().toUpperCase(),
-      brand:        p.brand?.trim()?.toUpperCase()    || "",
-      color:        p.color?.trim()?.toUpperCase()    || "",
-      size:         p.size?.trim()?.toUpperCase()     || "",
-      type:         p.type?.trim()?.toUpperCase()     || "",
-      shape:        p.shape?.trim()?.toUpperCase()    || "",
-      material:     p.material?.trim()?.toUpperCase() || "",
-      dimensions:   p.dimensions?.trim()              || "",
-      addition:     p.addition?.trim()                || "",
-      sph:          p.sph?.toString().trim()          || "",
-      cyl:          p.cyl?.toString().trim()          || "",
-      axis:         p.axis?.toString().trim()         || "",
-      index:        p.index?.toString().trim()        || "",
-      coating:      p.coating?.trim()?.toUpperCase()  || "",
-      expiry:       p.expiry                          || null,
-      price:        Number(p.price),
-      mrp:          Number(p.mrp),
-      gst:          Number(p.gst)    || 0,
-      hsnSac:       p.hsnSac?.trim() || "",
-      qty:          Number(p.qty)    || 0,
-      image:        p.image          || "",
-      orderSource:  p.orderSource    || (p.vendor?.id || p.vendor?.name ? "ORDER" : "INHOUSE"),
-      vendor:       p.vendor         || { id: null, name: null },
-      createdBy:    userId,
-      tenantId:     req.user.tenantId,
+    const docs = products.map((p) => ({
+      productCode: p.productCode.trim(),
+      productName: p.productName.trim().toUpperCase(),
+      category: p.category.trim().toUpperCase(),
+      brand: p.brand?.trim()?.toUpperCase() || "",
+      color: p.color?.trim()?.toUpperCase() || "",
+      size: p.size?.trim()?.toUpperCase() || "",
+      type: p.type?.trim()?.toUpperCase() || "",
+      shape: p.shape?.trim()?.toUpperCase() || "",
+      material: p.material?.trim()?.toUpperCase() || "",
+      dimensions: p.dimensions?.trim() || "",
+      addition: p.addition?.trim() || "",
+      sph: p.sph?.toString().trim() || "",
+      cyl: p.cyl?.toString().trim() || "",
+      axis: p.axis?.toString().trim() || "",
+      index: p.index?.toString().trim() || "",
+      coating: p.coating?.trim()?.toUpperCase() || "",
+      expiry: p.expiry || null,
+      price: Number(p.price),
+      mrp: Number(p.mrp),
+      gst: Number(p.gst) || 0,
+      hsnSac: p.hsnSac?.trim() || "",
+      qty: Number(p.qty) || 0,
+      image: p.image || "",
+      orderSource:
+        p.orderSource || (p.vendor?.id || p.vendor?.name ? "ORDER" : "INHOUSE"),
+      vendor: p.vendor || { id: null, name: null },
+      createdBy: userId,
+      tenantId: req.user.tenantId,
     }));
 
     const saved = await DigiProduct.insertMany(docs, { session });
@@ -721,7 +730,6 @@ export const bulkUploadProducts = async (req, res) => {
       count: saved.length,
       products: saved,
     });
-
   } catch (err) {
     await session.abortTransaction();
 
@@ -729,7 +737,6 @@ export const bulkUploadProducts = async (req, res) => {
       success: false,
       message: err.message,
     });
-
   } finally {
     session.endSession();
   }

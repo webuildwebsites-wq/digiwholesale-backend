@@ -1,65 +1,98 @@
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-let logoDataUrl = '';
+let logoDataUrl = "";
 try {
-    const logoBase64 = readFileSync(
-        join(__dirname, '../../../public/DigiOptics.png'),
-    ).toString('base64');
-    logoDataUrl = `data:image/png;base64,${logoBase64}`;
+  const logoBase64 = readFileSync(
+    join(__dirname, "../../../public/DigiOptics.png"),
+  ).toString("base64");
+  logoDataUrl = `data:image/png;base64,${logoBase64}`;
 } catch {
-    logoDataUrl = '';
+  logoDataUrl = "";
 }
 
 // Number to Words Converter for INR
 function numberToWordsINR(num) {
-    if (!num || isNaN(num)) return 'Zero Rupees Only';
+  if (!num || isNaN(num)) return "Zero Rupees Only";
 
-    const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
-    const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const a = [
+    "",
+    "One ",
+    "Two ",
+    "Three ",
+    "Four ",
+    "Five ",
+    "Six ",
+    "Seven ",
+    "Eight ",
+    "Nine ",
+    "Ten ",
+    "Eleven ",
+    "Twelve ",
+    "Thirteen ",
+    "Fourteen ",
+    "Fifteen ",
+    "Sixteen ",
+    "Seventeen ",
+    "Eighteen ",
+    "Nineteen ",
+  ];
+  const b = [
+    "",
+    "",
+    "Twenty",
+    "Thirty",
+    "Forty",
+    "Fifty",
+    "Sixty",
+    "Seventy",
+    "Eighty",
+    "Ninety",
+  ];
 
-    const numToWordsLessThanThousand = (n) => {
-        let str = '';
-        if (n > 99) {
-            str += a[Math.floor(n / 100)] + 'Hundred ';
-            n %= 100;
-        }
-        if (n > 19) {
-            str += b[Math.floor(n / 10)] + ' ' + a[n % 10];
-        } else if (n > 0) {
-            str += a[n];
-        }
-        return str;
-    };
-
-    const parts = Number(num).toFixed(2).split('.');
-    let rupees = parseInt(parts[0], 10);
-    const paise = parseInt(parts[1], 10);
-
-    if (rupees === 0 && paise === 0) return 'Zero Rupees Only';
-
-    let result = '';
-    const crore = Math.floor(rupees / 10000000);
-    rupees %= 10000000;
-    const lakh = Math.floor(rupees / 100000);
-    rupees %= 100000;
-    const thousand = Math.floor(rupees / 1000);
-    rupees %= 1000;
-
-    if (crore > 0) result += numToWordsLessThanThousand(crore) + 'Crore ';
-    if (lakh > 0) result += numToWordsLessThanThousand(lakh) + 'Lakh ';
-    if (thousand > 0) result += numToWordsLessThanThousand(thousand) + 'Thousand ';
-    if (rupees > 0) result += numToWordsLessThanThousand(rupees);
-
-    result = result.trim() + ' Rupees';
-
-    if (paise > 0) {
-        result += ' and ' + numToWordsLessThanThousand(paise).trim() + ' Paise';
+  const numToWordsLessThanThousand = (n) => {
+    let str = "";
+    if (n > 99) {
+      str += a[Math.floor(n / 100)] + "Hundred ";
+      n %= 100;
     }
+    if (n > 19) {
+      str += b[Math.floor(n / 10)] + " " + a[n % 10];
+    } else if (n > 0) {
+      str += a[n];
+    }
+    return str;
+  };
 
-    return result + ' Only';
+  const parts = Number(num).toFixed(2).split(".");
+  let rupees = parseInt(parts[0], 10);
+  const paise = parseInt(parts[1], 10);
+
+  if (rupees === 0 && paise === 0) return "Zero Rupees Only";
+
+  let result = "";
+  const crore = Math.floor(rupees / 10000000);
+  rupees %= 10000000;
+  const lakh = Math.floor(rupees / 100000);
+  rupees %= 100000;
+  const thousand = Math.floor(rupees / 1000);
+  rupees %= 1000;
+
+  if (crore > 0) result += numToWordsLessThanThousand(crore) + "Crore ";
+  if (lakh > 0) result += numToWordsLessThanThousand(lakh) + "Lakh ";
+  if (thousand > 0)
+    result += numToWordsLessThanThousand(thousand) + "Thousand ";
+  if (rupees > 0) result += numToWordsLessThanThousand(rupees);
+
+  result = result.trim() + " Rupees";
+
+  if (paise > 0) {
+    result += " and " + numToWordsLessThanThousand(paise).trim() + " Paise";
+  }
+
+  return result + " Only";
 }
 
 /**
@@ -67,71 +100,116 @@ function numberToWordsINR(num) {
  * Styled in Enterprise DigiOptics Wholesale Aesthetic (#1B6496 / #0284C7)
  */
 export const generatePaymentReceiptHTML = (data) => {
-    const {
-        receiptNo,
-        receiptDate,
-        company = {
-            name: 'DigiOptics Wholesale',
-            addressLine1: 'WeWork Eldeco Centre, Block A, Shivalik Colony',
-            addressLine2: 'Malviya Nagar, New Delhi, Delhi 110017',
-            phone: '+91 9650560526',
-            email: 'support@digioptics.com',
-            gstin: 'GST9876543210',
-        },
-        customer = {},
-        paymentMode = 'CASH',
-        grossAmount = 0,
-        paymentDetails = {},
-        allocations = [],
-        narration = '',
-        accountSummary = {},
-    } = data;
+  const {
+    receiptNo,
+    receiptDate,
+    company = {
+      name: "DigiOptics Wholesale",
+      addressLine1: "WeWork Eldeco Centre, Block A, Shivalik Colony",
+      addressLine2: "Malviya Nagar, New Delhi, Delhi 110017",
+      phone: "+91 9650560526",
+      email: "support@digioptics.com",
+      gstin: "GST9876543210",
+    },
+    customer = {},
+    paymentMode = "CASH",
+    grossAmount = 0,
+    paymentDetails = {},
+    allocations = [],
+    narration = "",
+    accountSummary = {},
+  } = data;
 
-    const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedDate = receiptDate ? new Date(receiptDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleDateString('en-IN');
-    const amountInWords = numberToWordsINR(grossAmount);
+  const fmtNum = (n) =>
+    Number(n || 0).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  const formattedDate = receiptDate
+    ? new Date(receiptDate).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : new Date().toLocaleDateString("en-IN");
+  const amountInWords = numberToWordsINR(grossAmount);
 
-    const modeLabels = {
-        CASH: 'Cash',
-        UPI: 'UPI / QR Transfer',
-        CHEQUE: 'Cheque Payment',
-        BANK_TRANSFER: 'Bank Transfer / NEFT / RTGS',
-        NEFT: 'NEFT Transfer',
-        RTGS: 'RTGS Transfer',
-        ONLINE: 'Online Payment Gateway',
-        ADVANCE_ADJUSTMENT: 'Advance Khata Adjustment',
-    };
+  const modeLabels = {
+    CASH: "Cash",
+    UPI: "UPI / QR Transfer",
+    CHEQUE: "Cheque Payment",
+    BANK_TRANSFER: "Bank Transfer / NEFT / RTGS",
+    NEFT: "NEFT Transfer",
+    RTGS: "RTGS Transfer",
+    ONLINE: "Online Payment Gateway",
+    ADVANCE_ADJUSTMENT: "Advance Khata Adjustment",
+  };
 
-    const modeName = modeLabels[paymentMode] || paymentMode;
+  const modeName = modeLabels[paymentMode] || paymentMode;
 
-    let referenceDetails = [];
-    if (paymentMode === 'CHEQUE') {
-        if (paymentDetails.chequeNumber) referenceDetails.push(`<strong>Cheque No:</strong> ${paymentDetails.chequeNumber}`);
-        if (paymentDetails.bankName) referenceDetails.push(`<strong>Bank:</strong> ${paymentDetails.bankName}`);
-        if (paymentDetails.chequeDate) referenceDetails.push(`<strong>Cheque Date:</strong> ${paymentDetails.chequeDate}`);
-    } else if (paymentMode === 'UPI') {
-        if (paymentDetails.upiTransactionId || paymentDetails.transactionId) referenceDetails.push(`<strong>UPI Ref / UTR:</strong> ${paymentDetails.upiTransactionId || paymentDetails.transactionId}`);
-    } else if (paymentMode === 'BANK_TRANSFER' || paymentMode === 'NEFT' || paymentMode === 'RTGS') {
-        if (paymentDetails.referenceNumber || paymentDetails.utrNumber) referenceDetails.push(`<strong>UTR / Ref No:</strong> ${paymentDetails.referenceNumber || paymentDetails.utrNumber}`);
-        if (paymentDetails.bankName) referenceDetails.push(`<strong>Bank:</strong> ${paymentDetails.bankName}`);
-    } else if (paymentMode === 'CASH') {
-        if (paymentDetails.cashVoucherNo) referenceDetails.push(`<strong>Voucher No:</strong> ${paymentDetails.cashVoucherNo}`);
-    }
+  let referenceDetails = [];
+  if (paymentMode === "CHEQUE") {
+    if (paymentDetails.chequeNumber)
+      referenceDetails.push(
+        `<strong>Cheque No:</strong> ${paymentDetails.chequeNumber}`,
+      );
+    if (paymentDetails.bankName)
+      referenceDetails.push(
+        `<strong>Bank:</strong> ${paymentDetails.bankName}`,
+      );
+    if (paymentDetails.chequeDate)
+      referenceDetails.push(
+        `<strong>Cheque Date:</strong> ${paymentDetails.chequeDate}`,
+      );
+  } else if (paymentMode === "UPI") {
+    if (paymentDetails.upiTransactionId || paymentDetails.transactionId)
+      referenceDetails.push(
+        `<strong>UPI Ref / UTR:</strong> ${paymentDetails.upiTransactionId || paymentDetails.transactionId}`,
+      );
+  } else if (
+    paymentMode === "BANK_TRANSFER" ||
+    paymentMode === "NEFT" ||
+    paymentMode === "RTGS"
+  ) {
+    if (paymentDetails.referenceNumber || paymentDetails.utrNumber)
+      referenceDetails.push(
+        `<strong>UTR / Ref No:</strong> ${paymentDetails.referenceNumber || paymentDetails.utrNumber}`,
+      );
+    if (paymentDetails.bankName)
+      referenceDetails.push(
+        `<strong>Bank:</strong> ${paymentDetails.bankName}`,
+      );
+  } else if (paymentMode === "CASH") {
+    if (paymentDetails.cashVoucherNo)
+      referenceDetails.push(
+        `<strong>Voucher No:</strong> ${paymentDetails.cashVoucherNo}`,
+      );
+  }
 
-    if (paymentDetails.collectedByName) {
-        referenceDetails.push(`<strong>Collected By:</strong> ${paymentDetails.collectedByName}`);
-    }
+  if (paymentDetails.collectedByName) {
+    referenceDetails.push(
+      `<strong>Collected By:</strong> ${paymentDetails.collectedByName}`,
+    );
+  }
 
-    const allocationRows = allocations && allocations.length > 0
-        ? allocations.map((alloc, idx) => `
-            <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+  const allocationRows =
+    allocations && allocations.length > 0
+      ? allocations
+          .map(
+            (alloc, idx) => `
+            <tr style="background:${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">
                 <td style="text-align:center;color:#64748b;font-weight:600;padding:8px 10px;">${idx + 1}</td>
-                <td style="font-weight:700;color:#0284c7;padding:8px 10px;">${alloc.invoiceNumber || alloc.invoiceId || 'Order Settlement'}</td>
+                <td style="font-weight:700;color:#0284c7;padding:8px 10px;">${alloc.invoiceNumber || alloc.invoiceId || "Order Settlement"}</td>
                 <td style="text-align:right;padding:8px 10px;color:#475569;">₹${fmtNum(alloc.invoiceTotal || alloc.allocatedAmount)}</td>
                 <td style="text-align:right;font-weight:700;color:#059669;padding:8px 10px;">₹${fmtNum(alloc.allocatedAmount)}</td>
             </tr>
-        `).join('')
-        : `
+        `,
+          )
+          .join("")
+      : `
             <tr>
                 <td colspan="4" style="text-align:center;padding:12px;color:#64748b;font-style:italic;">
                     General payment received / Credited to Customer Account Balance
@@ -139,7 +217,7 @@ export const generatePaymentReceiptHTML = (data) => {
             </tr>
         `;
 
-    return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8"/>
@@ -375,9 +453,9 @@ export const generatePaymentReceiptHTML = (data) => {
     <div class="meta-grid">
         <div class="company-cell">
             ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : '<div style="font-size:18px;font-weight:800;color:#0284c7;margin-bottom:6px;">DigiOptics Wholesale</div>'}
-            <div class="company-info">${company.addressLine1 || 'WeWork Eldeco Centre, Block A, Shivalik Colony'}</div>
-            <div class="company-info">${company.addressLine2 || 'Malviya Nagar, New Delhi, Delhi 110017'}</div>
-            <div class="company-info" style="margin-top:4px;"><strong>GSTIN:</strong> ${company.gstin || 'GST9876543210'} | <strong>Phone:</strong> ${company.phone || '+91 9650560526'}</div>
+            <div class="company-info">${company.addressLine1 || "WeWork Eldeco Centre, Block A, Shivalik Colony"}</div>
+            <div class="company-info">${company.addressLine2 || "Malviya Nagar, New Delhi, Delhi 110017"}</div>
+            <div class="company-info" style="margin-top:4px;"><strong>GSTIN:</strong> ${company.gstin || "GST9876543210"} | <strong>Phone:</strong> ${company.phone || "+91 9650560526"}</div>
         </div>
         <div class="meta-cell">
             <table class="meta-table">
@@ -405,16 +483,16 @@ export const generatePaymentReceiptHTML = (data) => {
     <div class="customer-strip">
         <div>
             <div class="section-heading">Received From (Customer)</div>
-            <div class="customer-name">${customer.shopName || customer.ownerName || 'Valued Customer'}</div>
-            <div class="customer-info"><strong>Owner Name:</strong> ${customer.ownerName || '—'}</div>
-            <div class="customer-info"><strong>Customer Code:</strong> ${customer.customerCode || '—'}</div>
-            <div class="customer-info"><strong>GSTIN:</strong> ${customer.gstNumber || '—'}</div>
+            <div class="customer-name">${customer.shopName || customer.ownerName || "Valued Customer"}</div>
+            <div class="customer-info"><strong>Owner Name:</strong> ${customer.ownerName || "—"}</div>
+            <div class="customer-info"><strong>Customer Code:</strong> ${customer.customerCode || "—"}</div>
+            <div class="customer-info"><strong>GSTIN:</strong> ${customer.gstNumber || "—"}</div>
         </div>
         <div>
             <div class="section-heading">Contact & Billing Address</div>
-            <div class="customer-info"><strong>Phone:</strong> ${customer.mobileNo1 || customer.mobile || '—'}</div>
-            <div class="customer-info"><strong>Email:</strong> ${customer.businessEmail || customer.email || '—'}</div>
-            <div class="customer-info"><strong>Address:</strong> ${customer.billToAddress?.address || customer.address || '—'}</div>
+            <div class="customer-info"><strong>Phone:</strong> ${customer.mobileNo1 || customer.mobile || "—"}</div>
+            <div class="customer-info"><strong>Email:</strong> ${customer.businessEmail || customer.email || "—"}</div>
+            <div class="customer-info"><strong>Address:</strong> ${customer.billToAddress?.address || customer.address || "—"}</div>
         </div>
     </div>
 
@@ -435,8 +513,8 @@ export const generatePaymentReceiptHTML = (data) => {
         <div class="info-card">
             <div class="section-heading">Transaction & Reference Info</div>
             <p><strong>Payment Mode:</strong> ${modeName}</p>
-            ${referenceDetails.length > 0 ? referenceDetails.map(d => `<p>${d}</p>`).join('') : '<p>Direct Cash / Account Inflow</p>'}
-            ${narration ? `<p style="margin-top:6px;font-style:italic;"><strong>Note:</strong> ${narration}</p>` : ''}
+            ${referenceDetails.length > 0 ? referenceDetails.map((d) => `<p>${d}</p>`).join("") : "<p>Direct Cash / Account Inflow</p>"}
+            ${narration ? `<p style="margin-top:6px;font-style:italic;"><strong>Note:</strong> ${narration}</p>` : ""}
         </div>
 
         <div class="info-card">
@@ -444,7 +522,7 @@ export const generatePaymentReceiptHTML = (data) => {
             <p><strong>Amount Adjusted against Due:</strong> ₹${fmtNum(paymentDetails.adjustedFromCreditUsed || 0)}</p>
             <p><strong>Added to Advance Deposit (Jama):</strong> ₹${fmtNum(paymentDetails.advanceCredited || (paymentDetails.adjustedFromCreditUsed ? 0 : grossAmount))}</p>
             <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
-                <p><strong>Current Outstanding Due (Udhaar):</strong> <span style="font-weight:800;color:${(accountSummary.remainingCreditUsed || 0) > 0 ? '#b91c1c' : '#15803d'}">₹${fmtNum(accountSummary.remainingCreditUsed || 0)}</span></p>
+                <p><strong>Current Outstanding Due (Udhaar):</strong> <span style="font-weight:800;color:${(accountSummary.remainingCreditUsed || 0) > 0 ? "#b91c1c" : "#15803d"}">₹${fmtNum(accountSummary.remainingCreditUsed || 0)}</span></p>
                 <p><strong>Available Advance Deposit (Jama):</strong> <span style="font-weight:800;color:#0284c7">₹${fmtNum(accountSummary.customerBalance || 0)}</span></p>
             </div>
         </div>
@@ -489,21 +567,34 @@ export const generatePaymentReceiptHTML = (data) => {
  * Sent to customer's business email with attached PDF receipt
  */
 export const generatePaymentEmailHTML = (data) => {
-    const {
-        customerName,
-        shopName,
-        receiptNo,
-        amount,
-        receiptDate,
-        paymentMode = 'CASH',
-        remainingDue = 0,
-        availableAdvance = 0,
-    } = data;
+  const {
+    customerName,
+    shopName,
+    receiptNo,
+    amount,
+    receiptDate,
+    paymentMode = "CASH",
+    remainingDue = 0,
+    availableAdvance = 0,
+  } = data;
 
-    const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const formattedDate = receiptDate ? new Date(receiptDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleDateString('en-IN');
+  const fmtNum = (n) =>
+    Number(n || 0).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  const formattedDate = receiptDate
+    ? new Date(receiptDate).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : new Date().toLocaleDateString("en-IN");
 
-    return `
+  return `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         
         <!-- Header -->
@@ -515,7 +606,7 @@ export const generatePaymentEmailHTML = (data) => {
         <!-- Body -->
         <div style="padding: 30px 25px; color: #334155;">
             
-            <p style="font-size: 15px; margin-top: 0; color: #0f172a;">Dear <strong>${shopName || customerName || 'Valued Customer'}</strong>,</p>
+            <p style="font-size: 15px; margin-top: 0; color: #0f172a;">Dear <strong>${shopName || customerName || "Valued Customer"}</strong>,</p>
             
             <p style="font-size: 14px; line-height: 1.6;">
                 We are pleased to inform you that your payment of <strong style="color: #166534; font-size: 16px;">₹${fmtNum(amount)}</strong> has been successfully received and credited to your account.
@@ -544,7 +635,7 @@ export const generatePaymentEmailHTML = (data) => {
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
                     <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Outstanding Due (Udhaar)</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: ${remainingDue > 0 ? '#b91c1c' : '#15803d'}; text-align: right;">₹${fmtNum(remainingDue)}</td>
+                    <td style="padding: 10px 0; font-weight: 700; color: ${remainingDue > 0 ? "#b91c1c" : "#15803d"}; text-align: right;">₹${fmtNum(remainingDue)}</td>
                 </tr>
                 <tr>
                     <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Advance Balance (Jama)</td>
