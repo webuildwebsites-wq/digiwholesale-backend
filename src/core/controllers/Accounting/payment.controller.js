@@ -585,11 +585,16 @@ export const executeVendorPayment = async (req, res) => {
       return payment;
     });
 
+    // Asynchronously dispatch Payment Advice / Payout Receipt Email to Vendor
+    sendPaymentReceiptEmail({ paymentId: result._id, tenantId }).catch((err) =>
+      console.error("[PaymentReceipt] Vendor background email error:", err.message),
+    );
+
     return sendSuccessResponse(
       res,
       201,
       result,
-      "Vendor payout processed successfully.",
+      "Vendor payout processed successfully. Payment advice receipt emailed to vendor.",
     );
   } catch (error) {
     console.error("executeVendorPayment error:", error);
