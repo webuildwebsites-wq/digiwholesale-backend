@@ -60,7 +60,9 @@ const allowedOrigins = [
   "https://digiopticswholesaledibysr.netlify.app",
   "https://digiwholesale-frontend.digibysr.in",
   "http://testing-digiwholesale-backend.digibysr.in",
-  "http://testing-digiwholesale-frontend.digibysr.in"
+  "http://testing-digiwholesale-frontend.digibysr.in",
+  "https://digiwholesale-backend.digibysr.in",
+  "http://digiwholesale-frontend.digibysr.in"
 ];
 
 
