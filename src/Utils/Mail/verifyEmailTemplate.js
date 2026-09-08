@@ -22,7 +22,7 @@ const VerificationEmail = (username, otp) => {
       box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
     }
     .header {
-      background-color: #1e40af;
+      background-color: #2980B9;
       padding: 22px;
       text-align: center;
       color: #ffffff;
@@ -46,9 +46,9 @@ const VerificationEmail = (username, otp) => {
       font-size: 26px;
       font-weight: 700;
       letter-spacing: 4px;
-      color: #1e40af;
+      color: #2980B9;
       background-color: #eff6ff;
-      border: 2px dashed #1e40af;
+      border: 2px dashed #2980B9;
       padding: 14px 0;
       border-radius: 8px;
       width: 70%;
@@ -59,7 +59,7 @@ const VerificationEmail = (username, otp) => {
       margin-top: 10px;
     }
     .footer {
-      background-color: #1e40af;
+      background-color: #2980B9;
       text-align: center;
       padding: 16px;
       font-size: 12px;

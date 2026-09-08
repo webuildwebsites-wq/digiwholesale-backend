@@ -242,7 +242,7 @@ export const executeCustomerPayment = async (req, res) => {
       } else if (adjustedFromCreditUsed > 0) {
         narration += ` ₹${adjustedFromCreditUsed.toLocaleString()} adjusted against Credit Used. Remaining Due: ₹${remainingCreditUsed.toLocaleString()}.`;
       } else {
-        narration += ` ₹${grossAmount.toLocaleString()} added to Advance Khata. Total Advance: ₹${newAdvanceAmount.toLocaleString()}.`;
+        narration += ` ₹${grossAmount.toLocaleString()} added to Advance Balance. Total Advance: ₹${newAdvanceAmount.toLocaleString()}.`;
       }
 
       await LedgerTransaction.create(

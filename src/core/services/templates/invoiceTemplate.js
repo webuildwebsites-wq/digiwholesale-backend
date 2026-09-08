@@ -72,7 +72,7 @@ body {
 }
 
 .header h1 {
-  color: #e8710a;
+  color: #2980B9;
   font-size: 28px;
 }
 
@@ -88,7 +88,7 @@ body {
 .section-title {
   font-weight: bold;
   margin-bottom: 6px;
-  color: #e8710a;
+  color: #2980B9;
   text-transform: uppercase;
   font-size: 12px;
 }
@@ -106,7 +106,7 @@ table {
 }
 
 thead {
-  background: #e8710a;
+  background: #2980B9;
   color: #fff;
 }
 

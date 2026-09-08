@@ -150,7 +150,7 @@ export const generatePaymentReceiptHTML = (data) => {
     NEFT: "NEFT Transfer",
     RTGS: "RTGS Transfer",
     ONLINE: "Online Payment Gateway",
-    ADVANCE_ADJUSTMENT: "Advance Khata Adjustment",
+    ADVANCE_ADJUSTMENT: "Advance Balance Adjustment",
   };
 
   const modeName = modeLabels[paymentMode] || paymentMode;
@@ -216,7 +216,7 @@ export const generatePaymentReceiptHTML = (data) => {
             (alloc, idx) => `
             <tr style="background:${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">
                 <td style="text-align:center;color:#64748b;font-weight:600;padding:8px 10px;">${idx + 1}</td>
-                <td style="font-weight:700;color:#0284c7;padding:8px 10px;">${alloc.invoiceNumber || alloc.invoiceId || "Bill Settlement"}</td>
+                <td style="font-weight:700;color:#2980B9;padding:8px 10px;">${alloc.invoiceNumber || alloc.invoiceId || "Bill Settlement"}</td>
                 <td style="text-align:right;padding:8px 10px;color:#475569;">₹${fmtNum(alloc.invoiceTotal || alloc.allocatedAmount)}</td>
                 <td style="text-align:right;font-weight:700;color:#059669;padding:8px 10px;">₹${fmtNum(alloc.allocatedAmount)}</td>
             </tr>
@@ -273,7 +273,7 @@ export const generatePaymentReceiptHTML = (data) => {
         box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
     }
     .header-bar {
-        background: linear-gradient(135deg, #1B6496 0%, #0284c7 100%);
+        background: linear-gradient(135deg, #1f618d 0%, #2980B9 100%);
         color: #ffffff;
         padding: 18px 22px;
         display: flex;
@@ -351,7 +351,7 @@ export const generatePaymentReceiptHTML = (data) => {
         font-weight: 800;
         text-transform: uppercase;
         letter-spacing: 0.8px;
-        color: #0284c7;
+        color: #2980B9;
         margin-bottom: 6px;
     }
     .customer-name {
@@ -474,7 +474,7 @@ export const generatePaymentReceiptHTML = (data) => {
     <!-- SUPPLIER & RECEIPT METADATA -->
     <div class="meta-grid">
         <div class="company-cell">
-            ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : '<div style="font-size:18px;font-weight:800;color:#0284c7;margin-bottom:6px;">DigiOptics Wholesale</div>'}
+            ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : '<div style="font-size:18px;font-weight:800;color:#2980B9;margin-bottom:6px;">DigiOptics Wholesale</div>'}
             <div class="company-info">${company.addressLine1 || "WeWork Eldeco Centre, Block A, Shivalik Colony"}</div>
             <div class="company-info">${company.addressLine2 || "Malviya Nagar, New Delhi, Delhi 110017"}</div>
             <div class="company-info" style="margin-top:4px;"><strong>GSTIN:</strong> ${company.gstin || "GST9876543210"} | <strong>Phone:</strong> ${company.phone || "+91 9650560526"}</div>
@@ -491,7 +491,7 @@ export const generatePaymentReceiptHTML = (data) => {
                 </tr>
                 <tr>
                     <td class="meta-label">Payment Mode</td>
-                    <td class="meta-val">: <span style="background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;font-weight:700;">${modeName}</span></td>
+                    <td class="meta-val">: <span style="background:#e0f2fe;color:#1f618d;padding:1px 6px;border-radius:4px;font-weight:700;">${modeName}</span></td>
                 </tr>
                 <tr>
                     <td class="meta-label">Disbursement Status</td>
@@ -556,7 +556,7 @@ export const generatePaymentReceiptHTML = (data) => {
         </div>
 
         <div class="info-card">
-            <div class="section-heading">${isVendor ? "Vendor Khata Position" : "Customer Khata Position"}</div>
+            <div class="section-heading">${isVendor ? "Vendor Ledger Position" : "Customer Ledger Position"}</div>
             ${isVendor ? `
             <p><strong>Payment Terms:</strong> ${vendor.paymentTerms || 30} Days</p>
             <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
@@ -567,7 +567,7 @@ export const generatePaymentReceiptHTML = (data) => {
             <p><strong>Added to Advance Deposit (Jama):</strong> ₹${fmtNum(paymentDetails.advanceCredited || (paymentDetails.adjustedFromCreditUsed ? 0 : grossAmount))}</p>
             <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
                 <p><strong>Current Outstanding Due (Udhaar):</strong> <span style="font-weight:800;color:${(accountSummary.remainingCreditUsed || 0) > 0 ? "#b91c1c" : "#15803d"}">₹${fmtNum(accountSummary.remainingCreditUsed || 0)}</span></p>
-                <p><strong>Available Advance Deposit (Jama):</strong> <span style="font-weight:800;color:#0284c7">₹${fmtNum(accountSummary.customerBalance || 0)}</span></p>
+                <p><strong>Available Advance Deposit (Jama):</strong> <span style="font-weight:800;color:#2980B9">₹${fmtNum(accountSummary.customerBalance || 0)}</span></p>
             </div>
             `}
         </div>
@@ -643,7 +643,7 @@ export const generatePaymentEmailHTML = (data) => {
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         
         <!-- Header -->
-        <div style="background: linear-gradient(135deg, #1B6496 0%, #0284c7 100%); padding: 24px 30px; text-align: center; color: #ffffff;">
+        <div style="background: linear-gradient(135deg, #1f618d 0%, #2980B9 100%); padding: 24px 30px; text-align: center; color: #ffffff;">
             <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.5px;">DigiOptics Wholesale</h1>
             <p style="margin: 4px 0 0 0; font-size: 13px; opacity: 0.9;">Payment Confirmation & Receipt</p>
         </div>
@@ -676,7 +676,7 @@ export const generatePaymentEmailHTML = (data) => {
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
                     <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Payment Mode</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #0284c7; text-align: right;">${paymentMode}</td>
+                    <td style="padding: 10px 0; font-weight: 700; color: #2980B9; text-align: right;">${paymentMode}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
                     <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Outstanding Due (Udhaar)</td>
@@ -684,16 +684,16 @@ export const generatePaymentEmailHTML = (data) => {
                 </tr>
                 <tr>
                     <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Advance Balance (Jama)</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #0284c7; text-align: right;">₹${fmtNum(availableAdvance)}</td>
+                    <td style="padding: 10px 0; font-weight: 700; color: #2980B9; text-align: right;">₹${fmtNum(availableAdvance)}</td>
                 </tr>
             </table>
 
-            <div style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 12px 16px; border-radius: 4px; margin-top: 25px; font-size: 13px; line-height: 1.5;">
+            <div style="background: #f8fafc; border-left: 4px solid #2980B9; padding: 12px 16px; border-radius: 4px; margin-top: 25px; font-size: 13px; line-height: 1.5;">
                 📎 <strong>Receipt Attached:</strong> Your official payment receipt PDF is attached to this email for your accounting records.
             </div>
 
             <p style="font-size: 13px; color: #64748b; margin-top: 25px; line-height: 1.5;">
-                If you have any questions or require statement clarification, please reach out to our accounts team at <a href="mailto:support@digioptics.com" style="color: #0284c7; text-decoration: none; font-weight: 600;">support@digioptics.com</a> or call <strong>+91 9650560526</strong>.
+                If you have any questions or require statement clarification, please reach out to our accounts team at <a href="mailto:support@digioptics.com" style="color: #2980B9; text-decoration: none; font-weight: 600;">support@digioptics.com</a> or call <strong>+91 9650560526</strong>.
             </p>
 
             <p style="font-size: 14px; margin-bottom: 0; color: #0f172a;">
@@ -764,7 +764,7 @@ export const generateVendorPaymentEmailHTML = (data) => {
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
         
         <!-- Header -->
-        <div style="background: linear-gradient(135deg, #1B6496 0%, #0284c7 100%); padding: 24px 30px; text-align: center; color: #ffffff;">
+        <div style="background: linear-gradient(135deg, #1f618d 0%, #2980B9 100%); padding: 24px 30px; text-align: center; color: #ffffff;">
             <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.5px;">DigiOptics Wholesale</h1>
             <p style="margin: 4px 0 0 0; font-size: 13px; opacity: 0.9;">Vendor Payment Advice & Disbursement Notice</p>
         </div>
@@ -775,14 +775,14 @@ export const generateVendorPaymentEmailHTML = (data) => {
             <p style="font-size: 15px; margin-top: 0; color: #0f172a;">Dear <strong>${firmName || vendorName || "Valued Supplier"}</strong>,</p>
             
             <p style="font-size: 14px; line-height: 1.6;">
-                We are pleased to inform you that a payment of <strong style="color: #0284c7; font-size: 16px;">₹${fmtNum(amount)}</strong> has been successfully processed and disbursed to your account by <strong>DigiOptics Wholesale</strong>.
+                We are pleased to inform you that a payment of <strong style="color: #2980B9; font-size: 16px;">₹${fmtNum(amount)}</strong> has been successfully processed and disbursed to your account by <strong>DigiOptics Wholesale</strong>.
             </p>
 
             <!-- Highlight Card -->
             <div style="background: #f0f9ff; border: 1.5px solid #7dd3fc; border-radius: 8px; padding: 18px 20px; margin: 20px 0; text-align: center;">
-                <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #0369a1; letter-spacing: 0.5px;">Payment Disbursed</div>
-                <div style="font-size: 28px; font-weight: 900; color: #0284c7; margin: 6px 0;">₹ ${fmtNum(amount)}</div>
-                <div style="font-size: 12px; color: #0369a1;">Voucher Ref: <strong>${receiptNo}</strong></div>
+                <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #1f618d; letter-spacing: 0.5px;">Payment Disbursed</div>
+                <div style="font-size: 28px; font-weight: 900; color: #2980B9; margin: 6px 0;">₹ ${fmtNum(amount)}</div>
+                <div style="font-size: 12px; color: #1f618d;">Voucher Ref: <strong>${receiptNo}</strong></div>
             </div>
 
             <!-- Transaction Summary Table -->
@@ -797,7 +797,7 @@ export const generateVendorPaymentEmailHTML = (data) => {
                 </tr>
                 <tr style="border-bottom: 1px solid #f1f5f9;">
                     <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Payment Mode</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #0284c7; text-align: right;">${modeText}</td>
+                    <td style="padding: 10px 0; font-weight: 700; color: #2980B9; text-align: right;">${modeText}</td>
                 </tr>
                 ${refText ? `
                 <tr style="border-bottom: 1px solid #f1f5f9;">
@@ -810,12 +810,12 @@ export const generateVendorPaymentEmailHTML = (data) => {
                 </tr>
             </table>
 
-            <div style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 12px 16px; border-radius: 4px; margin-top: 25px; font-size: 13px; line-height: 1.5;">
+            <div style="background: #f8fafc; border-left: 4px solid #2980B9; padding: 12px 16px; border-radius: 4px; margin-top: 25px; font-size: 13px; line-height: 1.5;">
                 📎 <strong>Payment Advice Attached:</strong> Your official payment voucher / disbursement receipt PDF is attached with this email for your accounting & GST records.
             </div>
 
             <p style="font-size: 13px; color: #64748b; margin-top: 25px; line-height: 1.5;">
-                If you have any questions or require account reconciliation, please contact our finance desk at <a href="mailto:support@digioptics.com" style="color: #0284c7; text-decoration: none; font-weight: 600;">support@digioptics.com</a> or call <strong>+91 9650560526</strong>.
+                If you have any questions or require account reconciliation, please contact our finance desk at <a href="mailto:support@digioptics.com" style="color: #2980B9; text-decoration: none; font-weight: 600;">support@digioptics.com</a> or call <strong>+91 9650560526</strong>.
             </p>
 
             <p style="font-size: 14px; margin-bottom: 0; color: #0f172a;">

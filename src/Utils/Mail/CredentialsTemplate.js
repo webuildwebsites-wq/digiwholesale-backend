@@ -23,7 +23,7 @@ const CredentialsTemplate = (username, businessEmail, customerpassword) => {
       box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
     }
     .header {
-      background-color: #1e40af;
+      background-color: #2980B9;
       padding: 22px;
       text-align: center;
       color: #ffffff;
@@ -44,7 +44,7 @@ const CredentialsTemplate = (username, businessEmail, customerpassword) => {
     .credentials-box {
       margin: 24px auto;
       background-color: #eff6ff;
-      border: 2px dashed #1e40af;
+      border: 2px dashed #2980B9;
       padding: 18px;
       border-radius: 8px;
       width: 85%;
@@ -60,7 +60,7 @@ const CredentialsTemplate = (username, businessEmail, customerpassword) => {
       margin-top: 15px;
     }
     .footer {
-      background-color: #1e40af;
+      background-color: #2980B9;
       text-align: center;
       padding: 16px;
       font-size: 12px;
@@ -88,7 +88,7 @@ const CredentialsTemplate = (username, businessEmail, customerpassword) => {
       </p>
       <div style="text-align: center; margin: 24px 0;">
         <a href="${frontendUrl}/customer-login"
-           style="background-color: #1e40af; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block;">
+           style="background-color: #2980B9; color: #ffffff; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block;">
           Login to DigiWholesale
         </a>
       </div>
