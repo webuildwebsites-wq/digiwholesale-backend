@@ -4,9 +4,10 @@ import FormData from 'form-data';
 dotenv.config();
 
 const WHATSAPP_BASE_URL   = process.env.WHATSAPP_BASE_URL   || "https://digiwppconnect-backend.digibysr.in";
-const WHATSAPP_DEVICE_TOKEN = process.env.WHATSAPP_DEVICE_TOKEN || "29a959f6-e5ee-46e5-80b7-603d8dc92efdc";
+const WHATSAPP_DEVICE_TOKEN = process.env.WHATSAPP_DEVICE_TOKEN || "cc759a15-f9e5-4f46-8604-6c26ed9ecdcd";
+const WHATSAPP_JWT_TOKEN   = process.env.WHATSAPP_JWT_TOKEN   || "wpp_62a1fd8d656a8511c18d0eef3a42646fd0d2119285135c9d32619d6ab1aaa00f798fdc7aa485bf16e38341f0780b8d83";
 
-const DEFAULT_PHONE         = process.env.WHATSAPP_DEFAULT_PHONE || "917579440117";
+const DEFAULT_PHONE         = process.env.WHATSAPP_DEFAULT_PHONE || "918368942780";
 
 const SEND_URL       = `${WHATSAPP_BASE_URL}/devices/${WHATSAPP_DEVICE_TOKEN}/send`;
 const SEND_MEDIA_URL = `${WHATSAPP_BASE_URL}/devices/${WHATSAPP_DEVICE_TOKEN}/send-media`;
@@ -17,7 +18,12 @@ export const sendWhatsAppOTP = async ({ phone, otp }) => {
         const response = await axios.post(
             SEND_URL,
             { number, message: otp },
-            { headers: { "Content-Type": "application/json" } }
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(WHATSAPP_JWT_TOKEN && { Authorization: `Bearer ${WHATSAPP_JWT_TOKEN}` }),
+                },
+            }
         );
         console.log("WhatsApp message sent:", response.data);
         return { success: true, result: response.data?.result };
@@ -46,7 +52,10 @@ export const sendWhatsAppMedia = async ({ phone, message, fileBuffer, fileName, 
         });
 
         const response = await axios.post(SEND_MEDIA_URL, form, {
-            headers:          form.getHeaders(),
+            headers: {
+                ...form.getHeaders(),
+                ...(WHATSAPP_JWT_TOKEN && { Authorization: `Bearer ${WHATSAPP_JWT_TOKEN}` }),
+            },
             maxBodyLength:    Infinity,
             maxContentLength: Infinity,
         });

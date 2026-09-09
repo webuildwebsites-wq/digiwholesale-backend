@@ -16,7 +16,12 @@ export const getAgingReport = async (req, res) => {
     const tenantFilter = tenantId ? { tenantId } : {};
 
     if (entityType === 'Customer' || entityType === 'Receivables') {
-      const customers = await Customer.find(tenantFilter).lean();
+      const customerFilter = {
+        ...tenantFilter,
+        "status.isActive": true,
+        "approvalWorkflow.salesHeadApprovalStatus": "APPROVED",
+      };
+      const customers = await Customer.find(customerFilter).lean();
 
       let grandTotal = 0;
       let total0_30 = 0;

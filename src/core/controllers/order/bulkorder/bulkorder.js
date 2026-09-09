@@ -11,7 +11,7 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/respon
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
 import { handleOrderBillingNotification } from "../../../services/billing/billingNotification.service.js";
-import { sendWhatsAppMessage } from "../../../../Utils/whatsapp/whatsappService.js";
+import { sendWhatsAppMessage, customerOrderCreditDueWhatsApp } from "../../../../Utils/whatsapp/whatsappService.js";
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
 import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
 import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
@@ -691,6 +691,29 @@ export const applyOrderToCustomerCreditAndLedger = async ({ bulkOrder, customerI
         }]);
 
         console.log(`[Order Credit Sync Complete] Order #${orderRef}: GrandTotal=₹${grandTotal}, AdvancePaid=₹${advancePaid}, AbsorbedAdv=₹${absorbedFromAdvance}, AddedToCredit=₹${newCreditUsedToAdd}, NewCreditUsed=₹${finalCreditUsed}, AdvanceBalance=₹${remainingAdvance}`);
+
+        // If order added to customer's outstanding credit due, send WhatsApp notification
+        const customerMobile = freshCustomer.mobileNo1 || freshCustomer.mobile;
+        if (customerMobile && newCreditUsedToAdd > 0) {
+            const creditLimit = Number(freshCustomer.creditLimit || 0);
+            const availableCredit = Math.max(0, creditLimit - finalCreditUsed);
+            const waMsg = customerOrderCreditDueWhatsApp({
+                customerName: freshCustomer.ownerName,
+                shopName: freshCustomer.shopName,
+                orderNumber: orderRef,
+                orderTotal: grandTotal,
+                advancePaid,
+                addedToDue: newCreditUsedToAdd,
+                totalOutstandingDue: finalCreditUsed,
+                creditLimit,
+                availableCredit,
+                companyName: process.env.COMPANY_NAME || "DigiOptics Wholesale",
+                companyPhone: process.env.COMPANY_PHONE || "+91 9650560526",
+            });
+            sendWhatsAppMessage({ to: customerMobile, message: waMsg }).catch(err =>
+                console.error("[OrderCreditSync] Customer WhatsApp credit notice error:", err.message)
+            );
+        }
     } catch (err) {
         console.error("[Order Credit Sync Error]:", err.message);
     }
