@@ -1,27 +1,46 @@
 import dotenv from 'dotenv';
 import axios from 'axios';
 import FormData from 'form-data';
-dotenv.config();
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const WHATSAPP_BASE_URL   = process.env.WHATSAPP_BASE_URL   || "https://digiwppconnect-backend.digibysr.in";
-const WHATSAPP_DEVICE_TOKEN = process.env.WHATSAPP_DEVICE_TOKEN || "cc759a15-f9e5-4f46-8604-6c26ed9ecdcd";
-const WHATSAPP_JWT_TOKEN   = process.env.WHATSAPP_JWT_TOKEN   || "wpp_62a1fd8d656a8511c18d0eef3a42646fd0d2119285135c9d32619d6ab1aaa00f798fdc7aa485bf16e38341f0780b8d83";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
-const DEFAULT_PHONE         = process.env.WHATSAPP_DEFAULT_PHONE || "918368942780";
+const getWhatsAppConfig = () => {
+    const baseUrl = (process.env.WHATSAPP_BASE_URL || "").replace(/\/+$/, "");
+    const deviceToken = process.env.WHATSAPP_DEVICE_TOKEN || "";
+    const jwtToken = process.env.WHATSAPP_JWT_TOKEN || "";
+    const defaultPhone = process.env.WHATSAPP_DEFAULT_PHONE || "";
 
-const SEND_URL       = `${WHATSAPP_BASE_URL}/devices/${WHATSAPP_DEVICE_TOKEN}/send`;
-const SEND_MEDIA_URL = `${WHATSAPP_BASE_URL}/devices/${WHATSAPP_DEVICE_TOKEN}/send-media`;
+    return {
+        baseUrl,
+        deviceToken,
+        jwtToken,
+        defaultPhone,
+        sendUrl: `${baseUrl}/devices/${deviceToken}/send`,
+        sendMediaUrl: `${baseUrl}/devices/${deviceToken}/send-media`,
+    };
+};
 
 export const sendWhatsAppOTP = async ({ phone, otp }) => {
     try {
-        const number = phone || DEFAULT_PHONE;
+        const { baseUrl, deviceToken, jwtToken, defaultPhone, sendUrl } = getWhatsAppConfig();
+        const number = phone || defaultPhone;
+
+        if (!baseUrl || !deviceToken) {
+            console.error("sendWhatsAppOTP Error: WHATSAPP_BASE_URL or WHATSAPP_DEVICE_TOKEN missing from .env");
+            return { success: false, reason: "CONFIG_MISSING" };
+        }
+
         const response = await axios.post(
-            SEND_URL,
+            sendUrl,
             { number, message: otp },
             {
                 headers: {
                     "Content-Type": "application/json",
-                    ...(WHATSAPP_JWT_TOKEN && { Authorization: `Bearer ${WHATSAPP_JWT_TOKEN}` }),
+                    ...(jwtToken && { Authorization: `Bearer ${jwtToken}` }),
                 },
             }
         );
@@ -35,8 +54,15 @@ export const sendWhatsAppOTP = async ({ phone, otp }) => {
 
 export const sendWhatsAppMedia = async ({ phone, message, fileBuffer, fileName, mimeType }) => {
     try {
-        const number = phone || DEFAULT_PHONE;
-        console.log("sendWhatsAppMedia — number:", number, "| file:", fileName, "| endpoint:", SEND_MEDIA_URL);
+        const { baseUrl, deviceToken, jwtToken, defaultPhone, sendMediaUrl } = getWhatsAppConfig();
+        const number = phone || defaultPhone;
+
+        if (!baseUrl || !deviceToken) {
+            console.error("sendWhatsAppMedia Error: WHATSAPP_BASE_URL or WHATSAPP_DEVICE_TOKEN missing from .env");
+            return { success: false, reason: "CONFIG_MISSING" };
+        }
+
+        console.log("sendWhatsAppMedia — number:", number, "| file:", fileName, "| endpoint:", sendMediaUrl);
 
         const buffer = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
         const name   = fileName || "document.pdf";
@@ -51,10 +77,10 @@ export const sendWhatsAppMedia = async ({ phone, message, fileBuffer, fileName, 
             knownLength: buffer.length,
         });
 
-        const response = await axios.post(SEND_MEDIA_URL, form, {
+        const response = await axios.post(sendMediaUrl, form, {
             headers: {
                 ...form.getHeaders(),
-                ...(WHATSAPP_JWT_TOKEN && { Authorization: `Bearer ${WHATSAPP_JWT_TOKEN}` }),
+                ...(jwtToken && { Authorization: `Bearer ${jwtToken}` }),
             },
             maxBodyLength:    Infinity,
             maxContentLength: Infinity,
