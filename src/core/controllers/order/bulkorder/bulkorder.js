@@ -1006,13 +1006,17 @@ export const createBulkOrder = async (req, res) => {
                             let batchId = item.batchId || null;
 
                             if (batchId) {
-                                await ProductBatch.findOneAndUpdate(
-                                    { _id: batchId, tenantId: req.user.tenantId, availableQty: { $gte: deductQty } },
-                                    [
-                                        { $set: { availableQty: { $subtract: ["$availableQty", deductQty] } } },
-                                        { $set: { status: { $cond: [{ $lte: ["$availableQty", 0] }, "EXHAUSTED", "OPEN"] } } },
-                                    ]
-                                );
+                                const batchDoc = await ProductBatch.findOne({
+                                    _id: batchId,
+                                    tenantId: req.user.tenantId,
+                                    availableQty: { $gte: deductQty },
+                                });
+                                if (batchDoc) {
+                                    const newQty = batchDoc.availableQty - deductQty;
+                                    batchDoc.availableQty = newQty;
+                                    batchDoc.status = newQty <= 0 ? "EXHAUSTED" : "OPEN";
+                                    await batchDoc.save();
+                                }
                             } else {
                                 let remaining = deductQty;
                                 const batches = await ProductBatch.find({

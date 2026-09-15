@@ -575,12 +575,24 @@ export async function getProductIndexesService({ tenantId } = {}) {
 
   return await DigiProduct.aggregate([
     { $match: match },
-    { $sort: { index: 1, createdAt: 1 } },
+    {
+      $addFields: {
+        _numericIndex: {
+          $convert: {
+            input: "$index",
+            to: "double",
+            onError: null,
+            onNull: null,
+          },
+        },
+      },
+    },
+    { $sort: { _numericIndex: 1, index: 1, createdAt: 1 } },
     {
       $group: {
         _id: "$index",
         docId: { $first: "$_id" },
-        value: { $first: { $toDouble: "$index" } },
+        value: { $first: "$_numericIndex" },
         __v: { $first: "$__v" },
         createdAt: { $first: "$createdAt" },
         updatedAt: { $first: "$updatedAt" },

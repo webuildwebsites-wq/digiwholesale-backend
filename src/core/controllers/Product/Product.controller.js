@@ -1,6 +1,9 @@
 import DigiProduct from "../../../models/Product/Product.model.js";
 import ProductBatch from "../../../models/Product/ProductBatch.model.js";
+import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
+import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
 import { uploadToGCSProduct } from "../../../Utils/uploads/uploadToGCS.js";
+import { getNextBatchNumber } from "./batch.controller.js";
 import mongoose from "mongoose";
 
 //  CREATE PRODUCT
@@ -131,6 +134,42 @@ export const createProduct = async (req, res) => {
     }));
 
     const savedProducts = await DigiProduct.insertMany(productDocs);
+
+    // Batch allocations for newly created products
+    for (let idx = 0; idx < savedProducts.length; idx++) {
+      const savedProduct = savedProducts[idx];
+      const pInput = products[idx] || {};
+
+      if (pInput.allocateBatch !== false) {
+        const bQty = pInput.batchQty !== undefined && pInput.batchQty !== "" && pInput.batchQty !== null
+          ? Number(pInput.batchQty)
+          : Number(savedProduct.qty || 0);
+
+        if (bQty > 0) {
+          let bNum = pInput.batchNumber ? pInput.batchNumber.trim().toUpperCase() : "";
+          if (!bNum) {
+            bNum = await getNextBatchNumber(savedProduct._id, req.user.tenantId);
+          }
+
+          let vId = savedProduct.vendor?.id || null;
+          let vName = savedProduct.vendor?.name || null;
+
+          await ProductBatch.create({
+            batchNumber: bNum,
+            productId: savedProduct._id,
+            initialQty: bQty,
+            availableQty: bQty,
+            costPrice: savedProduct.price || 0,
+            vendorId: vId,
+            vendorName: vName,
+            remarks: pInput.batchRemarks?.trim() || "Initial batch allocation on product creation",
+            status: "OPEN",
+            tenantId: req.user.tenantId,
+            createdBy: req.user._id,
+          });
+        }
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -486,33 +525,202 @@ export const addInventory = async (req, res) => {
   }
 };
 
-// GET INVENTORY BY PROUDCT ID
+// GET INVENTORY BY PRODUCT ID (WITH RECEIVING HISTORY, BATCHES & DETAILS)
 export const getInventoryByProductId = async (req, res) => {
   try {
     const { productId } = req.params;
 
-    if (!productId) {
+    if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
       return res.status(400).json({
         success: false,
-        message: "Product ID is required",
+        message: "Valid Product ID is required",
       });
     }
 
-    const inventory = await DigiProduct.find({
+    const product = await DigiProduct.findOne({
       tenantId: req.user.tenantId,
       _id: productId,
-    });
+    }).lean();
 
-    if (!inventory) {
+    if (!product) {
       return res.status(404).json({
         success: false,
-        message: "Inventory not found",
+        message: "Product not found",
+      });
+    }
+
+    // 1. Fetch batches for this product
+    const batches = await ProductBatch.find({
+      productId: product._id,
+      tenantId: req.user.tenantId,
+    }).sort({ createdAt: -1 }).lean();
+
+    // 2. Fetch purchase orders containing this product
+    const purchaseOrders = await VendorPurchase.find({
+      tenantId: req.user.tenantId,
+      $or: [
+        { "orders.items.productId": product._id },
+        { "orders.items.code": product.productCode },
+      ],
+    }).sort({ createdAt: -1 }).lean();
+
+    // 3. Fetch purchase inwards containing this product or corresponding to these POs
+    const poIds = purchaseOrders.map((po) => po._id);
+    const purchaseInwards = await PurchaseInward.find({
+      tenantId: req.user.tenantId,
+      $or: [
+        { "items.productId": product._id },
+        { purchaseOrderId: { $in: poIds } },
+      ],
+    }).sort({ inwardDate: -1, createdAt: -1 }).lean();
+
+    // Build receiving history entries
+    const receivingHistory = [];
+    const processedInwardItemKeys = new Set();
+
+    for (const inward of purchaseInwards) {
+      const poDoc = purchaseOrders.find(
+        (po) => po._id.toString() === (inward.purchaseOrderId?.toString() || "")
+      );
+
+      for (const item of (inward.items || [])) {
+        // Find matching purchase order item
+        let poItem = null;
+        if (poDoc) {
+          for (const ord of poDoc.orders || []) {
+            const found = (ord.items || []).find(
+              (pi) =>
+                (pi._id && item.itemId && pi._id.toString() === item.itemId.toString()) ||
+                (pi.productId && pi.productId.toString() === product._id.toString()) ||
+                (pi.code && pi.code === product.productCode)
+            );
+            if (found) {
+              poItem = found;
+              break;
+            }
+          }
+        }
+
+        const isThisProduct =
+          (item.productId && item.productId.toString() === product._id.toString()) ||
+          (poItem && (poItem.productId?.toString() === product._id.toString() || poItem.code === product.productCode)) ||
+          (item.itemName && item.itemName.toLowerCase() === product.productName.toLowerCase());
+
+        if (isThisProduct) {
+          const itemKey = `${inward._id}_${item.itemId || item._id || item.itemName}`;
+          if (!processedInwardItemKeys.has(itemKey)) {
+            processedInwardItemKeys.add(itemKey);
+
+            receivingHistory.push({
+              _id: inward._id,
+              type: "PURCHASE_INWARD",
+              inwardId: inward._id,
+              purchaseOrderId: inward.purchaseOrderId,
+              orderNumber: item.orderNumber || poDoc?.purchaseOrderSummary?.orderNumber || "—",
+              dateOfPurchase: poDoc?.createdAt || inward.createdAt,
+              inwardDate: inward.inwardDate || inward.createdAt,
+              receivedOn: inward.receivedOn || inward.inwardDate || inward.createdAt,
+              receivedBy: inward.receivedBy || "—",
+              receivedFrom: inward.receivedFrom || inward.vendorName || "—",
+              vendorName: inward.vendorName || poDoc?.vendor?.vendorName || product.vendor?.name || "—",
+              vendorId: inward.vendorId || poDoc?.vendor?.vendorId || product.vendor?.id || null,
+              batchNumber: item.vendorRefId || "—",
+              invoiceNumber: item.vendorRefId || inward.remarks || "—",
+              orderedQty: item.orderedQty || poItem?.qty || item.receivedQty,
+              receivedQty: item.receivedQty || 0,
+              buyingPrice: poItem?.price != null ? poItem.price : (product.price || 0),
+              sellingPrice: poItem?.mrp != null ? poItem.mrp : (product.mrp || 0),
+              gst: poItem?.gst != null ? poItem.gst : (product.gst || 0),
+              condition: item.condition || "GOOD",
+              inwardStatus: poItem?.inwardStatus || inward.status || "Confirmed",
+              qcStatus: poItem?.qcStatus || "PENDING",
+              remarks: item.remarks || inward.remarks || "",
+            });
+          }
+        }
+      }
+    }
+
+    // Also include any batches representing stock allocations not yet captured
+    for (const batch of batches) {
+      const alreadyIncluded = receivingHistory.some(
+        (rh) => rh.batchNumber && rh.batchNumber.toUpperCase() === batch.batchNumber.toUpperCase()
+      );
+
+      if (!alreadyIncluded) {
+        receivingHistory.push({
+          _id: batch._id,
+          type: "BATCH_ALLOCATION",
+          inwardId: null,
+          purchaseOrderId: batch.purchaseOrderId || null,
+          orderNumber: "—",
+          dateOfPurchase: batch.createdAt,
+          inwardDate: batch.inwardDate || batch.createdAt,
+          receivedOn: batch.inwardDate || batch.createdAt,
+          receivedBy: "—",
+          receivedFrom: batch.vendorName || product.vendor?.name || "—",
+          vendorName: batch.vendorName || product.vendor?.name || "—",
+          vendorId: batch.vendorId || product.vendor?.id || null,
+          batchNumber: batch.batchNumber,
+          invoiceNumber: "—",
+          orderedQty: batch.initialQty,
+          receivedQty: batch.initialQty,
+          availableQty: batch.availableQty,
+          buyingPrice: batch.costPrice != null ? batch.costPrice : (product.price || 0),
+          sellingPrice: product.mrp || 0,
+          gst: product.gst || 0,
+          condition: "GOOD",
+          inwardStatus: "Confirmed",
+          qcStatus: "PASSED",
+          batchStatus: batch.status,
+          remarks: batch.remarks || "Batch allocation",
+        });
+      }
+    }
+
+    // Sort receiving history by date descending
+    receivingHistory.sort(
+      (a, b) => new Date(b.receivedOn || b.inwardDate || b.dateOfPurchase) - new Date(a.receivedOn || a.inwardDate || a.dateOfPurchase)
+    );
+
+    // If receivingHistory is empty, provide the baseline opening inventory
+    if (receivingHistory.length === 0 && (product.qty > 0 || product.createdAt)) {
+      receivingHistory.push({
+        _id: product._id,
+        type: "INITIAL_STOCK",
+        inwardId: null,
+        purchaseOrderId: null,
+        orderNumber: "INITIAL",
+        dateOfPurchase: product.createdAt,
+        inwardDate: product.createdAt,
+        receivedOn: product.createdAt,
+        receivedBy: "System",
+        receivedFrom: product.vendor?.name || "Default Vendor",
+        vendorName: product.vendor?.name || "Default Vendor",
+        vendorId: product.vendor?.id || null,
+        batchNumber: "INITIAL-STOCK",
+        invoiceNumber: "OPENING",
+        orderedQty: product.qty || 0,
+        receivedQty: product.qty || 0,
+        availableQty: product.qty || 0,
+        buyingPrice: product.price || 0,
+        sellingPrice: product.mrp || 0,
+        gst: product.gst || 0,
+        condition: "GOOD",
+        inwardStatus: "Confirmed",
+        qcStatus: "PASSED",
+        remarks: "Opening inventory stock",
       });
     }
 
     res.status(200).json({
       success: true,
-      data: inventory,
+      data: {
+        product,
+        batches,
+        receivingHistory,
+        inventory: [product],
+      },
     });
   } catch (error) {
     console.error("Get inventory error:", error);
