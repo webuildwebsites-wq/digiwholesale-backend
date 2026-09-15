@@ -17,6 +17,7 @@
     "update-employee-type-order": "node scripts/updateEmployeeTypeOrder.js",
     "seed-excel": "node scripts/seedExcelData.js",
     "seed-digi-products": "node scripts/seedDigiProducts.js",
+    "allocate-batches": "node scripts/allocateBatchesForInventory.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

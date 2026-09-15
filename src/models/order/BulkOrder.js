@@ -113,6 +113,13 @@ const BulkOrderItemSchema = new mongoose.Schema(
             name: { type: String, default: null },
         },
 
+        batchId: {
+            type:    mongoose.Schema.Types.ObjectId,
+            ref:     "ProductBatch",
+            default: null,
+        },
+        batchNumber: { type: String, default: null, trim: true },
+
         orderSource: {
             type:    String,
             enum:    ["INHOUSE", "ORDER"],

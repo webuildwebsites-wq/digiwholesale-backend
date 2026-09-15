@@ -4,6 +4,7 @@ import CustomerLedger from "../../../../models/Accounting/CustomerLedger.model.j
 import LedgerTransaction from "../../../../models/Accounting/LedgerTransaction.model.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
+import ProductBatch from "../../../../models/Product/ProductBatch.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
 import VendorPurchase from "../../../../models/Purchase/VendorPurchase.model.js";
 import Employee from "../../../../models/Auth/Employee.js";
@@ -999,6 +1000,42 @@ export const createBulkOrder = async (req, res) => {
                                 update: { $inc: { qty: -item.qty } },
                             },
                         });
+
+                        const deductQty = Number(item.qty || 0);
+                        if (deductQty > 0) {
+                            let batchId = item.batchId || null;
+
+                            if (batchId) {
+                                await ProductBatch.findOneAndUpdate(
+                                    { _id: batchId, tenantId: req.user.tenantId, availableQty: { $gte: deductQty } },
+                                    [
+                                        { $set: { availableQty: { $subtract: ["$availableQty", deductQty] } } },
+                                        { $set: { status: { $cond: [{ $lte: ["$availableQty", 0] }, "EXHAUSTED", "OPEN"] } } },
+                                    ]
+                                );
+                            } else {
+                                let remaining = deductQty;
+                                const batches = await ProductBatch.find({
+                                    productId: item.productId,
+                                    tenantId:  req.user.tenantId,
+                                    status:    "OPEN",
+                                }).sort({ createdAt: 1 });
+
+                                for (const batch of batches) {
+                                    if (remaining <= 0) break;
+                                    const deduct = Math.min(batch.availableQty, remaining);
+                                    batch.availableQty -= deduct;
+                                    batch.status = batch.availableQty === 0 ? "EXHAUSTED" : "OPEN";
+                                    await batch.save();
+                                    remaining -= deduct;
+                                }
+
+                                if (batches.length > 0) {
+                                    item.batchId     = batches[0]._id;
+                                    item.batchNumber = batches[0].batchNumber;
+                                }
+                            }
+                        }
                     }
                 }
             }

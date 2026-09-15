@@ -1,4 +1,5 @@
 import DigiProduct from "../../../models/Product/Product.model.js";
+import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import { uploadToGCSProduct } from "../../../Utils/uploads/uploadToGCS.js";
 import mongoose from "mongoose";
 
@@ -353,11 +354,59 @@ export const deleteProduct = async (req, res) => {
       });
     }
 
+    await ProductBatch.deleteMany({
+      productId: req.params.id,
+      tenantId: req.user.tenantId,
+    }).catch(err => console.error("Error deleting product batches:", err));
+
     res.status(200).json({
       success: true,
       message: "Product deleted successfully",
     });
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+//  DELETE BULK PRODUCTS
+export const deleteBulkProducts = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Product IDs array is required",
+      });
+    }
+
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid product IDs provided",
+      });
+    }
+
+    const result = await DigiProduct.deleteMany({
+      _id: { $in: validIds },
+      tenantId: req.user.tenantId,
+    });
+
+    await ProductBatch.deleteMany({
+      productId: { $in: validIds },
+      tenantId: req.user.tenantId,
+    }).catch(err => console.error("Error deleting batches for bulk deleted products:", err));
+
+    res.status(200).json({
+      success: true,
+      deletedCount: result.deletedCount,
+      message: `${result.deletedCount} products deleted successfully`,
+    });
+  } catch (error) {
+    console.error("deleteBulkProducts error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
