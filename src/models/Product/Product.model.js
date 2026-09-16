@@ -31,6 +31,12 @@ const productSchema = new mongoose.Schema(
       default: "",
     },
 
+    color: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     colors: [
       {
         color: {
@@ -111,6 +117,18 @@ const productSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0,
+    },
+
+    buyingPrice: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    sellingPrice: {
+      type: Number,
+      min: 0,
+      default: 0,
     },
 
     gst: {

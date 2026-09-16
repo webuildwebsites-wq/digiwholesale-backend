@@ -81,6 +81,8 @@ const BulkOrderItemSchema = new mongoose.Schema(
         dimensions: String,
 
         price: Number,
+        sellingPrice: Number,
+        buyingPrice: Number,
         gst: Number,
         hsnSac: String,
         mrp: Number,

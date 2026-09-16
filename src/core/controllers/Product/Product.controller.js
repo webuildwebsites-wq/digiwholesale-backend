@@ -21,16 +21,17 @@ export const createProduct = async (req, res) => {
 
     // Validate required fields
     for (const p of products) {
+      const hasBuyingPrice = p.buyingPrice != null || p.price != null;
       if (
         !p.productCode ||
         !p.productName ||
         !p.category ||
-        p.price == null ||
+        !hasBuyingPrice ||
         p.mrp == null
       ) {
         return res.status(400).json({
           success: false,
-          message: "Required fields missing in one of the products",
+          message: "Required fields missing in one of the products (productCode, productName, category, buyingPrice/price, mrp)",
         });
       }
     }
@@ -100,13 +101,14 @@ export const createProduct = async (req, res) => {
       category: p.category.trim().toUpperCase(),
       productName: p.productName.trim().toUpperCase(),
       brand: p.brand?.trim()?.toUpperCase() || "",
-      colors: Array.isArray(p.colors)
+      color: (p.color?.trim()) || (Array.isArray(p.colors) && p.colors[0]?.color?.trim()) || "",
+      colors: Array.isArray(p.colors) && p.colors.length > 0
         ? p.colors.map((c) => ({
             color: c.color?.trim() || "",
             qty: Number(c.qty) || 0,
             productColorImage: c.productColorImage || "",
           }))
-        : [],
+        : (p.color?.trim() ? [{ color: p.color.trim(), qty: Number(p.qty) || 0, productColorImage: "" }] : []),
       size: p.size?.trim() || "",
       type: p.type?.trim() || "",
       shape: p.shape?.trim() || "",
@@ -119,10 +121,12 @@ export const createProduct = async (req, res) => {
       dimensions: p.dimensions?.trim() || "",
       coating: p.coating?.trim() || "",
       expiry: p.expiry || "",
-      price: Number(p.price),
+      price: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      buyingPrice: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      sellingPrice: Number(p.sellingPrice != null ? p.sellingPrice : (p.price ?? 0)),
       gst: Number(p.gst) || 0,
       hsnSac: p.hsnSac?.trim() || "",
-      mrp: Number(p.mrp),
+      mrp: Number(p.mrp ?? 0),
       qty: Number(p.qty),
       vendor:
         p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)
@@ -159,7 +163,10 @@ export const createProduct = async (req, res) => {
             productId: savedProduct._id,
             initialQty: bQty,
             availableQty: bQty,
-            costPrice: savedProduct.price || 0,
+            costPrice: savedProduct.buyingPrice || savedProduct.price || 0,
+            buyingPrice: savedProduct.buyingPrice || savedProduct.price || 0,
+            sellingPrice: savedProduct.sellingPrice || savedProduct.price || 0,
+            mrp: savedProduct.mrp || 0,
             vendorId: vId,
             vendorName: vName,
             remarks: pInput.batchRemarks?.trim() || "Initial batch allocation on product creation",
@@ -336,32 +343,57 @@ export const updateProduct = async (req, res) => {
     product.category = p.category.trim().toUpperCase();
     product.productName = p.productName.trim().toUpperCase();
     product.brand = p.brand.trim().toUpperCase();
-    product.color = p.color.trim();
-    product.size = p.size.trim();
-    product.type = p.type.trim();
-    product.shape = p.shape.trim();
-    product.sph = p.sph.trim();
-    product.cyl = p.cyl.trim();
-    product.index = p.index.trim();
-    product.axis = p.axis.trim();
+    const trimmedColor = p.color?.trim() || "";
+    product.color = trimmedColor;
+    if (trimmedColor) {
+      if (Array.isArray(product.colors) && product.colors.length > 0) {
+        product.colors[0].color = trimmedColor;
+      } else {
+        product.colors = [{ color: trimmedColor, qty: product.qty || 0, productColorImage: product.image || "" }];
+      }
+    }
+    product.size = p.size?.trim() || "";
+    product.type = p.type?.trim() || "";
+    product.shape = p.shape?.trim() || "";
+    product.sph = p.sph?.trim() || "";
+    product.cyl = p.cyl?.trim() || "";
+    product.index = p.index?.trim() || "";
+    product.axis = p.axis?.trim() || "";
 
     product.addition = p.addition?.trim() || "";
     product.material = p.material?.trim() || "";
     product.dimensions = p.dimensions?.trim() || "";
 
-    product.coating = p.coating.trim();
-    product.expiry = p.expiry;
-    product.price = p.price;
-    product.gst = p.gst;
-    product.hsnSac = p.hsnSac.trim();
-    product.mrp = p.mrp;
-    product.qty = p.qty;
+    product.coating = p.coating?.trim() || "";
+    product.expiry = p.expiry || null;
+    if (p.buyingPrice != null && p.buyingPrice !== "") product.buyingPrice = Number(p.buyingPrice);
+    if (p.sellingPrice != null && p.sellingPrice !== "") product.sellingPrice = Number(p.sellingPrice);
+    if (p.price != null && p.price !== "") {
+      product.price = Number(p.price);
+      if (product.buyingPrice == null) product.buyingPrice = product.price;
+    }
+    product.gst = p.gst != null ? Number(p.gst) : 0;
+    product.hsnSac = p.hsnSac?.trim() || "";
+    if (p.mrp != null && p.mrp !== "") product.mrp = Number(p.mrp);
+    if (p.qty != null && p.qty !== "") product.qty = Number(p.qty);
 
-    //  If image uploaded
+    // Update vendor if provided
+    if (p.vendorId) {
+      product.vendor = {
+        id: mongoose.Types.ObjectId.isValid(p.vendorId) ? p.vendorId : null,
+        name: p.vendorName || null,
+      };
+    }
+
+    //  If image uploaded — use GCS (same as createProduct)
     if (req.file) {
-      const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
-
-      product.image = imageUrl;
+      try {
+        const imageUrl = await uploadToGCSProduct(req.file);
+        product.image = imageUrl;
+      } catch (uploadErr) {
+        console.error("Image upload to GCS failed:", uploadErr);
+        // Don't fail the whole update — just skip image update
+      }
     }
 
     await product.save();
@@ -371,6 +403,7 @@ export const updateProduct = async (req, res) => {
       product,
     });
   } catch (error) {
+    console.error("updateProduct error:", error);
     res.status(400).json({
       success: false,
       message: error.message,
@@ -505,19 +538,78 @@ export const addInventory = async (req, res) => {
 
     for (const item of items) {
       const product = productMap[item.productCode];
-      product.qty += item.qty;
-      if (item.mrp && item.mrp > product.mrp) product.mrp = item.mrp;
-      if (item.price) product.price = item.price;
+      const addedQty = Number(item.qty || 0);
+      product.qty += addedQty;
+
+      const buyingP = item.buyingPrice != null ? Number(item.buyingPrice) : (item.price != null ? Number(item.price) : null);
+      const sellingP = item.sellingPrice != null ? Number(item.sellingPrice) : null;
+      const mrpP = item.mrp != null ? Number(item.mrp) : null;
+
+      if (buyingP != null) {
+        product.buyingPrice = buyingP;
+        product.price = buyingP;
+      }
+      if (sellingP != null) product.sellingPrice = sellingP;
+      if (mrpP != null && mrpP > 0) product.mrp = mrpP;
+      if (item.expiry) product.expiry = item.expiry;
+      if (item.vendorId) {
+        product.vendor = { id: item.vendorId, name: item.vendorName || "" };
+      }
+
+      // Determine batch number
+      let bNum = item.batchNumber?.trim() ? item.batchNumber.trim().toUpperCase() : "";
+      if (!bNum) {
+        bNum = await getNextBatchNumber(product._id, req.user.tenantId);
+      } else {
+        // Prevent duplicate batch numbers for the same product
+        const existingBatch = await ProductBatch.findOne({
+          productId: product._id,
+          tenantId: req.user.tenantId,
+          batchNumber: bNum,
+        });
+        if (existingBatch) {
+          return res.status(400).json({
+            success: false,
+            message: `Batch number "${bNum}" already exists for product ${product.productCode}. Please specify a different batch number or leave blank to auto-generate.`,
+          });
+        }
+      }
+
+      await ProductBatch.create({
+        batchNumber: bNum,
+        productId: product._id,
+        initialQty: addedQty,
+        availableQty: addedQty,
+        costPrice: buyingP != null ? buyingP : (product.buyingPrice || product.price || 0),
+        buyingPrice: buyingP != null ? buyingP : (product.buyingPrice || product.price || 0),
+        sellingPrice: sellingP != null ? sellingP : (product.sellingPrice || product.price || 0),
+        mrp: mrpP != null ? mrpP : (product.mrp || 0),
+        vendorId: item.vendorId || product.vendor?.id || null,
+        vendorName: item.vendorName || product.vendor?.name || null,
+        inwardDate: item.inwardDate ? new Date(item.inwardDate) : new Date(),
+        expiry: item.expiry ? new Date(item.expiry) : null,
+        remarks: item.remarks || "Stock added via inventory",
+        status: "OPEN",
+        tenantId: req.user.tenantId,
+        createdBy: req.user._id,
+      });
     }
 
     await Promise.all(products.map((p) => p.save()));
 
     return res.status(200).json({
       success: true,
-      message: `Updated quantity for ${products.length} product(s)`,
+      message: `Updated quantity and created batches for ${products.length} product(s)`,
       updated: products.map((p) => ({
+        _id: p._id,
         productCode: p.productCode,
+        productName: p.productName,
         qty: p.qty,
+        buyingPrice: p.buyingPrice,
+        sellingPrice: p.sellingPrice,
+        mrp: p.mrp,
+        vendor: p.vendor,
+        expiry: p.expiry,
       })),
     });
   } catch (error) {
@@ -611,6 +703,11 @@ export const getInventoryByProductId = async (req, res) => {
           if (!processedInwardItemKeys.has(itemKey)) {
             processedInwardItemKeys.add(itemKey);
 
+            const bNum = item.vendorRefId || "—";
+            const matchedBatch = batches.find(
+              (b) => b.batchNumber && bNum !== "—" && b.batchNumber.toUpperCase() === bNum.trim().toUpperCase()
+            );
+
             receivingHistory.push({
               _id: inward._id,
               type: "PURCHASE_INWARD",
@@ -624,12 +721,16 @@ export const getInventoryByProductId = async (req, res) => {
               receivedFrom: inward.receivedFrom || inward.vendorName || "—",
               vendorName: inward.vendorName || poDoc?.vendor?.vendorName || product.vendor?.name || "—",
               vendorId: inward.vendorId || poDoc?.vendor?.vendorId || product.vendor?.id || null,
-              batchNumber: item.vendorRefId || "—",
+              batchNumber: bNum,
+              batchId: matchedBatch?._id || null,
               invoiceNumber: item.vendorRefId || inward.remarks || "—",
               orderedQty: item.orderedQty || poItem?.qty || item.receivedQty,
               receivedQty: item.receivedQty || 0,
-              buyingPrice: poItem?.price != null ? poItem.price : (product.price || 0),
-              sellingPrice: poItem?.mrp != null ? poItem.mrp : (product.mrp || 0),
+              availableQty: matchedBatch != null ? matchedBatch.availableQty : item.receivedQty,
+              initialQty: matchedBatch != null ? matchedBatch.initialQty : item.receivedQty,
+              buyingPrice: matchedBatch?.costPrice ?? matchedBatch?.buyingPrice ?? (poItem?.price != null ? poItem.price : (product.buyingPrice || product.price || 0)),
+              sellingPrice: matchedBatch?.sellingPrice ?? (product.sellingPrice || product.price || 0),
+              mrp: matchedBatch?.mrp ?? poItem?.mrp ?? (product.mrp || 0),
               gst: poItem?.gst != null ? poItem.gst : (product.gst || 0),
               condition: item.condition || "GOOD",
               inwardStatus: poItem?.inwardStatus || inward.status || "Confirmed",
@@ -662,12 +763,15 @@ export const getInventoryByProductId = async (req, res) => {
           vendorName: batch.vendorName || product.vendor?.name || "—",
           vendorId: batch.vendorId || product.vendor?.id || null,
           batchNumber: batch.batchNumber,
+          batchId: batch._id,
           invoiceNumber: "—",
           orderedQty: batch.initialQty,
           receivedQty: batch.initialQty,
           availableQty: batch.availableQty,
-          buyingPrice: batch.costPrice != null ? batch.costPrice : (product.price || 0),
-          sellingPrice: product.mrp || 0,
+          initialQty: batch.initialQty,
+          buyingPrice: batch.costPrice != null ? batch.costPrice : (batch.buyingPrice != null ? batch.buyingPrice : (product.buyingPrice || product.price || 0)),
+          sellingPrice: batch.sellingPrice != null ? batch.sellingPrice : (product.sellingPrice || product.price || 0),
+          mrp: batch.mrp != null ? batch.mrp : (product.mrp || 0),
           gst: product.gst || 0,
           condition: "GOOD",
           inwardStatus: "Confirmed",
@@ -713,13 +817,20 @@ export const getInventoryByProductId = async (req, res) => {
       });
     }
 
+    const enrichedProduct = {
+      ...product,
+      buyingPrice: product.buyingPrice != null ? product.buyingPrice : (product.price || 0),
+      sellingPrice: product.sellingPrice != null ? product.sellingPrice : (product.price || 0),
+      mrp: product.mrp || 0,
+    };
+
     res.status(200).json({
       success: true,
       data: {
-        product,
+        product: enrichedProduct,
         batches,
         receivingHistory,
-        inventory: [product],
+        inventory: [enrichedProduct],
       },
     });
   } catch (error) {

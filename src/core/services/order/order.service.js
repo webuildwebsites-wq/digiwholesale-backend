@@ -545,10 +545,17 @@ export async function getProductNamesService({ brand, category, search = "", lim
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const total = await DigiProduct.countDocuments(filter);
 
-  const data = await DigiProduct.find(filter, {
+  const rawData = await DigiProduct.find(filter, {
     _id: 1, productCode: 1, productName: 1, brand: 1, category: 1, coating: 1,
-    price: 1, mrp: 1, gst: 1, qty: 1, createdAt: 1, updatedAt: 1, __v: 1,
+    price: 1, sellingPrice: 1, buyingPrice: 1, mrp: 1, gst: 1, qty: 1, createdAt: 1, updatedAt: 1, __v: 1,
   }).sort({ productName: 1 }).skip(skip).limit(parseInt(limit)).lean();
+
+  const data = rawData.map(item => ({
+    ...item,
+    sellingPrice: item.sellingPrice != null && Number(item.sellingPrice) > 0 ? item.sellingPrice : item.price,
+    buyingPrice: item.buyingPrice != null ? item.buyingPrice : item.price,
+    price: item.sellingPrice != null && Number(item.sellingPrice) > 0 ? item.sellingPrice : item.price,
+  }));
 
   return {
     data,

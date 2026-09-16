@@ -25,15 +25,50 @@ export const getBatchesForProduct = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ID", "Valid productId is required");
         }
 
-        const product = await DigiProduct.findOne({ _id: productId, tenantId: req.user.tenantId }).select("qty productName productCode price").lean();
+        const product = await DigiProduct.findOne({ _id: productId, tenantId: req.user.tenantId })
+            .select("qty productName productCode price buyingPrice sellingPrice mrp")
+            .lean();
 
         const statusFilter = req.query.status || "OPEN"; // default: only open
         const query = { productId, tenantId: req.user.tenantId };
         if (statusFilter !== "ALL") query.status = statusFilter;
 
-        const batches = await ProductBatch.find(query)
+        const rawBatches = await ProductBatch.find(query)
             .sort({ createdAt: -1 })
             .lean();
+
+        const batches = rawBatches.map(b => {
+            const hasSelling = b.sellingPrice != null && Number(b.sellingPrice) > 0;
+            const hasCost = b.costPrice != null && Number(b.costPrice) > 0;
+            const hasBuying = b.buyingPrice != null && Number(b.buyingPrice) > 0;
+
+            const sPrice = hasSelling
+                ? Number(b.sellingPrice)
+                : (hasCost
+                    ? Number(b.costPrice)
+                    : (hasBuying
+                        ? Number(b.buyingPrice)
+                        : Number(product?.sellingPrice != null ? product.sellingPrice : (product?.price || 0))));
+
+            const bPrice = hasBuying
+                ? Number(b.buyingPrice)
+                : (hasCost
+                    ? Number(b.costPrice)
+                    : (hasSelling
+                        ? Number(b.sellingPrice)
+                        : Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0))));
+
+            const cPrice = hasCost ? Number(b.costPrice) : bPrice;
+            const mPrice = (b.mrp != null && Number(b.mrp) > 0) ? Number(b.mrp) : Number(product?.mrp || 0);
+
+            return {
+                ...b,
+                buyingPrice: bPrice,
+                costPrice: cPrice,
+                sellingPrice: sPrice,
+                mrp: mPrice,
+            };
+        });
 
         // Calculate summary stats
         const openBatches = await ProductBatch.find({ productId, tenantId: req.user.tenantId, status: "OPEN" }).lean();
@@ -46,7 +81,10 @@ export const getBatchesForProduct = async (req, res) => {
             totalStock,
             allocatedQty,
             unallocatedQty,
-            productPrice: product?.price || 0
+            productPrice: product?.sellingPrice || product?.price || 0,
+            buyingPrice: product?.buyingPrice || product?.price || 0,
+            sellingPrice: product?.sellingPrice || product?.price || 0,
+            mrp: product?.mrp || 0
         }, "Batches fetched successfully");
     } catch (error) {
         console.error("getBatchesForProduct error:", error);
@@ -57,7 +95,18 @@ export const getBatchesForProduct = async (req, res) => {
 
 export const allocateManualBatch = async (req, res) => {
     try {
-        const { productId, batchNumber: customBatchNumber, qty, costPrice, remarks, vendorId, vendorName } = req.body;
+        const { 
+            productId, 
+            batchNumber: customBatchNumber, 
+            qty, 
+            costPrice, 
+            buyingPrice, 
+            sellingPrice, 
+            mrp, 
+            remarks, 
+            vendorId, 
+            vendorName 
+        } = req.body;
 
         if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
             return sendErrorResponse(res, 400, "INVALID_ID", "Valid productId is required");
@@ -111,12 +160,29 @@ export const allocateManualBatch = async (req, res) => {
             }
         }
 
+        const bPrice = (buyingPrice !== undefined && buyingPrice !== "" && buyingPrice !== null && !isNaN(buyingPrice))
+            ? Number(buyingPrice)
+            : ((costPrice !== undefined && costPrice !== "" && costPrice !== null && !isNaN(costPrice))
+                ? Number(costPrice)
+                : Number(product.buyingPrice != null ? product.buyingPrice : (product.price || 0)));
+
+        const sPrice = (sellingPrice !== undefined && sellingPrice !== "" && sellingPrice !== null && !isNaN(sellingPrice))
+            ? Number(sellingPrice)
+            : Number(product.sellingPrice != null ? product.sellingPrice : (product.price || 0));
+
+        const mPrice = (mrp !== undefined && mrp !== "" && mrp !== null && !isNaN(mrp))
+            ? Number(mrp)
+            : Number(product.mrp || 0);
+
         const batch = await ProductBatch.create({
             batchNumber: finalBatchNumber,
             productId: product._id,
             initialQty: requestedQty,
             availableQty: requestedQty,
-            costPrice: costPrice !== undefined && costPrice !== "" ? Number(costPrice) : (Number(product.price) || 0),
+            costPrice: bPrice,
+            buyingPrice: bPrice,
+            sellingPrice: sPrice,
+            mrp: mPrice,
             vendorId: vendorId && mongoose.Types.ObjectId.isValid(vendorId) ? vendorId : null,
             vendorName: vendorName || null,
             remarks: remarks || "Manual batch allocation from Inventory",
@@ -158,15 +224,49 @@ export const getAllBatches = async (req, res) => {
             filter.batchNumber = { $regex: req.query.search, $options: "i" };
         }
 
-        const [batches, total] = await Promise.all([
+        const [rawBatches, total] = await Promise.all([
             ProductBatch.find(filter)
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .populate("productId", "productName productCode category")
+                .populate("productId", "productName productCode category price buyingPrice sellingPrice mrp")
                 .lean(),
             ProductBatch.countDocuments(filter),
         ]);
+
+        const batches = rawBatches.map(b => {
+            const prod = b.productId || {};
+            const hasSelling = b.sellingPrice != null && Number(b.sellingPrice) > 0;
+            const hasCost = b.costPrice != null && Number(b.costPrice) > 0;
+            const hasBuying = b.buyingPrice != null && Number(b.buyingPrice) > 0;
+
+            const sPrice = hasSelling
+                ? Number(b.sellingPrice)
+                : (hasCost
+                    ? Number(b.costPrice)
+                    : (hasBuying
+                        ? Number(b.buyingPrice)
+                        : Number(prod?.sellingPrice != null ? prod.sellingPrice : (prod?.price || 0))));
+
+            const bPrice = hasBuying
+                ? Number(b.buyingPrice)
+                : (hasCost
+                    ? Number(b.costPrice)
+                    : (hasSelling
+                        ? Number(b.sellingPrice)
+                        : Number(prod?.buyingPrice != null ? prod.buyingPrice : (prod?.price || 0))));
+
+            const cPrice = hasCost ? Number(b.costPrice) : bPrice;
+            const mPrice = (b.mrp != null && Number(b.mrp) > 0) ? Number(b.mrp) : Number(prod?.mrp || 0);
+
+            return {
+                ...b,
+                buyingPrice: bPrice,
+                costPrice: cPrice,
+                sellingPrice: sPrice,
+                mrp: mPrice,
+            };
+        });
 
         return sendSuccessResponse(res, 200, {
             batches,
@@ -200,5 +300,32 @@ export const getBatchById = async (req, res) => {
     } catch (error) {
         console.error("getBatchById error:", error);
         return sendErrorResponse(res, 500, "FETCH_ERROR", error.message);
+    }
+};
+
+export const updateBatch = async (req, res) => {
+    try {
+        const { batchId } = req.params;
+        const { buyingPrice, costPrice, sellingPrice, mrp, remarks } = req.body;
+        if (!mongoose.Types.ObjectId.isValid(batchId)) {
+            return sendErrorResponse(res, 400, "INVALID_ID", "Valid batchId is required");
+        }
+
+        const batch = await ProductBatch.findOne({ _id: batchId, tenantId: req.user.tenantId });
+        if (!batch) {
+            return sendErrorResponse(res, 404, "NOT_FOUND", "Batch not found");
+        }
+
+        if (buyingPrice !== undefined && buyingPrice !== "") batch.buyingPrice = Number(buyingPrice);
+        if (costPrice !== undefined && costPrice !== "") batch.costPrice = Number(costPrice);
+        if (sellingPrice !== undefined && sellingPrice !== "") batch.sellingPrice = Number(sellingPrice);
+        if (mrp !== undefined && mrp !== "") batch.mrp = Number(mrp);
+        if (remarks !== undefined) batch.remarks = remarks;
+
+        await batch.save();
+        return sendSuccessResponse(res, 200, { batch }, "Batch updated successfully");
+    } catch (error) {
+        console.error("updateBatch error:", error);
+        return sendErrorResponse(res, 500, "UPDATE_ERROR", error.message);
     }
 };

@@ -39,12 +39,28 @@ const productBatchSchema = new mongoose.Schema(
             default: 0,
             min:     0,
         },
+        buyingPrice: {
+            type:    Number,
+            default: 0,
+            min:     0,
+        },
+        sellingPrice: {
+            type:    Number,
+            default: 0,
+            min:     0,
+        },
+        mrp: {
+            type:    Number,
+            default: 0,
+            min:     0,
+        },
         vendorId: {
             type:    mongoose.Schema.Types.ObjectId,
             ref:     "Vendor",
             default: null,
         },
         vendorName:  { type: String, default: null },
+        expiry:      { type: Date, default: null },
         inwardDate:  { type: Date, default: Date.now },
         status:      { type: String, enum: ["OPEN", "EXHAUSTED"], default: "OPEN" },
         remarks:     { type: String, default: null },
