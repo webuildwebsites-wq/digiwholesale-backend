@@ -170,6 +170,7 @@ export const createProduct = async (req, res) => {
             vendorId: vId,
             vendorName: vName,
             remarks: pInput.batchRemarks?.trim() || "Initial batch allocation on product creation",
+            invoices: Array.isArray(pInput.invoices) ? pInput.invoices : [],
             status: "OPEN",
             tenantId: req.user.tenantId,
             createdBy: req.user._id,
@@ -589,6 +590,7 @@ export const addInventory = async (req, res) => {
         inwardDate: item.inwardDate ? new Date(item.inwardDate) : new Date(),
         expiry: item.expiry ? new Date(item.expiry) : null,
         remarks: item.remarks || "Stock added via inventory",
+        invoices: Array.isArray(item.invoices) ? item.invoices : [],
         status: "OPEN",
         tenantId: req.user.tenantId,
         createdBy: req.user._id,
@@ -736,6 +738,7 @@ export const getInventoryByProductId = async (req, res) => {
               inwardStatus: poItem?.inwardStatus || inward.status || "Confirmed",
               qcStatus: poItem?.qcStatus || "PENDING",
               remarks: item.remarks || inward.remarks || "",
+              invoices: inward.invoices || matchedBatch?.invoices || [],
             });
           }
         }
@@ -778,6 +781,7 @@ export const getInventoryByProductId = async (req, res) => {
           qcStatus: "PASSED",
           batchStatus: batch.status,
           remarks: batch.remarks || "Batch allocation",
+          invoices: batch.invoices || [],
         });
       }
     }
@@ -814,6 +818,7 @@ export const getInventoryByProductId = async (req, res) => {
         inwardStatus: "Confirmed",
         qcStatus: "PASSED",
         remarks: "Opening inventory stock",
+        invoices: product.invoices || [],
       });
     }
 

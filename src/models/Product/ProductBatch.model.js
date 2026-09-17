@@ -64,6 +64,16 @@ const productBatchSchema = new mongoose.Schema(
         inwardDate:  { type: Date, default: Date.now },
         status:      { type: String, enum: ["OPEN", "EXHAUSTED"], default: "OPEN" },
         remarks:     { type: String, default: null },
+        purchaseInwardId: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseInward", default: null },
+        invoices: [
+            {
+                url:          { type: String, required: true },
+                originalName: { type: String, default: "" },
+                mimetype:     { type: String, default: "" },
+                size:         { type: Number, default: 0 },
+                uploadedAt:   { type: Date,   default: Date.now },
+            }
+        ],
         createdBy:   { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
         tenantId:    { type: String, trim: true, uppercase: true, default: null, index: true },
     },

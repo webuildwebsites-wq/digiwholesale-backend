@@ -105,7 +105,8 @@ export const allocateManualBatch = async (req, res) => {
             mrp, 
             remarks, 
             vendorId, 
-            vendorName 
+            vendorName,
+            invoices
         } = req.body;
 
         if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
@@ -186,6 +187,7 @@ export const allocateManualBatch = async (req, res) => {
             vendorId: vendorId && mongoose.Types.ObjectId.isValid(vendorId) ? vendorId : null,
             vendorName: vendorName || null,
             remarks: remarks || "Manual batch allocation from Inventory",
+            invoices: Array.isArray(invoices) ? invoices : [],
             status: "OPEN",
             tenantId: req.user.tenantId,
             createdBy: req.user._id,

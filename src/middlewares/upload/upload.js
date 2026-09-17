@@ -40,6 +40,21 @@ const uploadImage = multer({
   },
 });
 
+export const uploadMultipleFiles = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: FILE_SIZE_LIMIT,
+    files: 10,
+  },
+  fileFilter: (req, file, cb) => {
+    if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new multer.MulterError("LIMIT_UNEXPECTED_FILE", `Unsupported file type: ${file.mimetype}`));
+    }
+  },
+});
+
 export const handleMulterError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === "LIMIT_FILE_SIZE") {

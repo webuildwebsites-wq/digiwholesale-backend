@@ -264,16 +264,18 @@ export const createPurchaseQC = async (req, res) => {
                     await ProductBatch.create({
                         batchNumber,
                         productId,
-                        purchaseOrderId: purchaseOrderId,
-                        purchaseQCId:    purchaseQC._id,
-                        initialQty:      qty,
-                        availableQty:    qty,
-                        vendorId:        purchaseOrder.vendor.vendorId,
-                        vendorName:      purchaseOrder.vendor.vendorName,
-                        inwardDate:      new Date(),
-                        status:          "OPEN",
-                        createdBy:       req.user._id,
-                        tenantId:        req.user.tenantId,
+                        purchaseOrderId:  purchaseOrderId,
+                        purchaseQCId:     purchaseQC._id,
+                        purchaseInwardId: inward._id,
+                        initialQty:       qty,
+                        availableQty:     qty,
+                        vendorId:         purchaseOrder.vendor.vendorId,
+                        vendorName:       purchaseOrder.vendor.vendorName,
+                        inwardDate:       new Date(),
+                        status:           "OPEN",
+                        invoices:         Array.isArray(inward.invoices) ? inward.invoices : [],
+                        createdBy:        req.user._id,
+                        tenantId:         req.user.tenantId,
                     });
                 }
 

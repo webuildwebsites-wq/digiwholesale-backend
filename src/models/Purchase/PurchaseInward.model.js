@@ -30,6 +30,15 @@ const purchaseInwardSchema = new mongoose.Schema(
         items:    [inwardItemSchema],
         remarks:  String,
         status:   { type: String, enum: ["Draft", "Confirmed"], default: "Confirmed" },
+        invoices: [
+            {
+                url:          { type: String, required: true },
+                originalName: { type: String, default: "" },
+                mimetype:     { type: String, default: "" },
+                size:         { type: Number, default: 0 },
+                uploadedAt:   { type: Date,   default: Date.now },
+            }
+        ],
         createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
         tenantId:  { type: String, trim: true, uppercase: true, default: null, index: true },
     },
