@@ -4,11 +4,26 @@ import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
 import PurchaseReturn from "../../../models/Purchase/PurchaseReturn.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import DigiProduct from "../../../models/Product/Product.model.js";
+import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import Vendor from "../../../models/Vendor.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../config/Email/emailService.js";
 import { sendWhatsAppOTP } from "../../config/Whatsapp/sendWhatsappOtp.js";
 import { generateQCRejectionExcel } from "../../../Utils/excel/generateQCRejectionExcel.js";
+
+
+const getNextBatchNumber = async (productId, tenantId) => {
+    const lastBatch = await ProductBatch.findOne({ productId, tenantId })
+        .sort({ createdAt: -1 })
+        .select("batchNumber")
+        .lean();
+
+    if (!lastBatch) return "BTCN1";
+
+    const match = lastBatch.batchNumber.match(/BTCN(\d+)$/i);
+    const num = match ? parseInt(match[1], 10) : 0;
+    return `BTCN${num + 1}`;
+};
 
 const buildQCRejectionEmailHTML = ({ vendorName, purchaseOrderId, qcDate, failedItems, totalFailed, totalPassed }) => {
     const fmt    = (v) => (v !== undefined && v !== null && v !== "" ? v : "-");
@@ -243,6 +258,25 @@ export const createPurchaseQC = async (req, res) => {
             const rxItems    = passedItems.filter(p => !p.productId);
 
             if (stockItems.length > 0) {
+                for (const { productId, qty } of stockItems) {
+                    const batchNumber = await getNextBatchNumber(productId, req.user.tenantId);
+
+                    await ProductBatch.create({
+                        batchNumber,
+                        productId,
+                        purchaseOrderId: purchaseOrderId,
+                        purchaseQCId:    purchaseQC._id,
+                        initialQty:      qty,
+                        availableQty:    qty,
+                        vendorId:        purchaseOrder.vendor.vendorId,
+                        vendorName:      purchaseOrder.vendor.vendorName,
+                        inwardDate:      new Date(),
+                        status:          "OPEN",
+                        createdBy:       req.user._id,
+                        tenantId:        req.user.tenantId,
+                    });
+                }
+
                 const bulkOps = stockItems.map(({ productId, qty }) => ({
                     updateOne: {
                         filter: { _id: productId, tenantId: req.user.tenantId },

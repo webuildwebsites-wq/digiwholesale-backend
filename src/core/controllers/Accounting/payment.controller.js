@@ -13,7 +13,15 @@ import {
 import {
   generatePaymentReceiptPDF,
   sendPaymentReceiptEmail,
+  sendPaymentReceiptWhatsApp,
+  sendPaymentReceiptNotifications,
 } from "../../services/paymentReceiptService.js";
+import {
+  sendWhatsAppMessage,
+  customerAdvanceAdjustedWhatsApp,
+  paymentDueReminderWhatsApp,
+} from "../../../Utils/whatsapp/whatsappService.js";
+import { sendEmail } from "../../config/Email/emailService.js";
 
 const runInTransaction = async (workFn) => {
   let session = null;
@@ -76,6 +84,15 @@ export const executeCustomerPayment = async (req, res) => {
         404,
         "CUSTOMER_NOT_FOUND",
         "Customer not found.",
+      );
+    }
+
+    if (!customer.status?.isActive || customer.approvalWorkflow?.salesHeadApprovalStatus !== "APPROVED") {
+      return sendErrorResponse(
+        res,
+        400,
+        "CUSTOMER_NOT_APPROVED",
+        "Customer registration approval is pending. Payments can only be received for approved customers.",
       );
     }
 
@@ -270,9 +287,9 @@ export const executeCustomerPayment = async (req, res) => {
       return payment;
     });
 
-    // Automatically send Payment Receipt confirmation email to customer
-    sendPaymentReceiptEmail({ paymentId: result._id, tenantId }).catch((err) =>
-      console.error("[PaymentReceipt] Background email error:", err.message),
+    // Automatically send Payment Receipt confirmation Email & WhatsApp to customer
+    sendPaymentReceiptNotifications({ paymentId: result._id, tenantId }).catch((err) =>
+      console.error("[PaymentReceipt] Background notification error:", err.message),
     );
 
     return sendSuccessResponse(
@@ -585,16 +602,16 @@ export const executeVendorPayment = async (req, res) => {
       return payment;
     });
 
-    // Asynchronously dispatch Payment Advice / Payout Receipt Email to Vendor
-    sendPaymentReceiptEmail({ paymentId: result._id, tenantId }).catch((err) =>
-      console.error("[PaymentReceipt] Vendor background email error:", err.message),
+    // Asynchronously dispatch Payment Advice / Payout Receipt Email & WhatsApp to Vendor
+    sendPaymentReceiptNotifications({ paymentId: result._id, tenantId }).catch((err) =>
+      console.error("[PaymentReceipt] Vendor background notification error:", err.message),
     );
 
     return sendSuccessResponse(
       res,
       201,
       result,
-      "Vendor payout processed successfully. Payment advice receipt emailed to vendor.",
+      "Vendor payout processed successfully. Payment advice receipt sent via Email & WhatsApp.",
     );
   } catch (error) {
     console.error("executeVendorPayment error:", error);
@@ -829,6 +846,24 @@ export const adjustDueFromAdvance = async (req, res) => {
       },
     ]);
 
+    // Dispatch WhatsApp notification to customer about advance balance adjustment
+    const customerMobile = customer.mobileNo1 || customer.mobile || customer.mobileNo2;
+    if (customerMobile) {
+      const waMsg = customerAdvanceAdjustedWhatsApp({
+        customerName: customer.ownerName,
+        shopName: customer.shopName,
+        refNumber,
+        adjustedAmount: adjustAmount,
+        remainingDue: newCreditUsed,
+        remainingAdvance: newAdvance,
+        companyName: process.env.COMPANY_NAME || "DigiOptics Wholesale",
+        companyPhone: process.env.COMPANY_PHONE || "+91 9650560526",
+      });
+      sendWhatsAppMessage({ to: customerMobile, message: waMsg }).catch((err) =>
+        console.error("[AdvanceAdjustment] WhatsApp error:", err.message),
+      );
+    }
+
     return sendSuccessResponse(
       res,
       200,
@@ -878,5 +913,212 @@ export const getPaymentReceipt = async (req, res) => {
       "RECEIPT_GENERATION_FAILED",
       error.message,
     );
+  }
+};
+
+/**
+ * Sends a Payment Due Reminder to Customer or Vendor via WhatsApp and Email
+ */
+export const sendPaymentDueReminder = async (req, res) => {
+  try {
+    const { partyId, customerId, vendorId, entityType = "Customer" } = req.body;
+    const targetPartyId = partyId || customerId || vendorId;
+    const tenantId = req.user?.tenantId || null;
+
+    if (!targetPartyId || !mongoose.Types.ObjectId.isValid(targetPartyId)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "INVALID_PARTY_ID",
+        "Valid customer or vendor ID is required.",
+      );
+    }
+
+    const isCustomer = entityType.toLowerCase() !== "vendor";
+
+    if (isCustomer) {
+      const customer = await Customer.findById(targetPartyId);
+      if (!customer) {
+        return sendErrorResponse(res, 404, "CUSTOMER_NOT_FOUND", "Customer not found.");
+      }
+
+      const ledger = await CustomerLedger.findOne({ customerId: targetPartyId });
+      const dueAmount = Number(
+        ledger?.creditUsed !== undefined
+          ? ledger.creditUsed
+          : customer.creditUsed ||
+            (ledger?.currentBalance > 0 ? ledger.currentBalance : 0) ||
+            0,
+      );
+
+      const overdueAmount = Number(ledger?.overdueAmount || 0);
+      const creditDays = Number(ledger?.creditDays || customer.creditDays || 30);
+      const shopOrCustomerName = customer.shopName || customer.ownerName || "Valued Customer";
+      const recipientMobile = customer.mobileNo1 || customer.mobile || customer.mobileNo2;
+      const recipientEmail = customer.businessEmail || customer.email;
+
+      if (dueAmount <= 0) {
+        return sendErrorResponse(
+          res,
+          400,
+          "NO_DUE_BALANCE",
+          `Customer ${shopOrCustomerName} has no outstanding balance due (Balance: ₹0.00).`,
+        );
+      }
+
+      const companyName = process.env.COMPANY_NAME || "DigiOptics Wholesale";
+      const companyPhone = process.env.COMPANY_PHONE || "+91 9650560526";
+
+      const waReminderMessage = paymentDueReminderWhatsApp({
+        partyName: shopOrCustomerName,
+        isVendor: false,
+        totalDue: dueAmount,
+        overdueAmount,
+        creditDays,
+        companyName,
+        companyPhone,
+      });
+
+      let whatsappSent = false;
+      let emailSent = false;
+      let waError = null;
+      let mailError = null;
+
+      if (recipientMobile) {
+        const waRes = await sendWhatsAppMessage({
+          to: recipientMobile,
+          message: waReminderMessage,
+        });
+        whatsappSent = Boolean(waRes?.success);
+        if (!waRes?.success) waError = waRes?.error || "Failed to send WhatsApp";
+      }
+
+      if (recipientEmail) {
+        const mailHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+            <div style="background: #1f618d; padding: 20px; text-align: center; color: #fff;">
+              <h2 style="margin:0;">${companyName}</h2>
+              <p style="margin:4px 0 0; font-size: 13px;">Payment Due & Statement Reminder</p>
+            </div>
+            <div style="padding: 24px; color: #334155;">
+              <p>Dear <strong>${shopOrCustomerName}</strong>,</p>
+              <p>This is a gentle reminder regarding your outstanding balance with <strong>${companyName}</strong>.</p>
+              <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 16px; margin: 18px 0; text-align: center;">
+                <div style="font-size: 12px; color: #991b1b; font-weight: bold;">TOTAL OUTSTANDING DUE</div>
+                <div style="font-size: 26px; font-weight: 900; color: #dc2626; margin: 6px 0;">₹${dueAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+                ${overdueAmount > 0 ? `<div style="font-size: 12px; color: #b91c1c;">Overdue: ₹${overdueAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>` : ""}
+              </div>
+              <p style="font-size: 13px; color: #64748b;">Credit Terms: <strong>${creditDays} Days</strong></p>
+              <p style="font-size: 13px; line-height: 1.5;">Kindly arrange for the clearance of this balance at your earliest convenience. If you have already made the payment, please share the transaction receipt with us.</p>
+              <p style="font-size: 13px; color: #64748b; margin-top: 20px;">For payment queries or statements, contact us at ${companyPhone} or email <a href="mailto:${process.env.COMPANY_EMAIL || "support@digioptics.com"}">${process.env.COMPANY_EMAIL || "support@digioptics.com"}</a>.</p>
+            </div>
+          </div>
+        `;
+        const mailRes = await sendEmail({
+          to: recipientEmail,
+          subject: `Payment Due Reminder: ₹${dueAmount.toLocaleString("en-IN")} Outstanding - ${companyName}`,
+          html: mailHtml,
+        });
+        emailSent = Boolean(mailRes?.success);
+        if (!mailRes?.success) mailError = mailRes?.error;
+      }
+
+      return sendSuccessResponse(
+        res,
+        200,
+        {
+          partyId: targetPartyId,
+          partyName: shopOrCustomerName,
+          dueAmount,
+          recipientMobile: recipientMobile || null,
+          recipientEmail: recipientEmail || null,
+          whatsappSent,
+          emailSent,
+          waError,
+          mailError,
+        },
+        `Payment due reminder processed. WhatsApp: ${whatsappSent ? "Sent" : "Skipped/Failed"}, Email: ${emailSent ? "Sent" : "Skipped/Failed"}.`,
+      );
+    } else {
+      // Vendor payment / statement notification
+      const vendor = await Vendor.findById(targetPartyId);
+      if (!vendor) {
+        return sendErrorResponse(res, 404, "VENDOR_NOT_FOUND", "Vendor not found.");
+      }
+      const vLedger = await VendorLedger.findOne({ vendorId: targetPartyId });
+      const currentOutstanding = Number(vLedger?.currentOutstanding || 0);
+
+      const companyName = process.env.COMPANY_NAME || "DigiOptics Wholesale";
+      const companyPhone = process.env.COMPANY_PHONE || "+91 9650560526";
+
+      const waReminderMessage = paymentDueReminderWhatsApp({
+        partyName: vendor.firm || vendor.name || "Valued Supplier",
+        isVendor: true,
+        totalDue: currentOutstanding,
+        overdueAmount: Number(vLedger?.overdueAmount || 0),
+        creditDays: Number(vLedger?.paymentTerms || vendor.paymentTerms || 30),
+        companyName,
+        companyPhone,
+      });
+
+      let whatsappSent = false;
+      if (vendor.mobile) {
+        const waRes = await sendWhatsAppMessage({
+          to: vendor.mobile,
+          message: waReminderMessage,
+        });
+        whatsappSent = Boolean(waRes?.success);
+      }
+
+      return sendSuccessResponse(
+        res,
+        200,
+        {
+          partyId: targetPartyId,
+          partyName: vendor.firm || vendor.name,
+          currentOutstanding,
+          recipientMobile: vendor.mobile || null,
+          whatsappSent,
+        },
+        `Vendor notification processed. WhatsApp: ${whatsappSent ? "Sent" : "Skipped/Failed"}.`,
+      );
+    }
+  } catch (error) {
+    console.error("sendPaymentDueReminder error:", error);
+    return sendErrorResponse(res, 500, "DUE_REMINDER_FAILED", error.message);
+  }
+};
+
+/**
+ * Resends a Payment Receipt / Payout Advice via WhatsApp & Email
+ */
+export const resendPaymentReceiptNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { channel = "both" } = req.body || {}; // 'whatsapp', 'email', 'both'
+    const tenantId = req.user?.tenantId || null;
+
+    if (!id || typeof id !== "string" || !id.trim()) {
+      return sendErrorResponse(res, 400, "INVALID_ID", "Payment ID is required.");
+    }
+
+    let result = null;
+    if (channel === "whatsapp") {
+      result = await sendPaymentReceiptWhatsApp({ paymentId: id.trim(), tenantId });
+    } else if (channel === "email") {
+      result = await sendPaymentReceiptEmail({ paymentId: id.trim(), tenantId });
+    } else {
+      result = await sendPaymentReceiptNotifications({ paymentId: id.trim(), tenantId });
+    }
+
+    return sendSuccessResponse(
+      res,
+      200,
+      result,
+      "Payment receipt notification dispatched successfully.",
+    );
+  } catch (error) {
+    console.error("resendPaymentReceiptNotification error:", error);
+    return sendErrorResponse(res, 500, "RESEND_FAILED", error.message);
   }
 };

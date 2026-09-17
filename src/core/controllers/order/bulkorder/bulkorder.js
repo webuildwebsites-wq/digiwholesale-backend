@@ -4,6 +4,7 @@ import CustomerLedger from "../../../../models/Accounting/CustomerLedger.model.j
 import LedgerTransaction from "../../../../models/Accounting/LedgerTransaction.model.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
+import ProductBatch from "../../../../models/Product/ProductBatch.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
 import VendorPurchase from "../../../../models/Purchase/VendorPurchase.model.js";
 import Employee from "../../../../models/Auth/Employee.js";
@@ -11,7 +12,7 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/respon
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
 import { handleOrderBillingNotification } from "../../../services/billing/billingNotification.service.js";
-import { sendWhatsAppMessage } from "../../../../Utils/whatsapp/whatsappService.js";
+import { sendWhatsAppMessage, customerOrderCreditDueWhatsApp } from "../../../../Utils/whatsapp/whatsappService.js";
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
 import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
 import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
@@ -691,6 +692,29 @@ export const applyOrderToCustomerCreditAndLedger = async ({ bulkOrder, customerI
         }]);
 
         console.log(`[Order Credit Sync Complete] Order #${orderRef}: GrandTotal=₹${grandTotal}, AdvancePaid=₹${advancePaid}, AbsorbedAdv=₹${absorbedFromAdvance}, AddedToCredit=₹${newCreditUsedToAdd}, NewCreditUsed=₹${finalCreditUsed}, AdvanceBalance=₹${remainingAdvance}`);
+
+        // If order added to customer's outstanding credit due, send WhatsApp notification
+        const customerMobile = freshCustomer.mobileNo1 || freshCustomer.mobile;
+        if (customerMobile && newCreditUsedToAdd > 0) {
+            const creditLimit = Number(freshCustomer.creditLimit || 0);
+            const availableCredit = Math.max(0, creditLimit - finalCreditUsed);
+            const waMsg = customerOrderCreditDueWhatsApp({
+                customerName: freshCustomer.ownerName,
+                shopName: freshCustomer.shopName,
+                orderNumber: orderRef,
+                orderTotal: grandTotal,
+                advancePaid,
+                addedToDue: newCreditUsedToAdd,
+                totalOutstandingDue: finalCreditUsed,
+                creditLimit,
+                availableCredit,
+                companyName: process.env.COMPANY_NAME || "DigiOptics Wholesale",
+                companyPhone: process.env.COMPANY_PHONE || "+91 9650560526",
+            });
+            sendWhatsAppMessage({ to: customerMobile, message: waMsg }).catch(err =>
+                console.error("[OrderCreditSync] Customer WhatsApp credit notice error:", err.message)
+            );
+        }
     } catch (err) {
         console.error("[Order Credit Sync Error]:", err.message);
     }
@@ -858,7 +882,60 @@ export const createBulkOrder = async (req, res) => {
 
                 item.itemName = item.itemName || product?.productName;
                 item.category = rawCategory;
-                item.price    = item.price  ?? product?.price ?? 0;
+
+                let batchDoc = null;
+                if (item.batchId && mongoose.Types.ObjectId.isValid(item.batchId)) {
+                    batchDoc = await ProductBatch.findOne({ _id: item.batchId, tenantId: req.user.tenantId });
+                } else if (item.batchNumber && item.productId) {
+                    batchDoc = await ProductBatch.findOne({
+                        productId: item.productId,
+                        batchNumber: item.batchNumber.trim().toUpperCase(),
+                        tenantId: req.user.tenantId,
+                    });
+                }
+
+                if (batchDoc) {
+                    item.batchId = batchDoc._id;
+                    item.batchNumber = batchDoc.batchNumber;
+
+                    const hasBatchSelling = batchDoc.sellingPrice != null && Number(batchDoc.sellingPrice) > 0;
+                    const hasBatchCost = batchDoc.costPrice != null && Number(batchDoc.costPrice) > 0;
+                    const hasBatchBuying = batchDoc.buyingPrice != null && Number(batchDoc.buyingPrice) > 0;
+
+                    const batchSellingPrice = hasBatchSelling
+                        ? Number(batchDoc.sellingPrice)
+                        : (hasBatchCost
+                            ? Number(batchDoc.costPrice)
+                            : (hasBatchBuying
+                                ? Number(batchDoc.buyingPrice)
+                                : Number(product?.sellingPrice != null ? product.sellingPrice : (product?.price || 0))));
+
+                    const batchBuyingPrice = hasBatchBuying
+                        ? Number(batchDoc.buyingPrice)
+                        : (hasBatchCost
+                            ? Number(batchDoc.costPrice)
+                            : (hasBatchSelling
+                                ? Number(batchDoc.sellingPrice)
+                                : Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0))));
+
+                    if (!item.price || item.price === product?.price || item.price === product?.sellingPrice) {
+                        item.price = batchSellingPrice;
+                    }
+                    if (!item.sellingPrice || item.sellingPrice === product?.price || item.sellingPrice === product?.sellingPrice) {
+                        item.sellingPrice = item.price || batchSellingPrice;
+                    }
+                    if (!item.buyingPrice || item.buyingPrice === product?.price || item.buyingPrice === product?.buyingPrice) {
+                        item.buyingPrice = batchBuyingPrice;
+                    }
+                    if (!item.mrp && batchDoc.mrp) {
+                        item.mrp = Number(batchDoc.mrp);
+                    }
+                } else {
+                    item.price = item.price ?? product?.sellingPrice ?? product?.price ?? 0;
+                    item.sellingPrice = item.sellingPrice ?? item.price;
+                    item.buyingPrice = item.buyingPrice ?? product?.buyingPrice ?? product?.price ?? 0;
+                }
+
                 item.mrp      = item.mrp    ?? product?.mrp   ?? 0;
                 item.gst      = item.gst    ?? product?.gst   ?? 0;
                 item.hsnSac   = item.hsnSac || product?.hsnSac;
@@ -976,9 +1053,63 @@ export const createBulkOrder = async (req, res) => {
                                 update: { $inc: { qty: -item.qty } },
                             },
                         });
+
+                        const deductQty = Number(item.qty || 0);
+                        if (deductQty > 0) {
+                            let batchDoc = null;
+
+                            if (item.batchId && mongoose.Types.ObjectId.isValid(item.batchId)) {
+                                batchDoc = await ProductBatch.findOne({
+                                    _id: item.batchId,
+                                    tenantId: req.user.tenantId,
+                                });
+                            }
+
+                            if (!batchDoc && item.batchNumber) {
+                                batchDoc = await ProductBatch.findOne({
+                                    productId: item.productId,
+                                    batchNumber: item.batchNumber.trim().toUpperCase(),
+                                    tenantId: req.user.tenantId,
+                                });
+                            }
+
+                            if (batchDoc) {
+                                const deduct = Math.min(batchDoc.availableQty, deductQty);
+                                batchDoc.availableQty = Math.max(0, batchDoc.availableQty - deduct);
+                                batchDoc.status = batchDoc.availableQty <= 0 ? "EXHAUSTED" : "OPEN";
+                                await batchDoc.save();
+
+                                item.batchId     = batchDoc._id;
+                                item.batchNumber = batchDoc.batchNumber;
+                            } else {
+                                let remaining = deductQty;
+                                const batches = await ProductBatch.find({
+                                    productId: item.productId,
+                                    tenantId:  req.user.tenantId,
+                                    status:    "OPEN",
+                                    availableQty: { $gt: 0 },
+                                }).sort({ createdAt: 1 });
+
+                                for (const batch of batches) {
+                                    if (remaining <= 0) break;
+                                    const deduct = Math.min(batch.availableQty, remaining);
+                                    batch.availableQty = Math.max(0, batch.availableQty - deduct);
+                                    batch.status = batch.availableQty <= 0 ? "EXHAUSTED" : "OPEN";
+                                    await batch.save();
+                                    remaining -= deduct;
+                                }
+
+                                if (batches.length > 0) {
+                                    item.batchId     = batches[0]._id;
+                                    item.batchNumber = batches[0].batchNumber;
+                                }
+                            }
+                        }
                     }
                 }
             }
+            bulkOrder.markModified("orders");
+            await bulkOrder.save();
             if (stockDeductions.length > 0) {
                 await DigiProduct.bulkWrite(stockDeductions);
             }

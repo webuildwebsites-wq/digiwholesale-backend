@@ -23,11 +23,15 @@ const purchaseInwardSchema = new mongoose.Schema(
         vendorId:        { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", required: true },
         vendorName:      String,
         inwardDate:      { type: Date, default: Date.now },
-        items:           [inwardItemSchema],
-        remarks:         String,
-        status:          { type: String, enum: ["Draft", "Confirmed"], default: "Confirmed" },
-        createdBy:       { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
-        tenantId:        { type: String, trim: true, uppercase: true, default: null, index: true },
+
+        receivedBy:   { type: String, trim: true, default: null }, 
+        receivedOn:   { type: Date,   default: null },             
+        receivedFrom: { type: String, trim: true, default: null },  
+        items:    [inwardItemSchema],
+        remarks:  String,
+        status:   { type: String, enum: ["Draft", "Confirmed"], default: "Confirmed" },
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+        tenantId:  { type: String, trim: true, uppercase: true, default: null, index: true },
     },
     { timestamps: true }
 );

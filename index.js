@@ -1,6 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '.env') });
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import hpp from 'hpp';
@@ -39,8 +45,7 @@ import paymentRouter from './src/routes/Accounting/payment.routes.js';
 import ledgerRouter from './src/routes/Accounting/ledger.routes.js';
 import accountRouter from './src/routes/Accounting/account.routes.js';
 import agingRouter from './src/routes/Accounting/aging.routes.js';
-
-dotenv.config();
+import batchRouter from './src/routes/Product/batch.routes.js';
 
 if (!process.env.PASSWORD_SECRET) {
   console.error('FATAL: PASSWORD_SECRET environment variable is not set. Server cannot start.');
@@ -183,6 +188,7 @@ try {
   app.use("/api/v1/ledgers", ledgerRouter);
   app.use("/api/v1/accounts", accountRouter);
   app.use("/api/v1/reports/aging", agingRouter);
+  app.use("/api/v1/batches", batchRouter);
 
   app.use("/api/payments", paymentRouter);
   app.use("/api/ledgers", ledgerRouter);

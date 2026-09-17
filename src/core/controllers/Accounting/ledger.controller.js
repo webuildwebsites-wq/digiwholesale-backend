@@ -53,6 +53,15 @@ export const getCustomerLedgerStatement = async (req, res) => {
       );
     }
 
+    if (!customer.status?.isActive || customer.approvalWorkflow?.salesHeadApprovalStatus !== "APPROVED") {
+      return sendErrorResponse(
+        res,
+        400,
+        "CUSTOMER_NOT_APPROVED",
+        "Customer registration approval is pending. Khata statement is accessible only after Sales Head approval.",
+      );
+    }
+
     const inheritedCreditLimit = Number(customer.creditLimit || 0);
     const inheritedCreditDays = parseCreditDays(customer.creditDays);
     const inheritedCreditUsed = Number(customer.creditUsed || 0);
@@ -420,7 +429,10 @@ export const getCustomerLedgersList = async (req, res) => {
     const { search, status, branchId, page = 1, limit = 50 } = req.query;
     const tenantId = req.user?.tenantId || null;
 
-    const customerQuery = {};
+    const customerQuery = {
+      "status.isActive": true,
+      "approvalWorkflow.salesHeadApprovalStatus": "APPROVED",
+    };
     if (tenantId) {
       customerQuery.tenantId = tenantId;
     }
@@ -677,6 +689,25 @@ export const upsertCustomerLedger = async (req, res) => {
         400,
         "INVALID_CUSTOMER_ID",
         "Valid customerId is required.",
+      );
+    }
+
+    const customer = await Customer.findById(customerId).lean();
+    if (!customer) {
+      return sendErrorResponse(
+        res,
+        404,
+        "CUSTOMER_NOT_FOUND",
+        "Customer not found.",
+      );
+    }
+
+    if (!customer.status?.isActive || customer.approvalWorkflow?.salesHeadApprovalStatus !== "APPROVED") {
+      return sendErrorResponse(
+        res,
+        400,
+        "CUSTOMER_NOT_APPROVED",
+        "Customer registration approval is pending. Ledger settings can only be configured for approved customers.",
       );
     }
 

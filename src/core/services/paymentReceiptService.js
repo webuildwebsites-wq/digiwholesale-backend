@@ -12,6 +12,12 @@ import {
   generateVendorPaymentEmailHTML,
 } from "../../Utils/templates/paymentReceiptTemplate.js";
 import { sendEmail } from "../config/Email/emailService.js";
+import {
+  sendWhatsAppMessage,
+  sendWhatsAppMedia,
+  customerPaymentReceivedWhatsApp,
+  vendorPaymentDisbursedWhatsApp,
+} from "../../Utils/whatsapp/whatsappService.js";
 
 /**
  * Generates the Payment Receipt / Payout Advice PDF Buffer for a given payment ID or reference number
@@ -277,13 +283,17 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
 /**
  * Sends a confirmation email to the customer or vendor with the Payment Receipt / Voucher PDF attached
  */
-export const sendPaymentReceiptEmail = async ({ paymentId, tenantId }) => {
+export const sendPaymentReceiptEmail = async ({
+  paymentId,
+  tenantId,
+  cachedPDFData = null,
+}) => {
   try {
     console.log(
       `[PaymentReceipt] Preparing receipt & email for payment: ${paymentId}`,
     );
     const { buffer, fileName, payment, customer, vendor, receiptData } =
-      await generatePaymentReceiptPDF(paymentId, tenantId);
+      cachedPDFData || (await generatePaymentReceiptPDF(paymentId, tenantId));
 
     // VENDOR PAYOUT EMAIL DISBURSEMENT
     if (receiptData.isVendorPayout) {
@@ -365,6 +375,183 @@ export const sendPaymentReceiptEmail = async ({ paymentId, tenantId }) => {
   } catch (err) {
     console.error(
       "[PaymentReceipt] Failed to send receipt email:",
+      err.message,
+    );
+    return { success: false, error: err.message };
+  }
+};
+
+/**
+ * Sends a confirmation WhatsApp message (and attached PDF receipt/voucher) to the customer or vendor
+ */
+export const sendPaymentReceiptWhatsApp = async ({
+  paymentId,
+  tenantId,
+  cachedPDFData = null,
+}) => {
+  try {
+    console.log(
+      `[PaymentReceipt] Preparing WhatsApp notification for payment: ${paymentId}`,
+    );
+    const { buffer, fileName, payment, customer, vendor, receiptData } =
+      cachedPDFData || (await generatePaymentReceiptPDF(paymentId, tenantId));
+
+    // 1. VENDOR PAYOUT WHATSAPP NOTIFICATION
+    if (receiptData.isVendorPayout) {
+      const recipientMobile = vendor?.mobile;
+      if (!recipientMobile) {
+        console.warn(
+          `[PaymentReceipt] Vendor ${vendor?.firm || vendor?.name || vendor?._id} does not have a mobile number configured. Skipping WhatsApp.`,
+        );
+        return { success: false, reason: "NO_MOBILE" };
+      }
+
+      let refInfo = "";
+      if (receiptData.paymentDetails?.utrNumber) {
+        refInfo = `UTR: ${receiptData.paymentDetails.utrNumber}`;
+      } else if (receiptData.paymentDetails?.chequeNumber) {
+        refInfo = `Cheque: ${receiptData.paymentDetails.chequeNumber}${
+          receiptData.paymentDetails.bankName
+            ? ` (${receiptData.paymentDetails.bankName})`
+            : ""
+        }`;
+      } else if (receiptData.paymentDetails?.receiverUpiId) {
+        refInfo = `UPI: ${receiptData.paymentDetails.receiverUpiId}`;
+      }
+
+      const whatsappText = vendorPaymentDisbursedWhatsApp({
+        vendorName: vendor.name,
+        firmName: vendor.firm,
+        receiptNo: payment.paymentNumber,
+        amount: payment.grossAmount || payment.netAmountPaid,
+        paymentMode: payment.paymentMode,
+        receiptDate: payment.createdAt,
+        refInfo,
+        remainingOutstanding: receiptData.accountSummary?.currentOutstanding || 0,
+        companyName: receiptData.company?.name || "DigiOptics Wholesale",
+        companyPhone: receiptData.company?.phone || "+91 9650560526",
+      });
+
+      // Try sending with PDF attachment first, fallback to text message
+      let whatsappResult = null;
+      if (buffer && buffer.length > 0) {
+        whatsappResult = await sendWhatsAppMedia({
+          to: recipientMobile,
+          message: whatsappText,
+          fileBuffer: buffer,
+          fileName: fileName || `VendorPayout-${payment.paymentNumber}.pdf`,
+          mimeType: "application/pdf",
+        });
+      }
+
+      if (!whatsappResult?.success) {
+        console.log(
+          `[PaymentReceipt] Media send unconfirmed/failed for vendor WhatsApp, sending text fallback to ${recipientMobile}`,
+        );
+        whatsappResult = await sendWhatsAppMessage({
+          to: recipientMobile,
+          message: whatsappText,
+        });
+      }
+
+      console.log(
+        `[PaymentReceipt] Vendor Payout WhatsApp sent to ${recipientMobile}:`,
+        whatsappResult,
+      );
+      return { success: true, whatsappResult };
+    }
+
+    // 2. CUSTOMER PAYMENT RECEIPT WHATSAPP NOTIFICATION
+    const recipientMobile =
+      customer?.mobileNo1 || customer?.mobile || customer?.mobileNo2;
+    if (!recipientMobile) {
+      console.warn(
+        `[PaymentReceipt] Customer ${customer?.shopName || customer?._id} does not have a mobile number configured. Skipping WhatsApp.`,
+      );
+      return { success: false, reason: "NO_MOBILE" };
+    }
+
+    const whatsappText = customerPaymentReceivedWhatsApp({
+      customerName: customer.ownerName,
+      shopName: customer.shopName,
+      receiptNo: payment.paymentNumber,
+      amount: payment.grossAmount || payment.netAmountPaid,
+      paymentMode: payment.paymentMode,
+      receiptDate: payment.createdAt,
+      remainingDue: receiptData.accountSummary?.remainingCreditUsed || 0,
+      availableAdvance: receiptData.accountSummary?.customerBalance || 0,
+      companyName: receiptData.company?.name || "DigiOptics Wholesale",
+      companyPhone: receiptData.company?.phone || "+91 9650560526",
+    });
+
+    // Try sending with PDF receipt attached, fallback to text message
+    let whatsappResult = null;
+    if (buffer && buffer.length > 0) {
+      whatsappResult = await sendWhatsAppMedia({
+        to: recipientMobile,
+        message: whatsappText,
+        fileBuffer: buffer,
+        fileName: fileName || `Receipt-${payment.paymentNumber}.pdf`,
+        mimeType: "application/pdf",
+      });
+    }
+
+    if (!whatsappResult?.success) {
+      console.log(
+        `[PaymentReceipt] Media send unconfirmed/failed for customer WhatsApp, sending text fallback to ${recipientMobile}`,
+      );
+      whatsappResult = await sendWhatsAppMessage({
+        to: recipientMobile,
+        message: whatsappText,
+      });
+    }
+
+    console.log(
+      `[PaymentReceipt] Customer Receipt WhatsApp sent to ${recipientMobile}:`,
+      whatsappResult,
+    );
+    return { success: true, whatsappResult };
+  } catch (err) {
+    console.error(
+      "[PaymentReceipt] Failed to send receipt WhatsApp:",
+      err.message,
+    );
+    return { success: false, error: err.message };
+  }
+};
+
+/**
+ * Dispatches both Email and WhatsApp notifications for a transaction / payment receipt
+ */
+export const sendPaymentReceiptNotifications = async ({
+  paymentId,
+  tenantId,
+}) => {
+  try {
+    const pdfData = await generatePaymentReceiptPDF(paymentId, tenantId);
+
+    const [emailRes, whatsappRes] = await Promise.allSettled([
+      sendPaymentReceiptEmail({ paymentId, tenantId, cachedPDFData: pdfData }),
+      sendPaymentReceiptWhatsApp({
+        paymentId,
+        tenantId,
+        cachedPDFData: pdfData,
+      }),
+    ]);
+
+    return {
+      email:
+        emailRes.status === "fulfilled"
+          ? emailRes.value
+          : { success: false, error: emailRes.reason?.message },
+      whatsapp:
+        whatsappRes.status === "fulfilled"
+          ? whatsappRes.value
+          : { success: false, error: whatsappRes.reason?.message },
+    };
+  } catch (err) {
+    console.error(
+      "[PaymentReceipt] Failed to dispatch payment notifications:",
       err.message,
     );
     return { success: false, error: err.message };

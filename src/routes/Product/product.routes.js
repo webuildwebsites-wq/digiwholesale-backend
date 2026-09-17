@@ -1,5 +1,5 @@
 import express from "express";
-import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames, bulkUploadProducts, getFrameSunglassProducts } from "../../core/controllers/Product/Product.controller.js";
+import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, deleteBulkProducts, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames, bulkUploadProducts, getFrameSunglassProducts } from "../../core/controllers/Product/Product.controller.js";
 import { digiupload } from "../uploads/multer.js";
 import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
@@ -31,8 +31,7 @@ router.post("/add/inventory", checkPageAccess('INVENTORY'), addInventory);
 // Filter products
 router.post("/search", checkPageAccess('INVENTORY'), filterProducts);
 router.post("/bulk", checkPermission("UPDATE_INVENTORY"), digiupload.any(), bulkUploadProducts);
-
-
+router.post("/delete-bulk", checkPermission("UPDATE_INVENTORY"), deleteBulkProducts);
 
 // Update product
 router.put("/", checkPermission('UPDATE_INVENTORY'), digiupload.single("image"), updateProduct);
