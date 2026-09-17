@@ -1,22 +1,21 @@
 const ResetPasswordTemplate = (name, resetUrl, expiryMinutes = 30) => {
-  return `
-<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Reset Your Password</title>
   <style>
-    body { margin: 0; padding: 0; background-color: #eeeeee; font-family: 'Segoe UI', Roboto, Arial, sans-serif; }
-    .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
-    .header { background-color: #2980B9; padding: 22px; text-align: center; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
-    .content { padding: 32px; color: #333333; background-color: #f9f9f9; line-height: 1.7; font-size: 15px; }
+    body { margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
+    .header { background: linear-gradient(135deg, #1F618D 0%, #1e40af 100%); padding: 24px; text-align: center; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
+    .content { padding: 32px 28px; color: #334155; line-height: 1.7; font-size: 15px; }
     .content p { margin: 0 0 18px; }
     .btn-wrap { text-align: center; margin: 28px 0; }
-    .btn { background-color: #2980B9; color: #ffffff; padding: 13px 32px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block; }
-    .note { color: #6b6b6b; font-size: 13px; margin-top: 15px; }
-    .link-box { background-color: #eff6ff; border: 1px dashed #2980B9; border-radius: 6px; padding: 12px 16px; word-break: break-all; font-size: 13px; color: #555; margin: 16px 0; }
-    .footer { background-color: #2980B9; text-align: center; padding: 16px; font-size: 12px; color: #ffffff; }
+    .btn { background-color: #2980B9; color: #ffffff; padding: 13px 32px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 12px rgba(41, 128, 185, 0.25); }
+    .note { color: #64748b; font-size: 13px; margin-top: 15px; }
+    .link-box { background-color: #f0f9ff; border: 1px dashed #7dd3fc; border-radius: 8px; padding: 12px 16px; word-break: break-all; font-size: 13px; color: #0369a1; margin: 16px 0; }
+    .footer { background-color: #0f172a; text-align: center; padding: 18px; font-size: 12px; color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -37,8 +36,7 @@ const ResetPasswordTemplate = (name, resetUrl, expiryMinutes = 30) => {
     </div>
   </div>
 </body>
-</html>
-  `;
+</html>`;
 };
 
 export default ResetPasswordTemplate;
