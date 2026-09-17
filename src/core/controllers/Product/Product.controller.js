@@ -2,6 +2,8 @@ import DigiProduct from "../../../models/Product/Product.model.js";
 import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
+import PurchaseQC from "../../../models/Purchase/PurchaseQC.model.js";
+import Vendor from "../../../models/Vendor.model.js";
 import { uploadToGCSProduct } from "../../../Utils/uploads/uploadToGCS.js";
 import { getNextBatchNumber } from "./batch.controller.js";
 import mongoose from "mongoose";
@@ -95,6 +97,17 @@ export const createProduct = async (req, res) => {
       );
     }
 
+    // Lookup vendor names if vendor IDs are provided
+    const vendorIds = products
+      .map((p) => (typeof p.vendor === "string" && mongoose.Types.ObjectId.isValid(p.vendor) ? p.vendor : p.vendor?.id))
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+
+    let vendorMap = new Map();
+    if (vendorIds.length > 0) {
+      const vendorsList = await Vendor.find({ _id: { $in: vendorIds } }).lean();
+      vendorMap = new Map(vendorsList.map((v) => [v._id.toString(), v.vendorName || v.name || v.companyName]));
+    }
+
     // Prepare documents
     const productDocs = products.map((p) => ({
       productCode: p.productCode.trim(),
@@ -128,12 +141,21 @@ export const createProduct = async (req, res) => {
       hsnSac: p.hsnSac?.trim() || "",
       mrp: Number(p.mrp ?? 0),
       qty: Number(p.qty),
-      vendor:
-        p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)
-          ? { id: p.vendor, name: null }
-          : typeof p.vendor === "object" && p.vendor !== null
-            ? p.vendor
-            : { id: null, name: null },
+      vendor: (() => {
+        if (p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)) {
+          const vName = vendorMap.get(p.vendor.toString()) || p.vendorName || null;
+          return { id: p.vendor, name: vName };
+        }
+        if (typeof p.vendor === "object" && p.vendor !== null) {
+          const vId = p.vendor.id || null;
+          const vName = p.vendor.name || (vId ? vendorMap.get(vId.toString()) : null) || null;
+          return { id: vId, name: vName };
+        }
+        if (p.vendorName) {
+          return { id: null, name: p.vendorName };
+        }
+        return { id: null, name: null };
+      })(),
       tenantId: req.user.tenantId,
     }));
 
@@ -643,11 +665,33 @@ export const getInventoryByProductId = async (req, res) => {
       });
     }
 
+    // Auto-resolve vendor name if vendor.id is present but vendor.name is missing
+    if (product.vendor?.id && !product.vendor?.name) {
+      const vendorDoc = await Vendor.findById(product.vendor.id).lean();
+      if (vendorDoc) {
+        product.vendor.name = vendorDoc.vendorName || vendorDoc.name || vendorDoc.companyName || null;
+      }
+    }
+
     // 1. Fetch batches for this product
     const batches = await ProductBatch.find({
       productId: product._id,
       tenantId: req.user.tenantId,
     }).sort({ createdAt: -1 }).lean();
+
+    // Ensure all batches have vendorName resolved
+    for (const b of batches) {
+      if (!b.vendorName) {
+        if (b.vendorId && product.vendor?.id && b.vendorId.toString() === product.vendor.id.toString()) {
+          b.vendorName = product.vendor.name;
+        } else if (b.vendorId) {
+          const vDoc = await Vendor.findById(b.vendorId).lean();
+          if (vDoc) b.vendorName = vDoc.vendorName || vDoc.name || vDoc.companyName || null;
+        } else if (product.vendor?.name) {
+          b.vendorName = product.vendor.name;
+        }
+      }
+    }
 
     // 2. Fetch purchase orders containing this product
     const purchaseOrders = await VendorPurchase.find({
@@ -668,9 +712,21 @@ export const getInventoryByProductId = async (req, res) => {
       ],
     }).sort({ inwardDate: -1, createdAt: -1 }).lean();
 
+    // 4. Fetch PurchaseQC records for these POs or inwards
+    const inwardIds = purchaseInwards.map((i) => i._id);
+    const qcRecords = await PurchaseQC.find({
+      tenantId: req.user.tenantId,
+      $or: [
+        { purchaseOrderId: { $in: poIds } },
+        { purchaseInwardId: { $in: inwardIds } },
+        { "items.productId": product._id },
+      ],
+    }).sort({ qcDate: -1, createdAt: -1 }).lean();
+
     // Build receiving history entries
     const receivingHistory = [];
     const processedInwardItemKeys = new Set();
+    const usedBatchIds = new Set();
 
     for (const inward of purchaseInwards) {
       const poDoc = purchaseOrders.find(
@@ -705,9 +761,66 @@ export const getInventoryByProductId = async (req, res) => {
           if (!processedInwardItemKeys.has(itemKey)) {
             processedInwardItemKeys.add(itemKey);
 
-            const bNum = item.vendorRefId || "—";
-            const matchedBatch = batches.find(
-              (b) => b.batchNumber && bNum !== "—" && b.batchNumber.toUpperCase() === bNum.trim().toUpperCase()
+            // Find matching QC record and item
+            let matchedQc = null;
+            let matchedQcItem = null;
+            for (const qc of qcRecords) {
+              const isMatchQc =
+                (qc.purchaseInwardId && qc.purchaseInwardId.toString() === inward._id.toString()) ||
+                (qc.purchaseOrderId && inward.purchaseOrderId && qc.purchaseOrderId.toString() === inward.purchaseOrderId.toString());
+
+              if (isMatchQc) {
+                const qi = (qc.items || []).find(
+                  (q) =>
+                    (q.itemId && item.itemId && q.itemId.toString() === item.itemId.toString()) ||
+                    (q.productId && q.productId.toString() === product._id.toString()) ||
+                    (q.itemName && item.itemName && q.itemName.toLowerCase() === item.itemName.toLowerCase())
+                );
+                if (qi) {
+                  matchedQc = qc;
+                  matchedQcItem = qi;
+                  break;
+                }
+              }
+            }
+
+            // Find matching batch (created for this inward or QC or PO)
+            let matchedBatch = null;
+            for (const b of batches) {
+              if (
+                (b.purchaseInwardId && b.purchaseInwardId.toString() === inward._id.toString()) ||
+                (matchedQc && b.purchaseQCId && b.purchaseQCId.toString() === matchedQc._id.toString()) ||
+                (b.purchaseOrderId && inward.purchaseOrderId && b.purchaseOrderId.toString() === inward.purchaseOrderId.toString()) ||
+                (b.batchNumber && item.vendorRefId && b.batchNumber.toUpperCase() === item.vendorRefId.trim().toUpperCase())
+              ) {
+                matchedBatch = b;
+                usedBatchIds.add(b._id.toString());
+                break;
+              }
+            }
+
+            const batchNo = matchedBatch?.batchNumber || (item.vendorRefId && !mongoose.Types.ObjectId.isValid(item.vendorRefId) ? item.vendorRefId : "—");
+            const vendorName = matchedBatch?.vendorName || inward.vendorName || poDoc?.vendor?.vendorName || product.vendor?.name || "—";
+            const vendorId = matchedBatch?.vendorId || inward.vendorId || poDoc?.vendor?.vendorId || product.vendor?.id || null;
+
+            const passedQty = matchedQcItem?.passedQty != null
+              ? matchedQcItem.passedQty
+              : (poItem?.passedQty != null ? poItem.passedQty : (matchedBatch != null ? matchedBatch.initialQty : item.receivedQty));
+
+            const failedQty = matchedQcItem?.failedQty != null
+              ? matchedQcItem.failedQty
+              : (poItem?.failedQty != null ? poItem.failedQty : 0);
+
+            const qcResult = matchedQcItem?.qcResult || poItem?.qcStatus || (matchedBatch ? "PASSED" : "PENDING");
+            const failureReason = matchedQcItem?.failureReason || "";
+            const qcRemarks = matchedQcItem?.remarks || "";
+
+            const combinedInvoices = [
+              ...(Array.isArray(inward.invoices) ? inward.invoices : []),
+              ...(matchedBatch && Array.isArray(matchedBatch.invoices) ? matchedBatch.invoices : []),
+            ];
+            const uniqueInvoices = Array.from(
+              new Map(combinedInvoices.filter(Boolean).map((inv) => [inv.url, inv])).values()
             );
 
             receivingHistory.push({
@@ -715,48 +828,61 @@ export const getInventoryByProductId = async (req, res) => {
               type: "PURCHASE_INWARD",
               inwardId: inward._id,
               purchaseOrderId: inward.purchaseOrderId,
+              purchaseQCId: matchedQc?._id || null,
               orderNumber: item.orderNumber || poDoc?.purchaseOrderSummary?.orderNumber || "—",
               dateOfPurchase: poDoc?.createdAt || inward.createdAt,
               inwardDate: inward.inwardDate || inward.createdAt,
               receivedOn: inward.receivedOn || inward.inwardDate || inward.createdAt,
               receivedBy: inward.receivedBy || "—",
               receivedFrom: inward.receivedFrom || inward.vendorName || "—",
-              vendorName: inward.vendorName || poDoc?.vendor?.vendorName || product.vendor?.name || "—",
-              vendorId: inward.vendorId || poDoc?.vendor?.vendorId || product.vendor?.id || null,
-              batchNumber: bNum,
+              vendorName,
+              vendorId,
+              batchNumber: batchNo,
               batchId: matchedBatch?._id || null,
               invoiceNumber: item.vendorRefId || inward.remarks || "—",
               orderedQty: item.orderedQty || poItem?.qty || item.receivedQty,
               receivedQty: item.receivedQty || 0,
-              availableQty: matchedBatch != null ? matchedBatch.availableQty : item.receivedQty,
-              initialQty: matchedBatch != null ? matchedBatch.initialQty : item.receivedQty,
-              buyingPrice: matchedBatch?.costPrice ?? matchedBatch?.buyingPrice ?? (poItem?.price != null ? poItem.price : (product.buyingPrice || product.price || 0)),
-              sellingPrice: matchedBatch?.sellingPrice ?? (product.sellingPrice || product.price || 0),
-              mrp: matchedBatch?.mrp ?? poItem?.mrp ?? (product.mrp || 0),
+              passedQty,
+              failedQty,
+              qcStatus: qcResult,
+              failureReason,
+              qcRemarks,
+              availableQty: matchedBatch != null ? matchedBatch.availableQty : passedQty,
+              initialQty: matchedBatch != null ? matchedBatch.initialQty : passedQty,
+              buyingPrice: (poItem?.price != null && poItem.price > 0) ? poItem.price : (matchedBatch?.costPrice ?? matchedBatch?.buyingPrice ?? (product.buyingPrice || product.price || 0)),
+              sellingPrice: (matchedBatch?.sellingPrice != null && matchedBatch.sellingPrice > 0) ? matchedBatch.sellingPrice : (product.sellingPrice || product.price || 0),
+              mrp: (poItem?.mrp != null && poItem.mrp > 0) ? poItem.mrp : (matchedBatch?.mrp != null && matchedBatch.mrp > 0 ? matchedBatch.mrp : (product.mrp || 0)),
               gst: poItem?.gst != null ? poItem.gst : (product.gst || 0),
               condition: item.condition || "GOOD",
               inwardStatus: poItem?.inwardStatus || inward.status || "Confirmed",
-              qcStatus: poItem?.qcStatus || "PENDING",
-              remarks: item.remarks || inward.remarks || "",
-              invoices: inward.invoices || matchedBatch?.invoices || [],
+              remarks: inward.remarks || item.remarks || qcRemarks || "",
+              invoices: uniqueInvoices,
             });
           }
         }
       }
     }
 
-    // Also include any batches representing stock allocations not yet captured
+    // Also include any standalone batches (e.g. initial product creation or manual stock additions)
     for (const batch of batches) {
-      const alreadyIncluded = receivingHistory.some(
-        (rh) => rh.batchNumber && rh.batchNumber.toUpperCase() === batch.batchNumber.toUpperCase()
+      if (usedBatchIds.has(batch._id.toString())) continue;
+
+      // Also verify it was not linked to any inward or purchase order in receivingHistory
+      const isLinkedToInward = receivingHistory.some(
+        (rh) =>
+          (rh.inwardId && batch.purchaseInwardId && rh.inwardId.toString() === batch.purchaseInwardId.toString()) ||
+          (rh.purchaseOrderId && batch.purchaseOrderId && rh.purchaseOrderId.toString() === batch.purchaseOrderId.toString()) ||
+          (rh.batchNumber && batch.batchNumber && rh.batchNumber.toUpperCase() === batch.batchNumber.toUpperCase())
       );
 
-      if (!alreadyIncluded) {
+      if (!isLinkedToInward) {
+        usedBatchIds.add(batch._id.toString());
         receivingHistory.push({
           _id: batch._id,
           type: "BATCH_ALLOCATION",
           inwardId: null,
           purchaseOrderId: batch.purchaseOrderId || null,
+          purchaseQCId: batch.purchaseQCId || null,
           orderNumber: "—",
           dateOfPurchase: batch.createdAt,
           inwardDate: batch.inwardDate || batch.createdAt,
@@ -770,6 +896,9 @@ export const getInventoryByProductId = async (req, res) => {
           invoiceNumber: "—",
           orderedQty: batch.initialQty,
           receivedQty: batch.initialQty,
+          passedQty: batch.initialQty,
+          failedQty: 0,
+          qcStatus: "PASSED",
           availableQty: batch.availableQty,
           initialQty: batch.initialQty,
           buyingPrice: batch.costPrice != null ? batch.costPrice : (batch.buyingPrice != null ? batch.buyingPrice : (product.buyingPrice || product.price || 0)),
@@ -778,7 +907,6 @@ export const getInventoryByProductId = async (req, res) => {
           gst: product.gst || 0,
           condition: "GOOD",
           inwardStatus: "Confirmed",
-          qcStatus: "PASSED",
           batchStatus: batch.status,
           remarks: batch.remarks || "Batch allocation",
           invoices: batch.invoices || [],

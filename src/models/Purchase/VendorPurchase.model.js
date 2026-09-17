@@ -51,6 +51,8 @@ const purchaseItemSchema = new mongoose.Schema(
             default: "PENDING",
         },
         receivedQty: { type: Number, default: 0 },
+        passedQty:   { type: Number, default: 0 },
+        failedQty:   { type: Number, default: 0 },
 
         qcStatus: {
             type:    String,

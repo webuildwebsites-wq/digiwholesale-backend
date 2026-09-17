@@ -187,7 +187,9 @@ export const createPurchaseQC = async (req, res) => {
                 ? photos
                 : [];
 
-            item.qcStatus = qcResult;
+            item.qcStatus  = qcResult;
+            item.passedQty = passed;
+            item.failedQty = failed;
 
             qcItems.push({
                 itemId:        item._id,
