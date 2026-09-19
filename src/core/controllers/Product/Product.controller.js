@@ -247,7 +247,7 @@ export const suggestionProduct = async (req, res) => {
   }
 };
 
-//  GET ALL PRODUCTS - pagination (STORE WISE)
+
 export const getProducts = async (req, res) => {
   try {
     const page = Number(req.query.page) || 1;
@@ -255,11 +255,11 @@ export const getProducts = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const [products, total] = await Promise.all([
-      DigiProduct.find({ tenantId: req.user.tenantId })
+      DigiProduct.find({ tenantId: req.user.tenantId, isDeleted: { $ne: true } })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
-      DigiProduct.countDocuments({ tenantId: req.user.tenantId }),
+      DigiProduct.countDocuments({ tenantId: req.user.tenantId, isDeleted: { $ne: true } }),
     ]);
 
     const hasMore = page * limit < total;
@@ -437,6 +437,29 @@ export const deleteProduct = async (req, res) => {
         success: false,
         message: "Product not found",
       });
+    }
+
+    // If deleted product was holding lensHistory, transfer it to an active sibling or preserve as tombstone
+    if (product.lensHistory && Array.isArray(product.lensHistory) && product.lensHistory.length > 0) {
+      const sibling = await DigiProduct.findOne({
+        tenantId: req.user.tenantId,
+        productName: product.productName,
+        _id: { $ne: product._id },
+        isDeleted: { $ne: true },
+      });
+
+      if (sibling) {
+        await DigiProduct.updateOne(
+          { _id: sibling._id },
+          { $set: { lensHistory: product.lensHistory } }
+        );
+      } else {
+        await DigiProduct.create({
+          ...product.toObject(),
+          isDeleted: true,
+          qty: 0,
+        });
+      }
     }
 
     await ProductBatch.deleteMany({
@@ -1073,7 +1096,7 @@ export const filterProducts = async (req, res) => {
       });
     }
 
-    let query = { tenantId: req.user.tenantId };
+    let query = { tenantId: req.user.tenantId, isDeleted: { $ne: true } };
 
     if (startDate && endDate) {
       const start = new Date(startDate);

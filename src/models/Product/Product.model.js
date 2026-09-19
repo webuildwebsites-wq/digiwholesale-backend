@@ -177,6 +177,7 @@ const productSchema = new mongoose.Schema(
       ],
       default: undefined,
     },
+    isDeleted: { type: Boolean, default: false, index: true },
     tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
   },
   { timestamps: true }

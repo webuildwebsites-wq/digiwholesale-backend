@@ -1,7 +1,6 @@
 import mongoose from "mongoose";
 import DigiProduct from "../../../models/Product/Product.model.js";
 
-// Helper to normalize optical powers to numeric float (e.g. "+0.25" / "0.25" -> 0.25)
 const parsePower = (val) => {
   if (val === null || val === undefined || val === "") return null;
   const cleaned = String(val).replace(/\+/g, "").trim();
@@ -9,7 +8,7 @@ const parsePower = (val) => {
   return isNaN(num) ? null : num;
 };
 
-// 1. Search distinct lens products by name (for autocomplete / suggestions)
+
 export const searchLensProducts = async (req, res) => {
   try {
     const q = (req.query.q || "").trim();
@@ -70,7 +69,6 @@ export const searchLensProducts = async (req, res) => {
   }
 };
 
-// 2. Get Matrix Grid Data for an existing Lens Product
 export const getLensMatrixData = async (req, res) => {
   try {
     const { productName } = req.query;
@@ -98,7 +96,6 @@ export const getLensMatrixData = async (req, res) => {
       });
     }
 
-    // Extract and sort distinct SPH and CYL values numerically
     const rawSphs = new Set();
     const rawCyls = new Set();
 
@@ -112,7 +109,6 @@ export const getLensMatrixData = async (req, res) => {
     const sortedSphs = Array.from(rawSphs).sort((a, b) => a - b);
     const sortedCyls = Array.from(rawCyls).sort((a, b) => a - b);
 
-    // Build matrix lookup map: key = `${sph.toFixed(2)}_${cyl.toFixed(2)}`
     const matrixMap = {};
     products.forEach((p) => {
       const s = parsePower(p.sph);
@@ -154,7 +150,6 @@ export const getLensMatrixData = async (req, res) => {
   }
 };
 
-// 3. Update Lens Matrix directly on DigiProduct using bulkWrite (Zero extra models)
 export const updateLensMatrix = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -163,9 +158,9 @@ export const updateLensMatrix = async (req, res) => {
 
     const {
       productName,
-      action = "UPDATE_QTY", // "UPDATE_QTY" | "UPDATE_PRICE" | "DELETE"
-      priceType = "sellingPrice", // "buyingPrice" | "sellingPrice" | "mrp" | "price" | "all"
-      updates = [], // array of { sph, cyl, value }
+      action = "UPDATE_QTY", 
+      priceType = "sellingPrice", 
+      updates = [], 
     } = req.body;
 
     if (!productName || !productName.trim()) {
@@ -179,7 +174,6 @@ export const updateLensMatrix = async (req, res) => {
     const cleanName = productName.trim().toUpperCase();
     const tenantId = req.user.tenantId;
 
-    // Fetch existing products for this product name
     const existingProducts = await DigiProduct.find({
       tenantId,
       productName: { $regex: `^${cleanName}$`, $options: "i" },
@@ -189,7 +183,6 @@ export const updateLensMatrix = async (req, res) => {
       throw new Error(`No products found for "${cleanName}"`);
     }
 
-    // Build lookup by normalized numeric power: `${sph.toFixed(2)}_${cyl.toFixed(2)}`
     const productLookup = new Map();
     existingProducts.forEach((p) => {
       const s = parsePower(p.sph);
@@ -200,146 +193,236 @@ export const updateLensMatrix = async (req, res) => {
       }
     });
 
-    const bulkOps = [];
     let updatedCount = 0;
-
-    for (const item of updates) {
-      const s = parsePower(item.sph);
-      const c = parsePower(item.cyl);
-
-      if (s === null || c === null) continue;
-      const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
-      const prod = productLookup.get(key);
-
-      if (!prod) continue; // No matching product for this combination
-
-      if (action === "UPDATE_QTY") {
-        const val = Number(item.value);
-        if (isNaN(val)) continue;
-        const newQty = Math.max(0, Math.round(val));
-        const oldQty = prod.qty || 0;
-        if (newQty !== oldQty) {
-          bulkOps.push({
-            updateOne: {
-              filter: { _id: prod._id, tenantId },
-              update: { $set: { qty: newQty } },
-            },
-          });
-          updatedCount++;
-        }
-      } else if (action === "UPDATE_PRICE") {
-        const updateFields = {};
-
-        if (item.buyingPrice != null && !isNaN(Number(item.buyingPrice))) {
-          const bp = Math.max(0, Number(item.buyingPrice));
-          updateFields.buyingPrice = bp;
-          updateFields.price = bp;
-        }
-        if (item.sellingPrice != null && !isNaN(Number(item.sellingPrice))) {
-          updateFields.sellingPrice = Math.max(0, Number(item.sellingPrice));
-        }
-        if (item.mrp != null && !isNaN(Number(item.mrp))) {
-          updateFields.mrp = Math.max(0, Number(item.mrp));
-        }
-
-        // If no discrete fields provided, fall back to item.value
-        if (Object.keys(updateFields).length === 0 && item.value != null && !isNaN(Number(item.value))) {
-          const newPrice = Math.max(0, Number(item.value));
-          updateFields.buyingPrice = newPrice;
-          updateFields.sellingPrice = newPrice;
-          updateFields.mrp = newPrice;
-          updateFields.price = newPrice;
-        }
-
-        if (Object.keys(updateFields).length > 0) {
-          bulkOps.push({
-            updateOne: {
-              filter: { _id: prod._id, tenantId },
-              update: { $set: updateFields },
-            },
-          });
-          updatedCount++;
-        }
-      } else if (action === "DELETE") {
-        bulkOps.push({
-          deleteOne: {
-            filter: { _id: prod._id, tenantId },
-          },
-        });
-        updatedCount++;
-      }
-    }
-
-    if (bulkOps.length > 0) {
-      await DigiProduct.bulkWrite(bulkOps, { session });
-    }
-
     let summaryText = "";
-    if (action === "UPDATE_QTY") {
-      summaryText = `Updated stock quantity across ${updatedCount} lens combination(s)`;
-    } else if (action === "UPDATE_PRICE") {
-      summaryText = `Updated prices (Buying, Selling & MRP) across ${updatedCount} lens combination(s)`;
-    } else if (action === "DELETE") {
-      summaryText = `Deleted ${updatedCount} lens combination(s)`;
-    }
 
-    // Refresh remaining product metrics to record accurate transaction snapshot
-    const remainingProducts = await DigiProduct.find({
-      tenantId,
-      productName: { $regex: `^${cleanName}$`, $options: "i" },
-    })
-      .select("sph cyl qty price buyingPrice sellingPrice mrp")
-      .session(session)
-      .lean();
+    if (action === "DELETE") {
+      const existingHistory = existingProducts
+        .flatMap((d) => d.lensHistory || [])
+        .filter((h) => h && h.action);
 
-    if (remainingProducts && remainingProducts.length > 0) {
-      const distinctSphs = Array.from(new Set(remainingProducts.map((p) => parsePower(p.sph)).filter((x) => x !== null))).sort((a, b) => a - b);
-      const distinctCyls = Array.from(new Set(remainingProducts.map((p) => parsePower(p.cyl)).filter((x) => x !== null))).sort((a, b) => a - b);
-      const totalStock = remainingProducts.reduce((sum, p) => sum + (p.qty || 0), 0);
-      const sample = remainingProducts.find((p) => p.sellingPrice || p.buyingPrice || p.mrp) || remainingProducts[0];
+      const idsToDelete = new Set();
+      for (const item of updates) {
+        const s = parsePower(item.sph);
+        const c = parsePower(item.cyl);
+        if (s === null || c === null) continue;
+        const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
+        const prod = productLookup.get(key);
+        if (prod) {
+          idsToDelete.add(prod._id.toString());
+        }
+      }
+
+      if (idsToDelete.size === 0) {
+        throw new Error("No matching lens combinations found to delete.");
+      }
+
+      const survivingProducts = existingProducts.filter(
+        (d) => !idsToDelete.has(d._id.toString()) && !d.isDeleted
+      );
+
+      const sample = survivingProducts[0] || existingProducts[0];
+      const distinctSphs = Array.from(
+        new Set(survivingProducts.map((p) => parsePower(p.sph)).filter((x) => x !== null))
+      ).sort((a, b) => a - b);
+      const distinctCyls = Array.from(
+        new Set(survivingProducts.map((p) => parsePower(p.cyl)).filter((x) => x !== null))
+      ).sort((a, b) => a - b);
+      const totalStock = survivingProducts.reduce((sum, p) => sum + (p.qty || 0), 0);
 
       const historyEntry = {
-        action,
-        priceType: action === "UPDATE_PRICE" ? "Buying, Selling & MRP" : "",
-        totalLenses: remainingProducts.length,
+        action: "DELETE",
+        priceType: "",
+        totalLenses: survivingProducts.length,
         totalStockQty: totalStock,
-        sphRange: distinctSphs.length ? `${distinctSphs[0].toFixed(2)} to ${distinctSphs[distinctSphs.length - 1].toFixed(2)}` : "",
-        cylRange: distinctCyls.length ? `${distinctCyls[0].toFixed(2)} to ${distinctCyls[distinctCyls.length - 1].toFixed(2)}` : "",
-        buyingPrice: sample.buyingPrice ?? sample.price ?? 0,
-        sellingPrice: sample.sellingPrice ?? sample.price ?? 0,
-        mrp: sample.mrp ?? 0,
+        sphRange: distinctSphs.length
+          ? `${distinctSphs[0].toFixed(2)} to ${distinctSphs[distinctSphs.length - 1].toFixed(2)}`
+          : "None (All combinations deleted)",
+        cylRange: distinctCyls.length
+          ? `${distinctCyls[0].toFixed(2)} to ${distinctCyls[distinctCyls.length - 1].toFixed(2)}`
+          : "None (All combinations deleted)",
+        buyingPrice: sample?.buyingPrice ?? sample?.price ?? 0,
+        sellingPrice: sample?.sellingPrice ?? sample?.price ?? 0,
+        mrp: sample?.mrp ?? 0,
         updatedAt: new Date(),
       };
 
-      let targetDoc = await DigiProduct.findOneAndUpdate(
-        {
-          tenantId,
-          productName: { $regex: `^${cleanName}$`, $options: "i" },
-          lensHistory: { $exists: true, $ne: null },
-        },
-        { $push: { lensHistory: historyEntry } },
-        { session }
-      );
+      const combinedHistory = [...existingHistory, historyEntry];
+      updatedCount = idsToDelete.size;
 
-      if (!targetDoc) {
-        targetDoc = await DigiProduct.findOneAndUpdate(
-          { tenantId, productName: { $regex: `^${cleanName}$`, $options: "i" } },
-          { $set: { lensHistory: [historyEntry] } },
-          { session, sort: { createdAt: 1 }, new: true }
-        );
-      }
-
-      // Ensure no other variant documents have lensHistory field
-      if (targetDoc) {
-        await DigiProduct.updateMany(
-          {
-            tenantId,
-            productName: { $regex: `^${cleanName}$`, $options: "i" },
-            _id: { $ne: targetDoc._id },
-          },
-          { $unset: { lensHistory: 1 } },
+      if (survivingProducts.length > 0) {
+        const keeper = survivingProducts[0];
+        await DigiProduct.updateOne(
+          { _id: keeper._id },
+          { $set: { lensHistory: combinedHistory } },
           { session }
         );
+
+        await DigiProduct.deleteMany(
+          { _id: { $in: Array.from(idsToDelete) }, tenantId },
+          { session }
+        );
+
+        if (survivingProducts.length > 1) {
+          const otherIds = survivingProducts.slice(1).map((p) => p._id);
+          await DigiProduct.updateMany(
+            { _id: { $in: otherIds } },
+            { $unset: { lensHistory: 1 } },
+            { session }
+          );
+        }
+      } else {
+        const tombstone = existingProducts[0];
+        await DigiProduct.updateOne(
+          { _id: tombstone._id },
+          {
+            $set: {
+              isDeleted: true,
+              qty: 0,
+              lensHistory: combinedHistory,
+            },
+          },
+          { session }
+        );
+
+        const otherIds = Array.from(idsToDelete).filter((id) => id !== tombstone._id.toString());
+        if (otherIds.length > 0) {
+          await DigiProduct.deleteMany(
+            { _id: { $in: otherIds }, tenantId },
+            { session }
+          );
+        }
+      }
+
+      summaryText = `Deleted ${updatedCount} lens combination(s)`;
+    } else {
+      const bulkOps = [];
+      for (const item of updates) {
+        const s = parsePower(item.sph);
+        const c = parsePower(item.cyl);
+
+        if (s === null || c === null) continue;
+        const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
+        const prod = productLookup.get(key);
+
+        if (!prod) continue; 
+
+        if (action === "UPDATE_QTY") {
+          const val = Number(item.value);
+          if (isNaN(val)) continue;
+          const newQty = Math.max(0, Math.round(val));
+          const oldQty = prod.qty || 0;
+          if (newQty !== oldQty) {
+            bulkOps.push({
+              updateOne: {
+                filter: { _id: prod._id, tenantId },
+                update: { $set: { qty: newQty } },
+              },
+            });
+            updatedCount++;
+          }
+        } else if (action === "UPDATE_PRICE") {
+          const updateFields = {};
+
+          if (item.buyingPrice != null && !isNaN(Number(item.buyingPrice))) {
+            const bp = Math.max(0, Number(item.buyingPrice));
+            updateFields.buyingPrice = bp;
+            updateFields.price = bp;
+          }
+          if (item.sellingPrice != null && !isNaN(Number(item.sellingPrice))) {
+            updateFields.sellingPrice = Math.max(0, Number(item.sellingPrice));
+          }
+          if (item.mrp != null && !isNaN(Number(item.mrp))) {
+            updateFields.mrp = Math.max(0, Number(item.mrp));
+          }
+
+          if (Object.keys(updateFields).length === 0 && item.value != null && !isNaN(Number(item.value))) {
+            const newPrice = Math.max(0, Number(item.value));
+            updateFields.buyingPrice = newPrice;
+            updateFields.sellingPrice = newPrice;
+            updateFields.mrp = newPrice;
+            updateFields.price = newPrice;
+          }
+
+          if (Object.keys(updateFields).length > 0) {
+            bulkOps.push({
+              updateOne: {
+                filter: { _id: prod._id, tenantId },
+                update: { $set: updateFields },
+              },
+            });
+            updatedCount++;
+          }
+        }
+      }
+
+      if (bulkOps.length > 0) {
+        await DigiProduct.bulkWrite(bulkOps, { session });
+      }
+
+      if (action === "UPDATE_QTY") {
+        summaryText = `Updated stock quantity across ${updatedCount} lens combination(s)`;
+      } else if (action === "UPDATE_PRICE") {
+        summaryText = `Updated prices (Buying, Selling & MRP) across ${updatedCount} lens combination(s)`;
+      }
+
+      const remainingProducts = await DigiProduct.find({
+        tenantId,
+        productName: { $regex: `^${cleanName}$`, $options: "i" },
+        isDeleted: { $ne: true },
+      })
+        .select("sph cyl qty price buyingPrice sellingPrice mrp lensHistory")
+        .session(session)
+        .lean();
+
+      if (remainingProducts && remainingProducts.length > 0) {
+        const distinctSphs = Array.from(
+          new Set(remainingProducts.map((p) => parsePower(p.sph)).filter((x) => x !== null))
+        ).sort((a, b) => a - b);
+        const distinctCyls = Array.from(
+          new Set(remainingProducts.map((p) => parsePower(p.cyl)).filter((x) => x !== null))
+        ).sort((a, b) => a - b);
+        const totalStock = remainingProducts.reduce((sum, p) => sum + (p.qty || 0), 0);
+        const sample =
+          remainingProducts.find((p) => p.sellingPrice || p.buyingPrice || p.mrp) || remainingProducts[0];
+
+        const historyEntry = {
+          action,
+          priceType: action === "UPDATE_PRICE" ? "Buying, Selling & MRP" : "",
+          totalLenses: remainingProducts.length,
+          totalStockQty: totalStock,
+          sphRange: distinctSphs.length
+            ? `${distinctSphs[0].toFixed(2)} to ${distinctSphs[distinctSphs.length - 1].toFixed(2)}`
+            : "",
+          cylRange: distinctCyls.length
+            ? `${distinctCyls[0].toFixed(2)} to ${distinctCyls[distinctCyls.length - 1].toFixed(2)}`
+            : "",
+          buyingPrice: sample.buyingPrice ?? sample.price ?? 0,
+          sellingPrice: sample.sellingPrice ?? sample.price ?? 0,
+          mrp: sample.mrp ?? 0,
+          updatedAt: new Date(),
+        };
+
+        const existingHistory = remainingProducts
+          .flatMap((d) => d.lensHistory || [])
+          .filter((h) => h && h.action);
+        const combinedHistory = [...existingHistory, historyEntry];
+
+        const keeper = remainingProducts[0];
+        await DigiProduct.updateOne(
+          { _id: keeper._id },
+          { $set: { lensHistory: combinedHistory } },
+          { session }
+        );
+
+        if (remainingProducts.length > 1) {
+          const otherIds = remainingProducts.slice(1).map((p) => p._id);
+          await DigiProduct.updateMany(
+            { _id: { $in: otherIds } },
+            { $unset: { lensHistory: 1 } },
+            { session }
+          );
+        }
       }
     }
 
@@ -363,7 +446,7 @@ export const updateLensMatrix = async (req, res) => {
   }
 };
 
-// 4. Get History of Lens Products (Returns every transaction event with ZERO extra models)
+
 export const getLensHistory = async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
@@ -375,6 +458,7 @@ export const getLensHistory = async (req, res) => {
       $or: [
         { sph: { $exists: true, $nin: [null, ""] } },
         { category: { $regex: /lens|glass|contact/i } },
+        { lensHistory: { $exists: true, $ne: [] } },
       ],
     };
 
@@ -382,7 +466,6 @@ export const getLensHistory = async (req, res) => {
       matchStage.productName = { $regex: productName.trim(), $options: "i" };
     }
 
-    // Group by productName to inspect combinations, pricing, and embedded lensHistory
     const grouped = await DigiProduct.aggregate([
       { $match: matchStage },
       {
@@ -413,7 +496,6 @@ export const getLensHistory = async (req, res) => {
 
     for (const prod of grouped) {
       const rawLogs = (prod.allHistories || []).flat().filter((x) => x && x.action);
-      // Deduplicate by action + timestamp
       const seen = new Set();
       const logs = [];
       for (const item of rawLogs) {
@@ -426,7 +508,6 @@ export const getLensHistory = async (req, res) => {
       logs.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
       if (logs.length > 0) {
-        // Output every recorded transaction as its own row
         for (let i = 0; i < logs.length; i++) {
           const log = logs[i];
           historyTimeline.push({
@@ -447,8 +528,7 @@ export const getLensHistory = async (req, res) => {
           });
         }
       } else {
-        // Fallback for older existing products created prior to lensHistory array:
-        // 1. Initial Generation row
+
         historyTimeline.push({
           _id: `${prod.productName}_gen`,
           productName: prod.productName,
@@ -466,7 +546,6 @@ export const getLensHistory = async (req, res) => {
           timestamp: prod.firstGeneratedAt,
         });
 
-        // 2. If it was updated after initial generation, also show an update transaction row
         if (
           prod.lastUpdatedAt &&
           prod.firstGeneratedAt &&
@@ -492,7 +571,6 @@ export const getLensHistory = async (req, res) => {
       }
     }
 
-    // Sort complete transaction timeline descending by timestamp
     historyTimeline.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     return res.status(200).json({
