@@ -160,6 +160,23 @@ const productSchema = new mongoose.Schema(
       name: { type: String, default: null },
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+    lensHistory: {
+      type: [
+        {
+          action: { type: String, default: "GENERATED" },
+          priceType: { type: String, default: "" },
+          totalLenses: { type: Number, default: 0 },
+          totalStockQty: { type: Number, default: 0 },
+          sphRange: { type: String, default: "" },
+          cylRange: { type: String, default: "" },
+          buyingPrice: { type: Number, default: 0 },
+          sellingPrice: { type: Number, default: 0 },
+          mrp: { type: Number, default: 0 },
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: undefined,
+    },
     tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
   },
   { timestamps: true }
