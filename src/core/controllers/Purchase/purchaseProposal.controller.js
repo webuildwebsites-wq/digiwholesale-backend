@@ -72,6 +72,9 @@ export const createPurchaseProposal = async (req, res) => {
             requiredByDate,
             description,
             vendorIds,
+            mrp,
+            buyingPrice,
+            sellingPrice,
         } = req.body;
 
         if (!productName || !requiredQty || !Array.isArray(vendorIds) || vendorIds.length === 0) {
@@ -109,13 +112,16 @@ export const createPurchaseProposal = async (req, res) => {
         const proposal = await PurchaseProposal.create({
             proposalNumber:   generateProposalNumber(),
             product: {
-                productId:   productId || null,
-                productCode: productCode || "",
-                productName: productName.trim().toUpperCase(),
-                category:    (category || "").toUpperCase(),
-                brand:       (brand    || "").toUpperCase(),
-                unit:        unit || "PIECE",
+                productId:    productId || null,
+                productCode:  productCode || "",
+                productName:  productName.trim().toUpperCase(),
+                category:     (category || "").toUpperCase(),
+                brand:        (brand    || "").toUpperCase(),
+                unit:         unit || "PIECE",
                 currentQty,
+                mrp:          Number(mrp)          || 0,
+                buyingPrice:  Number(buyingPrice)  || 0,
+                sellingPrice: Number(sellingPrice) || 0,
             },
             requiredQty:      Number(requiredQty),
             requiredByDate:   requiredByDate ? new Date(requiredByDate) : null,

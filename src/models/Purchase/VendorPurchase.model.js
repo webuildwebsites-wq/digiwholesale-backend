@@ -21,6 +21,8 @@ const purchaseItemSchema = new mongoose.Schema(
         material:       String,
         dimensions:     String,
         price:          Number,
+        buyingPrice:    Number,
+        sellingPrice:   Number,
         gst:            Number,
         hsnSac:         String,
         mrp:            Number,

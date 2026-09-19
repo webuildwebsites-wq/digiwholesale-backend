@@ -34,13 +34,16 @@ const purchaseProposalSchema = new mongoose.Schema(
         proposalNumber: { type: String, required: true, trim: true },
 
         product: {
-            productId:   { type: mongoose.Schema.Types.ObjectId, ref: "DigiProduct", default: null },
-            productCode: { type: String, default: "" },
-            productName: { type: String, required: true, trim: true },
-            category:    { type: String, default: "" },
-            brand:       { type: String, default: "" },
-            unit:        { type: String, enum: ["PIECE", "PAIR", "BOX"], default: "PIECE" },
-            currentQty:  { type: Number, default: 0 },
+            productId:    { type: mongoose.Schema.Types.ObjectId, ref: "DigiProduct", default: null },
+            productCode:  { type: String, default: "" },
+            productName:  { type: String, required: true, trim: true },
+            category:     { type: String, default: "" },
+            brand:        { type: String, default: "" },
+            unit:         { type: String, enum: ["PIECE", "PAIR", "BOX"], default: "PIECE" },
+            currentQty:   { type: Number, default: 0 },
+            mrp:          { type: Number, default: 0 },
+            buyingPrice:  { type: Number, default: 0 },
+            sellingPrice: { type: Number, default: 0 },
         },
 
         requiredQty:    { type: Number, required: true, min: 1 },

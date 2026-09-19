@@ -1162,7 +1162,7 @@ export const bulkUploadProducts = async (req, res) => {
     if (!products.length) throw new Error("No products provided");
 
     for (const p of products) {
-      if (!p.productName || !p.category || p.price == null || p.mrp == null) {
+      if (!p.productName || !p.category || (p.price == null && p.buyingPrice == null) || p.mrp == null) {
         throw new Error(
           "Missing required fields: productName, category, price, mrp",
         );
@@ -1209,7 +1209,9 @@ export const bulkUploadProducts = async (req, res) => {
       index: p.index?.toString().trim() || "",
       coating: p.coating?.trim()?.toUpperCase() || "",
       expiry: p.expiry || null,
-      price: Number(p.price),
+      price: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      buyingPrice: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      sellingPrice: Number(p.sellingPrice != null ? p.sellingPrice : (p.price ?? 0)),
       mrp: Number(p.mrp),
       gst: Number(p.gst) || 0,
       hsnSac: p.hsnSac?.trim() || "",

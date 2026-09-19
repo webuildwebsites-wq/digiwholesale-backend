@@ -229,8 +229,10 @@ export const createVendorPurchaseItems = async (req, res) => {
                     item.isNewProduct = false;
                     item.itemName     = item.itemName || product.productName;
                     item.category     = rawCategory;
-                    item.price        = item.price    ?? product.price   ?? 0;
-                    item.mrp          = item.mrp      ?? product.mrp     ?? 0;
+                    item.buyingPrice  = item.buyingPrice != null && item.buyingPrice !== "" ? Number(item.buyingPrice) : Number(item.price ?? product.buyingPrice ?? product.price ?? 0);
+                    item.sellingPrice = item.sellingPrice != null && item.sellingPrice !== "" ? Number(item.sellingPrice) : Number(product.sellingPrice ?? 0);
+                    item.price        = item.buyingPrice;
+                    item.mrp          = item.mrp != null && item.mrp !== "" ? Number(item.mrp) : Number(product.mrp ?? 0);
                     item.gst          = item.gst      ?? product.gst     ?? 0;
                     item.hsnSac       = item.hsnSac   || product.hsnSac;
                     item.qty          = qty;
@@ -282,6 +284,10 @@ export const createVendorPurchaseItems = async (req, res) => {
                     item.productId    = null;
                     item.qty          = qty;
                     item.category     = (item.category || "").toUpperCase();
+                    item.buyingPrice  = item.buyingPrice != null && item.buyingPrice !== "" ? Number(item.buyingPrice) : Number(item.price ?? 0);
+                    item.sellingPrice = item.sellingPrice != null && item.sellingPrice !== "" ? Number(item.sellingPrice) : 0;
+                    item.price        = item.buyingPrice;
+                    item.mrp          = item.mrp != null && item.mrp !== "" ? Number(item.mrp) : 0;
                     if (item.orderType === "STOCK") delete item.rx;
                 }
             }
