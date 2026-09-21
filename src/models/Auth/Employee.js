@@ -168,6 +168,8 @@ const employee = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    demoMode: { type: Boolean, default: false },
+    demoExpiry: { type: Date, default: null },
     expiry: {
       type: Date,
     },
