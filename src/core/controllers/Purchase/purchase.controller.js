@@ -229,8 +229,10 @@ export const createVendorPurchaseItems = async (req, res) => {
                     item.isNewProduct = false;
                     item.itemName     = item.itemName || product.productName;
                     item.category     = rawCategory;
-                    item.price        = item.price    ?? product.price   ?? 0;
-                    item.mrp          = item.mrp      ?? product.mrp     ?? 0;
+                    item.buyingPrice  = item.buyingPrice != null && item.buyingPrice !== "" ? Number(item.buyingPrice) : Number(item.price ?? product.buyingPrice ?? product.price ?? 0);
+                    item.sellingPrice = item.sellingPrice != null && item.sellingPrice !== "" ? Number(item.sellingPrice) : Number(product.sellingPrice ?? 0);
+                    item.price        = item.buyingPrice;
+                    item.mrp          = item.mrp != null && item.mrp !== "" ? Number(item.mrp) : Number(product.mrp ?? 0);
                     item.gst          = item.gst      ?? product.gst     ?? 0;
                     item.hsnSac       = item.hsnSac   || product.hsnSac;
                     item.qty          = qty;
@@ -282,6 +284,10 @@ export const createVendorPurchaseItems = async (req, res) => {
                     item.productId    = null;
                     item.qty          = qty;
                     item.category     = (item.category || "").toUpperCase();
+                    item.buyingPrice  = item.buyingPrice != null && item.buyingPrice !== "" ? Number(item.buyingPrice) : Number(item.price ?? 0);
+                    item.sellingPrice = item.sellingPrice != null && item.sellingPrice !== "" ? Number(item.sellingPrice) : 0;
+                    item.price        = item.buyingPrice;
+                    item.mrp          = item.mrp != null && item.mrp !== "" ? Number(item.mrp) : 0;
                     if (item.orderType === "STOCK") delete item.rx;
                 }
             }
@@ -947,13 +953,16 @@ export const getQCPendingItems = async (req, res) => {
 
 export const getQCPassedItems = async (req, res) => {
     try {
-        const filter = buildItemsFilter(req, { "orders.items.qcStatus": "PASSED" });
+        const filter = buildItemsFilter(req, {
+            "orders.items.qcStatus": { $in: ["PASSED", "PARTIAL"] },
+        });
 
         const page  = Math.max(parseInt(req.query.page)  || 1, 1);
         const limit = Math.min(parseInt(req.query.limit) || 20, 100);
         const skip  = (page - 1) * limit;
 
         const PurchaseQC = (await import("../../../models/Purchase/PurchaseQC.model.js")).default;
+        await import("../../../models/Auth/Employee.js");
 
         const purchaseOrders = await VendorPurchase.find(filter).sort({ createdAt: -1 }).lean();
 
@@ -976,26 +985,36 @@ export const getQCPassedItems = async (req, res) => {
 
             for (const order of po.orders) {
                 for (const item of order.items) {
-                    if (item.qcStatus !== "PASSED") continue;
+                    if (item.qcStatus !== "PASSED" && item.qcStatus !== "PARTIAL") continue;
 
                     let qcDoneBy     = null;
                     let qcDoneByName = null;
                     let qcDate       = null;
+                    let passedQty    = item.passedQty != null ? item.passedQty : null;
 
                     for (const qc of poQCRecords) {
                         const qcItem = qc.items?.find(qi => qi.itemId?.toString() === item._id?.toString());
-                        if (qcItem && qcItem.qcResult === "PASSED") {
+                        if (qcItem && (qcItem.qcResult === "PASSED" || qcItem.qcResult === "PARTIAL" || (qcItem.passedQty != null && qcItem.passedQty > 0))) {
                             qcDoneBy     = qc.createdBy;
                             qcDoneByName = qc.createdByName || qc.createdBy?.employeeName || null;
                             qcDate       = qc.qcDate;
+                            if (qcItem.passedQty != null) {
+                                passedQty = qcItem.passedQty;
+                            }
                             break;
                         }
                     }
 
+                    if (passedQty == null) {
+                        passedQty = item.qcStatus === "PASSED" ? (item.receivedQty ?? item.qty ?? 0) : 0;
+                    }
+
+                    if (passedQty <= 0) continue;
+
                     allItems.push({
                         purchaseOrderId: po._id,
-                        vendorName:      po.vendor.vendorName,
-                        vendorId:        po.vendor.vendorId,
+                        vendorName:      po.vendor?.vendorName,
+                        vendorId:        po.vendor?.vendorId,
                         orderNumber:     order.orderNumber,
                         cgst:            order.cgst,
                         sgst:            order.sgst,
@@ -1003,6 +1022,7 @@ export const getQCPassedItems = async (req, res) => {
                         qcDoneByName,
                         qcDate,
                         ...item,
+                        passedQty,
                     });
                 }
             }

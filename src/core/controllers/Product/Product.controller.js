@@ -2,6 +2,8 @@ import DigiProduct from "../../../models/Product/Product.model.js";
 import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
+import PurchaseQC from "../../../models/Purchase/PurchaseQC.model.js";
+import Vendor from "../../../models/Vendor.model.js";
 import { uploadToGCSProduct } from "../../../Utils/uploads/uploadToGCS.js";
 import { getNextBatchNumber } from "./batch.controller.js";
 import mongoose from "mongoose";
@@ -9,7 +11,6 @@ import mongoose from "mongoose";
 //  CREATE PRODUCT
 export const createProduct = async (req, res) => {
   try {
-    // Parse products from FormData
     let products = JSON.parse(req.body.products || "[]");
 
     if (!Array.isArray(products) || products.length === 0) {
@@ -19,7 +20,6 @@ export const createProduct = async (req, res) => {
       });
     }
 
-    // Validate required fields
     for (const p of products) {
       const hasBuyingPrice = p.buyingPrice != null || p.price != null;
       if (
@@ -36,7 +36,6 @@ export const createProduct = async (req, res) => {
       }
     }
 
-    // Check duplicate productCode
     const productCodes = products.map((p) => p.productCode.trim());
 
     const existingProducts = await DigiProduct.find({
@@ -62,11 +61,9 @@ export const createProduct = async (req, res) => {
       })),
     );
 
-    // Attach color images to correct product index and color index
     if (req.files?.length) {
       await Promise.all(
         products.map(async (product, index) => {
-          // Specific image for each color in the product
           if (Array.isArray(product.colors)) {
             await Promise.all(
               product.colors.map(async (colorObj, cIndex) => {
@@ -95,7 +92,16 @@ export const createProduct = async (req, res) => {
       );
     }
 
-    // Prepare documents
+    const vendorIds = products
+      .map((p) => (typeof p.vendor === "string" && mongoose.Types.ObjectId.isValid(p.vendor) ? p.vendor : p.vendor?.id))
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+
+    let vendorMap = new Map();
+    if (vendorIds.length > 0) {
+      const vendorsList = await Vendor.find({ _id: { $in: vendorIds } }).lean();
+      vendorMap = new Map(vendorsList.map((v) => [v._id.toString(), v.vendorName || v.name || v.companyName]));
+    }
+
     const productDocs = products.map((p) => ({
       productCode: p.productCode.trim(),
       category: p.category.trim().toUpperCase(),
@@ -128,12 +134,21 @@ export const createProduct = async (req, res) => {
       hsnSac: p.hsnSac?.trim() || "",
       mrp: Number(p.mrp ?? 0),
       qty: Number(p.qty),
-      vendor:
-        p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)
-          ? { id: p.vendor, name: null }
-          : typeof p.vendor === "object" && p.vendor !== null
-            ? p.vendor
-            : { id: null, name: null },
+      vendor: (() => {
+        if (p.vendor && mongoose.Types.ObjectId.isValid(p.vendor)) {
+          const vName = vendorMap.get(p.vendor.toString()) || p.vendorName || null;
+          return { id: p.vendor, name: vName };
+        }
+        if (typeof p.vendor === "object" && p.vendor !== null) {
+          const vId = p.vendor.id || null;
+          const vName = p.vendor.name || (vId ? vendorMap.get(vId.toString()) : null) || null;
+          return { id: vId, name: vName };
+        }
+        if (p.vendorName) {
+          return { id: null, name: p.vendorName };
+        }
+        return { id: null, name: null };
+      })(),
       tenantId: req.user.tenantId,
     }));
 
@@ -170,6 +185,7 @@ export const createProduct = async (req, res) => {
             vendorId: vId,
             vendorName: vName,
             remarks: pInput.batchRemarks?.trim() || "Initial batch allocation on product creation",
+            invoices: Array.isArray(pInput.invoices) ? pInput.invoices : [],
             status: "OPEN",
             tenantId: req.user.tenantId,
             createdBy: req.user._id,
@@ -231,7 +247,7 @@ export const suggestionProduct = async (req, res) => {
   }
 };
 
-//  GET ALL PRODUCTS - pagination (STORE WISE)
+
 export const getProducts = async (req, res) => {
   try {
     const page = Number(req.query.page) || 1;
@@ -239,11 +255,11 @@ export const getProducts = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const [products, total] = await Promise.all([
-      DigiProduct.find({ tenantId: req.user.tenantId })
+      DigiProduct.find({ tenantId: req.user.tenantId, isDeleted: { $ne: true } })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
-      DigiProduct.countDocuments({ tenantId: req.user.tenantId }),
+      DigiProduct.countDocuments({ tenantId: req.user.tenantId, isDeleted: { $ne: true } }),
     ]);
 
     const hasMore = page * limit < total;
@@ -377,7 +393,6 @@ export const updateProduct = async (req, res) => {
     if (p.mrp != null && p.mrp !== "") product.mrp = Number(p.mrp);
     if (p.qty != null && p.qty !== "") product.qty = Number(p.qty);
 
-    // Update vendor if provided
     if (p.vendorId) {
       product.vendor = {
         id: mongoose.Types.ObjectId.isValid(p.vendorId) ? p.vendorId : null,
@@ -385,14 +400,12 @@ export const updateProduct = async (req, res) => {
       };
     }
 
-    //  If image uploaded — use GCS (same as createProduct)
     if (req.file) {
       try {
         const imageUrl = await uploadToGCSProduct(req.file);
         product.image = imageUrl;
       } catch (uploadErr) {
         console.error("Image upload to GCS failed:", uploadErr);
-        // Don't fail the whole update — just skip image update
       }
     }
 
@@ -424,6 +437,29 @@ export const deleteProduct = async (req, res) => {
         success: false,
         message: "Product not found",
       });
+    }
+
+    // If deleted product was holding lensHistory, transfer it to an active sibling or preserve as tombstone
+    if (product.lensHistory && Array.isArray(product.lensHistory) && product.lensHistory.length > 0) {
+      const sibling = await DigiProduct.findOne({
+        tenantId: req.user.tenantId,
+        productName: product.productName,
+        _id: { $ne: product._id },
+        isDeleted: { $ne: true },
+      });
+
+      if (sibling) {
+        await DigiProduct.updateOne(
+          { _id: sibling._id },
+          { $set: { lensHistory: product.lensHistory } }
+        );
+      } else {
+        await DigiProduct.create({
+          ...product.toObject(),
+          isDeleted: true,
+          qty: 0,
+        });
+      }
     }
 
     await ProductBatch.deleteMany({
@@ -556,12 +592,10 @@ export const addInventory = async (req, res) => {
         product.vendor = { id: item.vendorId, name: item.vendorName || "" };
       }
 
-      // Determine batch number
       let bNum = item.batchNumber?.trim() ? item.batchNumber.trim().toUpperCase() : "";
       if (!bNum) {
         bNum = await getNextBatchNumber(product._id, req.user.tenantId);
       } else {
-        // Prevent duplicate batch numbers for the same product
         const existingBatch = await ProductBatch.findOne({
           productId: product._id,
           tenantId: req.user.tenantId,
@@ -589,6 +623,7 @@ export const addInventory = async (req, res) => {
         inwardDate: item.inwardDate ? new Date(item.inwardDate) : new Date(),
         expiry: item.expiry ? new Date(item.expiry) : null,
         remarks: item.remarks || "Stock added via inventory",
+        invoices: Array.isArray(item.invoices) ? item.invoices : [],
         status: "OPEN",
         tenantId: req.user.tenantId,
         createdBy: req.user._id,
@@ -617,7 +652,6 @@ export const addInventory = async (req, res) => {
   }
 };
 
-// GET INVENTORY BY PRODUCT ID (WITH RECEIVING HISTORY, BATCHES & DETAILS)
 export const getInventoryByProductId = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -641,13 +675,31 @@ export const getInventoryByProductId = async (req, res) => {
       });
     }
 
-    // 1. Fetch batches for this product
+    if (product.vendor?.id && !product.vendor?.name) {
+      const vendorDoc = await Vendor.findById(product.vendor.id).lean();
+      if (vendorDoc) {
+        product.vendor.name = vendorDoc.vendorName || vendorDoc.name || vendorDoc.companyName || null;
+      }
+    }
+
     const batches = await ProductBatch.find({
       productId: product._id,
       tenantId: req.user.tenantId,
     }).sort({ createdAt: -1 }).lean();
 
-    // 2. Fetch purchase orders containing this product
+    for (const b of batches) {
+      if (!b.vendorName) {
+        if (b.vendorId && product.vendor?.id && b.vendorId.toString() === product.vendor.id.toString()) {
+          b.vendorName = product.vendor.name;
+        } else if (b.vendorId) {
+          const vDoc = await Vendor.findById(b.vendorId).lean();
+          if (vDoc) b.vendorName = vDoc.vendorName || vDoc.name || vDoc.companyName || null;
+        } else if (product.vendor?.name) {
+          b.vendorName = product.vendor.name;
+        }
+      }
+    }
+
     const purchaseOrders = await VendorPurchase.find({
       tenantId: req.user.tenantId,
       $or: [
@@ -656,7 +708,6 @@ export const getInventoryByProductId = async (req, res) => {
       ],
     }).sort({ createdAt: -1 }).lean();
 
-    // 3. Fetch purchase inwards containing this product or corresponding to these POs
     const poIds = purchaseOrders.map((po) => po._id);
     const purchaseInwards = await PurchaseInward.find({
       tenantId: req.user.tenantId,
@@ -666,9 +717,19 @@ export const getInventoryByProductId = async (req, res) => {
       ],
     }).sort({ inwardDate: -1, createdAt: -1 }).lean();
 
-    // Build receiving history entries
+    const inwardIds = purchaseInwards.map((i) => i._id);
+    const qcRecords = await PurchaseQC.find({
+      tenantId: req.user.tenantId,
+      $or: [
+        { purchaseOrderId: { $in: poIds } },
+        { purchaseInwardId: { $in: inwardIds } },
+        { "items.productId": product._id },
+      ],
+    }).sort({ qcDate: -1, createdAt: -1 }).lean();
+
     const receivingHistory = [];
     const processedInwardItemKeys = new Set();
+    const usedBatchIds = new Set();
 
     for (const inward of purchaseInwards) {
       const poDoc = purchaseOrders.find(
@@ -676,7 +737,6 @@ export const getInventoryByProductId = async (req, res) => {
       );
 
       for (const item of (inward.items || [])) {
-        // Find matching purchase order item
         let poItem = null;
         if (poDoc) {
           for (const ord of poDoc.orders || []) {
@@ -703,9 +763,64 @@ export const getInventoryByProductId = async (req, res) => {
           if (!processedInwardItemKeys.has(itemKey)) {
             processedInwardItemKeys.add(itemKey);
 
-            const bNum = item.vendorRefId || "—";
-            const matchedBatch = batches.find(
-              (b) => b.batchNumber && bNum !== "—" && b.batchNumber.toUpperCase() === bNum.trim().toUpperCase()
+            let matchedQc = null;
+            let matchedQcItem = null;
+            for (const qc of qcRecords) {
+              const isMatchQc =
+                (qc.purchaseInwardId && qc.purchaseInwardId.toString() === inward._id.toString()) ||
+                (qc.purchaseOrderId && inward.purchaseOrderId && qc.purchaseOrderId.toString() === inward.purchaseOrderId.toString());
+
+              if (isMatchQc) {
+                const qi = (qc.items || []).find(
+                  (q) =>
+                    (q.itemId && item.itemId && q.itemId.toString() === item.itemId.toString()) ||
+                    (q.productId && q.productId.toString() === product._id.toString()) ||
+                    (q.itemName && item.itemName && q.itemName.toLowerCase() === item.itemName.toLowerCase())
+                );
+                if (qi) {
+                  matchedQc = qc;
+                  matchedQcItem = qi;
+                  break;
+                }
+              }
+            }
+
+            let matchedBatch = null;
+            for (const b of batches) {
+              if (
+                (b.purchaseInwardId && b.purchaseInwardId.toString() === inward._id.toString()) ||
+                (matchedQc && b.purchaseQCId && b.purchaseQCId.toString() === matchedQc._id.toString()) ||
+                (b.purchaseOrderId && inward.purchaseOrderId && b.purchaseOrderId.toString() === inward.purchaseOrderId.toString()) ||
+                (b.batchNumber && item.vendorRefId && b.batchNumber.toUpperCase() === item.vendorRefId.trim().toUpperCase())
+              ) {
+                matchedBatch = b;
+                usedBatchIds.add(b._id.toString());
+                break;
+              }
+            }
+
+            const batchNo = matchedBatch?.batchNumber || (item.vendorRefId && !mongoose.Types.ObjectId.isValid(item.vendorRefId) ? item.vendorRefId : "—");
+            const vendorName = matchedBatch?.vendorName || inward.vendorName || poDoc?.vendor?.vendorName || product.vendor?.name || "—";
+            const vendorId = matchedBatch?.vendorId || inward.vendorId || poDoc?.vendor?.vendorId || product.vendor?.id || null;
+
+            const passedQty = matchedQcItem?.passedQty != null
+              ? matchedQcItem.passedQty
+              : (poItem?.passedQty != null ? poItem.passedQty : (matchedBatch != null ? matchedBatch.initialQty : item.receivedQty));
+
+            const failedQty = matchedQcItem?.failedQty != null
+              ? matchedQcItem.failedQty
+              : (poItem?.failedQty != null ? poItem.failedQty : 0);
+
+            const qcResult = matchedQcItem?.qcResult || poItem?.qcStatus || (matchedBatch ? "PASSED" : "PENDING");
+            const failureReason = matchedQcItem?.failureReason || "";
+            const qcRemarks = matchedQcItem?.remarks || "";
+
+            const combinedInvoices = [
+              ...(Array.isArray(inward.invoices) ? inward.invoices : []),
+              ...(matchedBatch && Array.isArray(matchedBatch.invoices) ? matchedBatch.invoices : []),
+            ];
+            const uniqueInvoices = Array.from(
+              new Map(combinedInvoices.filter(Boolean).map((inv) => [inv.url, inv])).values()
             );
 
             receivingHistory.push({
@@ -713,47 +828,59 @@ export const getInventoryByProductId = async (req, res) => {
               type: "PURCHASE_INWARD",
               inwardId: inward._id,
               purchaseOrderId: inward.purchaseOrderId,
+              purchaseQCId: matchedQc?._id || null,
               orderNumber: item.orderNumber || poDoc?.purchaseOrderSummary?.orderNumber || "—",
               dateOfPurchase: poDoc?.createdAt || inward.createdAt,
               inwardDate: inward.inwardDate || inward.createdAt,
               receivedOn: inward.receivedOn || inward.inwardDate || inward.createdAt,
               receivedBy: inward.receivedBy || "—",
               receivedFrom: inward.receivedFrom || inward.vendorName || "—",
-              vendorName: inward.vendorName || poDoc?.vendor?.vendorName || product.vendor?.name || "—",
-              vendorId: inward.vendorId || poDoc?.vendor?.vendorId || product.vendor?.id || null,
-              batchNumber: bNum,
+              vendorName,
+              vendorId,
+              batchNumber: batchNo,
               batchId: matchedBatch?._id || null,
               invoiceNumber: item.vendorRefId || inward.remarks || "—",
               orderedQty: item.orderedQty || poItem?.qty || item.receivedQty,
               receivedQty: item.receivedQty || 0,
-              availableQty: matchedBatch != null ? matchedBatch.availableQty : item.receivedQty,
-              initialQty: matchedBatch != null ? matchedBatch.initialQty : item.receivedQty,
-              buyingPrice: matchedBatch?.costPrice ?? matchedBatch?.buyingPrice ?? (poItem?.price != null ? poItem.price : (product.buyingPrice || product.price || 0)),
-              sellingPrice: matchedBatch?.sellingPrice ?? (product.sellingPrice || product.price || 0),
-              mrp: matchedBatch?.mrp ?? poItem?.mrp ?? (product.mrp || 0),
+              passedQty,
+              failedQty,
+              qcStatus: qcResult,
+              failureReason,
+              qcRemarks,
+              availableQty: matchedBatch != null ? matchedBatch.availableQty : passedQty,
+              initialQty: matchedBatch != null ? matchedBatch.initialQty : passedQty,
+              buyingPrice: (poItem?.price != null && poItem.price > 0) ? poItem.price : (matchedBatch?.costPrice ?? matchedBatch?.buyingPrice ?? (product.buyingPrice || product.price || 0)),
+              sellingPrice: (matchedBatch?.sellingPrice != null && matchedBatch.sellingPrice > 0) ? matchedBatch.sellingPrice : (product.sellingPrice || product.price || 0),
+              mrp: (poItem?.mrp != null && poItem.mrp > 0) ? poItem.mrp : (matchedBatch?.mrp != null && matchedBatch.mrp > 0 ? matchedBatch.mrp : (product.mrp || 0)),
               gst: poItem?.gst != null ? poItem.gst : (product.gst || 0),
               condition: item.condition || "GOOD",
               inwardStatus: poItem?.inwardStatus || inward.status || "Confirmed",
-              qcStatus: poItem?.qcStatus || "PENDING",
-              remarks: item.remarks || inward.remarks || "",
+              remarks: inward.remarks || item.remarks || qcRemarks || "",
+              invoices: uniqueInvoices,
             });
           }
         }
       }
     }
 
-    // Also include any batches representing stock allocations not yet captured
     for (const batch of batches) {
-      const alreadyIncluded = receivingHistory.some(
-        (rh) => rh.batchNumber && rh.batchNumber.toUpperCase() === batch.batchNumber.toUpperCase()
+      if (usedBatchIds.has(batch._id.toString())) continue;
+
+      const isLinkedToInward = receivingHistory.some(
+        (rh) =>
+          (rh.inwardId && batch.purchaseInwardId && rh.inwardId.toString() === batch.purchaseInwardId.toString()) ||
+          (rh.purchaseOrderId && batch.purchaseOrderId && rh.purchaseOrderId.toString() === batch.purchaseOrderId.toString()) ||
+          (rh.batchNumber && batch.batchNumber && rh.batchNumber.toUpperCase() === batch.batchNumber.toUpperCase())
       );
 
-      if (!alreadyIncluded) {
+      if (!isLinkedToInward) {
+        usedBatchIds.add(batch._id.toString());
         receivingHistory.push({
           _id: batch._id,
           type: "BATCH_ALLOCATION",
           inwardId: null,
           purchaseOrderId: batch.purchaseOrderId || null,
+          purchaseQCId: batch.purchaseQCId || null,
           orderNumber: "—",
           dateOfPurchase: batch.createdAt,
           inwardDate: batch.inwardDate || batch.createdAt,
@@ -767,6 +894,9 @@ export const getInventoryByProductId = async (req, res) => {
           invoiceNumber: "—",
           orderedQty: batch.initialQty,
           receivedQty: batch.initialQty,
+          passedQty: batch.initialQty,
+          failedQty: 0,
+          qcStatus: "PASSED",
           availableQty: batch.availableQty,
           initialQty: batch.initialQty,
           buyingPrice: batch.costPrice != null ? batch.costPrice : (batch.buyingPrice != null ? batch.buyingPrice : (product.buyingPrice || product.price || 0)),
@@ -775,19 +905,17 @@ export const getInventoryByProductId = async (req, res) => {
           gst: product.gst || 0,
           condition: "GOOD",
           inwardStatus: "Confirmed",
-          qcStatus: "PASSED",
           batchStatus: batch.status,
           remarks: batch.remarks || "Batch allocation",
+          invoices: batch.invoices || [],
         });
       }
     }
 
-    // Sort receiving history by date descending
     receivingHistory.sort(
       (a, b) => new Date(b.receivedOn || b.inwardDate || b.dateOfPurchase) - new Date(a.receivedOn || a.inwardDate || a.dateOfPurchase)
     );
 
-    // If receivingHistory is empty, provide the baseline opening inventory
     if (receivingHistory.length === 0 && (product.qty > 0 || product.createdAt)) {
       receivingHistory.push({
         _id: product._id,
@@ -814,6 +942,7 @@ export const getInventoryByProductId = async (req, res) => {
         inwardStatus: "Confirmed",
         qcStatus: "PASSED",
         remarks: "Opening inventory stock",
+        invoices: product.invoices || [],
       });
     }
 
@@ -842,7 +971,6 @@ export const getInventoryByProductId = async (req, res) => {
   }
 };
 
-// GET INVENTORY BY PROUDCT ID
 export const getInventoryByProductCode = async (req, res) => {
   try {
     const { productCode } = req.params;
@@ -957,7 +1085,7 @@ export const getFrameSunglassProducts = async (req, res) => {
   }
 };
 
-// get vendors data by date range or by keyword
+
 export const filterProducts = async (req, res) => {
   try {
     const { startDate, endDate, keyword } = req.body;
@@ -968,7 +1096,7 @@ export const filterProducts = async (req, res) => {
       });
     }
 
-    let query = { tenantId: req.user.tenantId };
+    let query = { tenantId: req.user.tenantId, isDeleted: { $ne: true } };
 
     if (startDate && endDate) {
       const start = new Date(startDate);
@@ -1029,7 +1157,7 @@ export const bulkUploadProducts = async (req, res) => {
     if (!products.length) throw new Error("No products provided");
 
     for (const p of products) {
-      if (!p.productName || !p.category || p.price == null || p.mrp == null) {
+      if (!p.productName || !p.category || (p.price == null && p.buyingPrice == null) || p.mrp == null) {
         throw new Error(
           "Missing required fields: productName, category, price, mrp",
         );
@@ -1076,7 +1204,9 @@ export const bulkUploadProducts = async (req, res) => {
       index: p.index?.toString().trim() || "",
       coating: p.coating?.trim()?.toUpperCase() || "",
       expiry: p.expiry || null,
-      price: Number(p.price),
+      price: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      buyingPrice: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      sellingPrice: Number(p.sellingPrice != null ? p.sellingPrice : (p.price ?? 0)),
       mrp: Number(p.mrp),
       gst: Number(p.gst) || 0,
       hsnSac: p.hsnSac?.trim() || "",
@@ -1090,6 +1220,58 @@ export const bulkUploadProducts = async (req, res) => {
     }));
 
     const saved = await DigiProduct.insertMany(docs, { session });
+
+    const isLens = docs.some((d) => d.sph || /lens|glass|contact/i.test(d.category));
+    if (isLens && saved.length > 0) {
+      const distinctSphs = Array.from(
+        new Set(
+          docs
+            .map((d) => parseFloat(String(d.sph).replace(/\+/g, "").trim()))
+            .filter((x) => !isNaN(x))
+        )
+      ).sort((a, b) => a - b);
+
+      const distinctCyls = Array.from(
+        new Set(
+          docs
+            .map((d) => parseFloat(String(d.cyl).replace(/\+/g, "").trim()))
+            .filter((x) => !isNaN(x))
+        )
+      ).sort((a, b) => a - b);
+
+      const first = docs[0];
+      const initialEntry = {
+        action: "GENERATED",
+        priceType: "",
+        totalLenses: saved.length,
+        totalStockQty: docs.reduce((sum, p) => sum + (p.qty || 0), 0),
+        sphRange: distinctSphs.length
+          ? `${distinctSphs[0].toFixed(2)} to ${distinctSphs[distinctSphs.length - 1].toFixed(2)}`
+          : "",
+        cylRange: distinctCyls.length
+          ? `${distinctCyls[0].toFixed(2)} to ${distinctCyls[distinctCyls.length - 1].toFixed(2)}`
+          : "",
+        buyingPrice: first.buyingPrice || first.price || 0,
+        sellingPrice: first.sellingPrice || first.price || 0,
+        mrp: first.mrp || 0,
+        updatedAt: new Date(),
+      };
+
+      await DigiProduct.updateOne(
+        { _id: saved[0]._id },
+        { $set: { lensHistory: [initialEntry] } },
+        { session }
+      );
+
+      if (saved.length > 1) {
+        const otherIds = saved.slice(1).map((s) => s._id);
+        await DigiProduct.updateMany(
+          { _id: { $in: otherIds } },
+          { $unset: { lensHistory: 1 } },
+          { session }
+        );
+      }
+    }
 
     await session.commitTransaction();
 

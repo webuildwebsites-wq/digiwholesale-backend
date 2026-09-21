@@ -187,7 +187,9 @@ export const createPurchaseQC = async (req, res) => {
                 ? photos
                 : [];
 
-            item.qcStatus = qcResult;
+            item.qcStatus  = qcResult;
+            item.passedQty = passed;
+            item.failedQty = failed;
 
             qcItems.push({
                 itemId:        item._id,
@@ -206,7 +208,7 @@ export const createPurchaseQC = async (req, res) => {
             });
 
             if (passed > 0 && item.productId && !item.isNewProduct) {
-                passedItems.push({ productId: item.productId, qty: passed });
+                passedItems.push({ productId: item.productId, qty: passed, item });
             }
 
             if (passed > 0 && (!item.productId || item.isNewProduct)) {
@@ -258,22 +260,32 @@ export const createPurchaseQC = async (req, res) => {
             const rxItems    = passedItems.filter(p => !p.productId);
 
             if (stockItems.length > 0) {
-                for (const { productId, qty } of stockItems) {
+                for (const { productId, qty, item: pItem } of stockItems) {
                     const batchNumber = await getNextBatchNumber(productId, req.user.tenantId);
+                    const bPrice = pItem?.buyingPrice != null ? Number(pItem.buyingPrice) : Number(pItem?.price || 0);
+                    const sPrice = pItem?.sellingPrice != null ? Number(pItem.sellingPrice) : 0;
+                    const mrpVal = pItem?.mrp != null ? Number(pItem.mrp) : 0;
 
                     await ProductBatch.create({
                         batchNumber,
                         productId,
-                        purchaseOrderId: purchaseOrderId,
-                        purchaseQCId:    purchaseQC._id,
-                        initialQty:      qty,
-                        availableQty:    qty,
-                        vendorId:        purchaseOrder.vendor.vendorId,
-                        vendorName:      purchaseOrder.vendor.vendorName,
-                        inwardDate:      new Date(),
-                        status:          "OPEN",
-                        createdBy:       req.user._id,
-                        tenantId:        req.user.tenantId,
+                        purchaseOrderId:  purchaseOrderId,
+                        purchaseQCId:     purchaseQC._id,
+                        purchaseInwardId: inward._id,
+                        initialQty:       qty,
+                        availableQty:     qty,
+                        buyingPrice:      bPrice,
+                        costPrice:        bPrice,
+                        price:            bPrice,
+                        sellingPrice:     sPrice,
+                        mrp:              mrpVal,
+                        vendorId:         purchaseOrder.vendor.vendorId,
+                        vendorName:       purchaseOrder.vendor.vendorName,
+                        inwardDate:       new Date(),
+                        status:           "OPEN",
+                        invoices:         Array.isArray(inward.invoices) ? inward.invoices : [],
+                        createdBy:        req.user._id,
+                        tenantId:         req.user.tenantId,
                     });
                 }
 
@@ -295,8 +307,15 @@ export const createPurchaseQC = async (req, res) => {
                     tenantId: req.user.tenantId,
                 });
 
+                const rxBuyingPrice  = item.buyingPrice != null ? Number(item.buyingPrice) : Number(item.price || 0);
+                const rxSellingPrice = item.sellingPrice != null ? Number(item.sellingPrice) : 0;
+                const rxMrp          = item.mrp != null ? Number(item.mrp) : 0;
+
                 if (product) {
                     product.qty += qty;
+                    if (rxBuyingPrice > 0) product.buyingPrice = rxBuyingPrice;
+                    if (rxSellingPrice > 0) product.sellingPrice = rxSellingPrice;
+                    if (rxMrp > 0) product.mrp = rxMrp;
                     await product.save();
                 } else {
                     product = await DigiProduct.create({
@@ -315,8 +334,10 @@ export const createPurchaseQC = async (req, res) => {
                         axis:         item.axis?.toString() || "",
                         addition:     item.add?.toString()  || "",
                         index:        item.index?.toString() || "",
-                        price:        item.price  ?? 0,
-                        mrp:          item.mrp    ?? 0,
+                        price:        rxBuyingPrice,
+                        buyingPrice:  rxBuyingPrice,
+                        sellingPrice: rxSellingPrice,
+                        mrp:          rxMrp,
                         gst:          item.gst    ?? 0,
                         hsnSac:       item.hsnSac || "",
                         qty,
@@ -324,6 +345,29 @@ export const createPurchaseQC = async (req, res) => {
                         createdBy:    req.user._id,
                     });
                 }
+
+                const rxBatchNumber = await getNextBatchNumber(product._id, req.user.tenantId);
+                await ProductBatch.create({
+                    batchNumber:      rxBatchNumber,
+                    productId:        product._id,
+                    purchaseOrderId:  purchaseOrderId,
+                    purchaseQCId:     purchaseQC._id,
+                    purchaseInwardId: inward._id,
+                    initialQty:       qty,
+                    availableQty:     qty,
+                    buyingPrice:      rxBuyingPrice,
+                    costPrice:        rxBuyingPrice,
+                    price:            rxBuyingPrice,
+                    sellingPrice:     rxSellingPrice,
+                    mrp:              rxMrp,
+                    vendorId:         purchaseOrder.vendor.vendorId,
+                    vendorName:       purchaseOrder.vendor.vendorName,
+                    inwardDate:       new Date(),
+                    status:           "OPEN",
+                    invoices:         Array.isArray(inward.invoices) ? inward.invoices : [],
+                    createdBy:        req.user._id,
+                    tenantId:         req.user.tenantId,
+                });
 
                 const allPO = purchaseOrder.orders.flatMap(o => o.items);
                 const poItem = allPO.find(i => i._id.toString() === item._id.toString());

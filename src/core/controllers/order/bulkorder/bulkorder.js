@@ -171,6 +171,9 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
                 if (!vendorItemsMap.has(vendorId)) {
                     vendorItemsMap.set(vendorId, { vendorId, vendorName, items: [], orderNumber: order.orderNumber, cgst: order.cgst, sgst: order.sgst });
                 }
+                const rxItemBuyingPrice  = item.buyingPrice != null && Number(item.buyingPrice) > 0 ? Number(item.buyingPrice) : Number(item.price || 0);
+                const rxItemSellingPrice = item.sellingPrice != null && Number(item.sellingPrice) > 0 ? Number(item.sellingPrice) : Number(item.price || 0);
+
                 vendorItemsMap.get(vendorId).items.push({
                     productId:    item.productId   || null,
                     isNewProduct: !item.productId,
@@ -180,7 +183,9 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
                     unit:         item.unit        || "PIECE",
                     brand:        item.brand       || "",
                     code:         item.code        || "",
-                    price:        item.price       ?? 0,
+                    price:        rxItemBuyingPrice,
+                    buyingPrice:  rxItemBuyingPrice,
+                    sellingPrice: rxItemSellingPrice,
                     mrp:          item.mrp         ?? 0,
                     gst:          item.gst         ?? 0,
                     hsnSac:       item.hsnSac      || "",
