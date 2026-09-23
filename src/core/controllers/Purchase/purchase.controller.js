@@ -260,6 +260,13 @@ export const createVendorPurchaseItems = async (req, res) => {
                             item.tint    = item.tint    || product.tint;
                             item.coating = item.coating || product.coating;
                         }
+
+                        const toNum = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+                        item.sph   = toNum(item.sph);
+                        item.cyl   = toNum(item.cyl);
+                        item.axis  = toNum(item.axis);
+                        item.add   = toNum(item.add);
+                        item.index = toNum(item.index);
                     }
 
                     if (rawCategory === "CONTACT_LENS") {
@@ -1168,11 +1175,11 @@ export const createReplacementOrder = async (req, res) => {
                     hsnSac:         item.hsnSac    || product.hsnSac,
                     discountPercent:item.discountPercent || 0,
                     discountAmount: item.discountAmount  || 0,
-                    sph:            item.sph       ?? product.sph,
-                    cyl:            item.cyl       ?? product.cyl,
-                    axis:           item.axis      ?? product.axis,
-                    add:            item.add       ?? product.add,
-                    index:          item.index     ?? product.index,
+                    sph:            parseFloat(item.sph   ?? product.sph)   || null,
+                    cyl:            parseFloat(item.cyl   ?? product.cyl)   || null,
+                    axis:           parseFloat(item.axis  ?? product.axis)  || null,
+                    add:            parseFloat(item.add   ?? product.add)   || null,
+                    index:          parseFloat(item.index ?? product.index) || null,
                     coating:        item.coating   || product.coating,
                     tint:           item.tint      || product.tint,
                     expiry:         item.expiry    || product.expiry,
@@ -1203,11 +1210,11 @@ export const createReplacementOrder = async (req, res) => {
                     hsnSac:         item.hsnSac     || "",
                     discountPercent:item.discountPercent || 0,
                     discountAmount: item.discountAmount  || 0,
-                    sph:            item.sph,
-                    cyl:            item.cyl,
-                    axis:           item.axis,
-                    add:            item.add,
-                    index:          item.index,
+                    sph:            parseFloat(item.sph)   || null,
+                    cyl:            parseFloat(item.cyl)   || null,
+                    axis:           parseFloat(item.axis)  || null,
+                    add:            parseFloat(item.add)   || null,
+                    index:          parseFloat(item.index) || null,
                     coating:        item.coating    || "",
                     tint:           item.tint       || "",
                     expiry:         item.expiry     || "",
