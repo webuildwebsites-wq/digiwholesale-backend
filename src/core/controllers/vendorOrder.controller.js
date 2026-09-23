@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 import VendorOrder from "../../models/VendorOrder.model.js";
 import VendorOrderItem from "../../models/VendorOrderItem.model.js";
 import Vendor from "../../models/Vendor.model.js";
+import VendorLedger from "../../models/Accounting/VendorLedger.model.js";
+import LedgerTransaction from "../../models/Accounting/LedgerTransaction.model.js";
 
 import { generateVendorOrderInvoiceHTML, generateVendorReturnInvoiceHTML } from "../services/templates/invoiceTemplate.js";
 import generatePDF from "../services/pdfService.js";
@@ -85,6 +87,65 @@ export const createVendorOrder = async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // Sync to Vendor Ledger
+    try {
+      const grandTotal = Number(order.grandTotal || 0);
+      if (grandTotal > 0) {
+        let ledger = await VendorLedger.findOne({ vendorId });
+        if (!ledger) {
+          ledger = new VendorLedger({
+            ledgerCode: `VEND-LED-${vendorId.toString().slice(-6).toUpperCase()}`,
+            vendorId,
+            vendorCategory: 'Manufacturer',
+            paymentTerms: 0,
+            openingBalance: 0,
+            currentOutstanding: 0,
+            branchId: null,
+            tenantId: req.user.tenantId,
+            createdBy: req.user._id,
+          });
+          await ledger.save();
+        }
+
+        const existingTxns = await LedgerTransaction.find({
+          $or: [
+            { ledgerId: ledger._id },
+            { partyId: vendorId, entityType: 'Vendor' }
+          ]
+        }).lean();
+
+        let currentBalance = Number(ledger.openingBalance || 0);
+        for (const t of existingTxns) {
+          currentBalance += Number(t.credit || 0) - Number(t.debit || 0);
+        }
+        const newBalance = currentBalance + grandTotal;
+
+        ledger.currentOutstanding = newBalance;
+        await ledger.save();
+
+        const orderRef = order._id.toString();
+
+        await LedgerTransaction.create({
+          entityType: 'Vendor',
+          ledgerId: ledger._id,
+          partyId: vendorId,
+          transactionDate: order.createdAt || new Date(),
+          voucherType: 'Purchase Invoice',
+          voucherId: order._id,
+          referenceNumber: orderRef,
+          debit: 0,
+          credit: grandTotal,
+          runningBalance: newBalance,
+          narration: `Vendor Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}. Vendor: ${vendor.name}.`,
+          branchId: null,
+          tenantId: req.user.tenantId,
+          createdBy: req.user._id,
+        });
+      }
+    } catch (ledgerErr) {
+      console.error("[VendorOrder Ledger Sync Error]:", ledgerErr.message);
+    }
 
 
     const invoiceData = {
@@ -437,6 +498,19 @@ export const deleteVendorOrder = async (req, res) => {
     await order.deleteOne({ session });
 
     await session.commitTransaction();
+    session.endSession();
+
+    // Clean up ledger transactions associated with this VendorOrder
+    await LedgerTransaction.deleteMany({ voucherId: order._id, entityType: 'Vendor' });
+    const remainingTxns = await LedgerTransaction.find({
+      partyId: order.vendorId,
+      entityType: 'Vendor'
+    }).lean();
+    let synced = 0;
+    for (const t of remainingTxns) {
+      synced += Number(t.credit || 0) - Number(t.debit || 0);
+    }
+    await VendorLedger.findOneAndUpdate({ vendorId: order.vendorId }, { currentOutstanding: synced });
 
     return res.status(200).json({
       success: true,

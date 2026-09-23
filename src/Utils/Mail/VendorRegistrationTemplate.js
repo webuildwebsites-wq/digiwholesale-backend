@@ -8,12 +8,12 @@ const VendorRegistrationTemplate = ({ vendorName, firmName, mobile, email }) => 
 <body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Roboto,Arial,sans-serif;">
   <div style="max-width:620px;margin:40px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
 
-    <div style="background:#e8710a;padding:22px 28px;color:#fff;">
+    <div style="background:#2980B9;padding:22px 28px;color:#fff;">
       <div style="font-size:22px;font-weight:700;letter-spacing:0.5px;">DigiOptics</div>
       <div style="font-size:13px;margin-top:4px;opacity:0.9;">Vendor Registration Confirmation</div>
     </div>
 
-    <div style="padding:28px;background:#fff8f3;border-bottom:2px solid #e8710a;">
+    <div style="padding:28px;background:#f0f9ff;border-bottom:2px solid #2980B9;">
       <p style="margin:0 0 6px;font-size:15px;">Dear <b>${vendorName}</b>,</p>
       <p style="margin:0;font-size:14px;color:#555;">
         You have been successfully registered as a vendor on <b>DigiOptics Wholesale</b>. We're excited to have you on board!
@@ -25,19 +25,19 @@ const VendorRegistrationTemplate = ({ vendorName, firmName, mobile, email }) => 
 
       <table style="width:100%;border-collapse:collapse;background:#f9f9f9;border:1px solid #e5e7eb;border-radius:6px;">
         <tr>
-          <td style="padding:10px 14px;font-weight:bold;color:#e8710a;font-size:12px;text-transform:uppercase;width:35%;">Vendor Name</td>
+          <td style="padding:10px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;width:35%;">Vendor Name</td>
           <td style="padding:10px 14px;font-size:13px;">${vendorName}</td>
         </tr>
         <tr style="background:#fff;">
-          <td style="padding:10px 14px;font-weight:bold;color:#e8710a;font-size:12px;text-transform:uppercase;">Firm Name</td>
+          <td style="padding:10px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Firm Name</td>
           <td style="padding:10px 14px;font-size:13px;">${firmName}</td>
         </tr>
         <tr>
-          <td style="padding:10px 14px;font-weight:bold;color:#e8710a;font-size:12px;text-transform:uppercase;">Mobile</td>
+          <td style="padding:10px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Mobile</td>
           <td style="padding:10px 14px;font-size:13px;">${mobile}</td>
         </tr>
         <tr style="background:#fff;">
-          <td style="padding:10px 14px;font-weight:bold;color:#e8710a;font-size:12px;text-transform:uppercase;">Email</td>
+          <td style="padding:10px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Email</td>
           <td style="padding:10px 14px;font-size:13px;">${email}</td>
         </tr>
       </table>

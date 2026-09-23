@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import Vendor from "../../../models/Vendor.model.js";
 import DigiProduct from "../../../models/Product/Product.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
+import VendorLedger from "../../../models/Accounting/VendorLedger.model.js";
+import LedgerTransaction from "../../../models/Accounting/LedgerTransaction.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../config/Email/emailService.js";
 import VendorPurchaseOrderTemplate from "../../../Utils/Mail/VendorPurchaseOrderTemplate.js";
@@ -71,6 +73,84 @@ const validatePurchaseItem = (item, product) => {
     }
 
     return null;
+};
+
+export const deriveVendorPurchaseTotal = (orders) => {
+    let total = 0;
+    for (const ord of orders) {
+        if (ord.totalOrderPrice && Number(ord.totalOrderPrice) > 0) {
+            total += Number(ord.totalOrderPrice);
+        } else if (Array.isArray(ord.items)) {
+            for (const it of ord.items) {
+                const price   = Number(it.price || 0);
+                const qty     = Number(it.qty   || 1);
+                const disc    = Number(it.discountAmount || 0);
+                const taxable = Math.max(0, price * qty - disc);
+                total += taxable + taxable * (Number(it.gst || 0) / 100);
+            }
+        }
+    }
+    return total;
+};
+
+export const applyPurchaseToVendorLedger = async ({ vendorPurchase, vendorId, userId, tenantId }) => {
+    try {
+        const grandTotal = deriveVendorPurchaseTotal(vendorPurchase.orders);
+        if (grandTotal <= 0) return;
+
+        let ledger = await VendorLedger.findOne({ vendorId });
+        if (!ledger) {
+            ledger = new VendorLedger({
+                ledgerCode:         `VEND-LED-${vendorId.toString().slice(-6).toUpperCase()}`,
+                vendorId,
+                vendorCategory:     'Manufacturer',
+                paymentTerms:       0,
+                openingBalance:     0,
+                currentOutstanding: 0,
+                branchId:           null,
+                tenantId,
+                createdBy:          userId,
+            });
+            await ledger.save();
+        }
+
+        const existingTxns = await LedgerTransaction.find({
+            $or: [
+                { ledgerId: ledger._id },
+                { partyId: vendorId, entityType: 'Vendor' }
+            ]
+        }).lean();
+
+        let currentBalance = Number(ledger.openingBalance || 0);
+        for (const t of existingTxns) {
+            currentBalance += Number(t.credit || 0) - Number(t.debit || 0);
+        }
+        const newBalance = currentBalance + grandTotal;
+
+        ledger.currentOutstanding = newBalance;
+        await ledger.save();
+
+        const orderRef = vendorPurchase.orders[0]?.orderNumber || vendorPurchase._id.toString();
+
+        await LedgerTransaction.create({
+            entityType:      'Vendor',
+            ledgerId:        ledger._id,
+            partyId:         vendorId,
+            transactionDate: vendorPurchase.createdAt || new Date(),
+            voucherType:     'Purchase Invoice',
+            voucherId:       vendorPurchase._id,
+            referenceNumber: orderRef,
+            debit:           0,
+            credit:          grandTotal,
+            runningBalance:  newBalance,
+            narration:       `Purchase Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}. Vendor: ${vendorPurchase.vendor?.vendorName || ''}.`,
+            branchId:        null,
+            tenantId,
+            createdBy:       userId,
+        });
+    } catch (err) {
+        console.error("[Vendor Ledger Sync Error]:", err.message);
+    }
 };
 
 export const createVendorPurchaseItems = async (req, res) => {
@@ -149,8 +229,10 @@ export const createVendorPurchaseItems = async (req, res) => {
                     item.isNewProduct = false;
                     item.itemName     = item.itemName || product.productName;
                     item.category     = rawCategory;
-                    item.price        = item.price    ?? product.price   ?? 0;
-                    item.mrp          = item.mrp      ?? product.mrp     ?? 0;
+                    item.buyingPrice  = item.buyingPrice != null && item.buyingPrice !== "" ? Number(item.buyingPrice) : Number(item.price ?? product.buyingPrice ?? product.price ?? 0);
+                    item.sellingPrice = item.sellingPrice != null && item.sellingPrice !== "" ? Number(item.sellingPrice) : Number(product.sellingPrice ?? 0);
+                    item.price        = item.buyingPrice;
+                    item.mrp          = item.mrp != null && item.mrp !== "" ? Number(item.mrp) : Number(product.mrp ?? 0);
                     item.gst          = item.gst      ?? product.gst     ?? 0;
                     item.hsnSac       = item.hsnSac   || product.hsnSac;
                     item.qty          = qty;
@@ -178,6 +260,13 @@ export const createVendorPurchaseItems = async (req, res) => {
                             item.tint    = item.tint    || product.tint;
                             item.coating = item.coating || product.coating;
                         }
+
+                        const toNum = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+                        item.sph   = toNum(item.sph);
+                        item.cyl   = toNum(item.cyl);
+                        item.axis  = toNum(item.axis);
+                        item.add   = toNum(item.add);
+                        item.index = toNum(item.index);
                     }
 
                     if (rawCategory === "CONTACT_LENS") {
@@ -202,6 +291,10 @@ export const createVendorPurchaseItems = async (req, res) => {
                     item.productId    = null;
                     item.qty          = qty;
                     item.category     = (item.category || "").toUpperCase();
+                    item.buyingPrice  = item.buyingPrice != null && item.buyingPrice !== "" ? Number(item.buyingPrice) : Number(item.price ?? 0);
+                    item.sellingPrice = item.sellingPrice != null && item.sellingPrice !== "" ? Number(item.sellingPrice) : 0;
+                    item.price        = item.buyingPrice;
+                    item.mrp          = item.mrp != null && item.mrp !== "" ? Number(item.mrp) : 0;
                     if (item.orderType === "STOCK") delete item.rx;
                 }
             }
@@ -224,9 +317,16 @@ export const createVendorPurchaseItems = async (req, res) => {
         const vendorPurchase = await VendorPurchase.create({
             vendor:    vendorDoc,
             orders,
-            createdBy: req.user._id,
+            createdBy: req.user.id || req.user._id,
             tenantId:  req.user.tenantId,
         });
+
+        applyPurchaseToVendorLedger({
+            vendorPurchase,
+            vendorId:  vendor._id,
+            userId:    req.user.id || req.user._id,
+            tenantId:  req.user.tenantId,
+        }).catch(err => console.error("Vendor ledger sync error on purchase create:", err.message));
 
         if (vendor.email) {
             const html = VendorPurchaseOrderTemplate({
@@ -450,6 +550,21 @@ export const deleteVendorPurchaseItems = async (req, res) => {
         const purchaseOrder = await VendorPurchase.findOneAndDelete({ _id: id, tenantId: req.user.tenantId });
         if (!purchaseOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Purchase order not found");
+        }
+
+        await LedgerTransaction.deleteMany({ voucherId: purchaseOrder._id, entityType: 'Vendor' });
+
+        const vendorId = purchaseOrder.vendor?.vendorId;
+        if (vendorId) {
+            const txns = await LedgerTransaction.find({
+                partyId: vendorId,
+                entityType: 'Vendor'
+            }).lean();
+            let synced = 0;
+            for (const t of txns) {
+                synced += Number(t.credit || 0) - Number(t.debit || 0);
+            }
+            await VendorLedger.findOneAndUpdate({ vendorId }, { currentOutstanding: synced });
         }
 
         return sendSuccessResponse(res, 200, null, "Purchase order deleted successfully");
@@ -845,13 +960,16 @@ export const getQCPendingItems = async (req, res) => {
 
 export const getQCPassedItems = async (req, res) => {
     try {
-        const filter = buildItemsFilter(req, { "orders.items.qcStatus": "PASSED" });
+        const filter = buildItemsFilter(req, {
+            "orders.items.qcStatus": { $in: ["PASSED", "PARTIAL"] },
+        });
 
         const page  = Math.max(parseInt(req.query.page)  || 1, 1);
         const limit = Math.min(parseInt(req.query.limit) || 20, 100);
         const skip  = (page - 1) * limit;
 
         const PurchaseQC = (await import("../../../models/Purchase/PurchaseQC.model.js")).default;
+        await import("../../../models/Auth/Employee.js");
 
         const purchaseOrders = await VendorPurchase.find(filter).sort({ createdAt: -1 }).lean();
 
@@ -874,26 +992,36 @@ export const getQCPassedItems = async (req, res) => {
 
             for (const order of po.orders) {
                 for (const item of order.items) {
-                    if (item.qcStatus !== "PASSED") continue;
+                    if (item.qcStatus !== "PASSED" && item.qcStatus !== "PARTIAL") continue;
 
                     let qcDoneBy     = null;
                     let qcDoneByName = null;
                     let qcDate       = null;
+                    let passedQty    = item.passedQty != null ? item.passedQty : null;
 
                     for (const qc of poQCRecords) {
                         const qcItem = qc.items?.find(qi => qi.itemId?.toString() === item._id?.toString());
-                        if (qcItem && qcItem.qcResult === "PASSED") {
+                        if (qcItem && (qcItem.qcResult === "PASSED" || qcItem.qcResult === "PARTIAL" || (qcItem.passedQty != null && qcItem.passedQty > 0))) {
                             qcDoneBy     = qc.createdBy;
                             qcDoneByName = qc.createdByName || qc.createdBy?.employeeName || null;
                             qcDate       = qc.qcDate;
+                            if (qcItem.passedQty != null) {
+                                passedQty = qcItem.passedQty;
+                            }
                             break;
                         }
                     }
 
+                    if (passedQty == null) {
+                        passedQty = item.qcStatus === "PASSED" ? (item.receivedQty ?? item.qty ?? 0) : 0;
+                    }
+
+                    if (passedQty <= 0) continue;
+
                     allItems.push({
                         purchaseOrderId: po._id,
-                        vendorName:      po.vendor.vendorName,
-                        vendorId:        po.vendor.vendorId,
+                        vendorName:      po.vendor?.vendorName,
+                        vendorId:        po.vendor?.vendorId,
                         orderNumber:     order.orderNumber,
                         cgst:            order.cgst,
                         sgst:            order.sgst,
@@ -901,6 +1029,7 @@ export const getQCPassedItems = async (req, res) => {
                         qcDoneByName,
                         qcDate,
                         ...item,
+                        passedQty,
                     });
                 }
             }
@@ -1046,11 +1175,11 @@ export const createReplacementOrder = async (req, res) => {
                     hsnSac:         item.hsnSac    || product.hsnSac,
                     discountPercent:item.discountPercent || 0,
                     discountAmount: item.discountAmount  || 0,
-                    sph:            item.sph       ?? product.sph,
-                    cyl:            item.cyl       ?? product.cyl,
-                    axis:           item.axis      ?? product.axis,
-                    add:            item.add       ?? product.add,
-                    index:          item.index     ?? product.index,
+                    sph:            parseFloat(item.sph   ?? product.sph)   || null,
+                    cyl:            parseFloat(item.cyl   ?? product.cyl)   || null,
+                    axis:           parseFloat(item.axis  ?? product.axis)  || null,
+                    add:            parseFloat(item.add   ?? product.add)   || null,
+                    index:          parseFloat(item.index ?? product.index) || null,
                     coating:        item.coating   || product.coating,
                     tint:           item.tint      || product.tint,
                     expiry:         item.expiry    || product.expiry,
@@ -1081,11 +1210,11 @@ export const createReplacementOrder = async (req, res) => {
                     hsnSac:         item.hsnSac     || "",
                     discountPercent:item.discountPercent || 0,
                     discountAmount: item.discountAmount  || 0,
-                    sph:            item.sph,
-                    cyl:            item.cyl,
-                    axis:           item.axis,
-                    add:            item.add,
-                    index:          item.index,
+                    sph:            parseFloat(item.sph)   || null,
+                    cyl:            parseFloat(item.cyl)   || null,
+                    axis:           parseFloat(item.axis)  || null,
+                    add:            parseFloat(item.add)   || null,
+                    index:          parseFloat(item.index) || null,
                     coating:        item.coating    || "",
                     tint:           item.tint       || "",
                     expiry:         item.expiry     || "",

@@ -1,5 +1,6 @@
 import express from "express";
-import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames, bulkUploadProducts, getFrameSunglassProducts } from "../../core/controllers/Product/Product.controller.js";
+import { createProduct, getProducts, getProductById, updateProduct, deleteProduct, deleteBulkProducts, addInventory, getInventoryByProductId, getProductsByCategory, filterProducts, suggestionProduct, getInventoryByProductCode, getDigiProductNames, bulkUploadProducts, getFrameSunglassProducts } from "../../core/controllers/Product/Product.controller.js";
+import { searchLensProducts, getLensMatrixData, updateLensMatrix, getLensHistory } from "../../core/controllers/Product/lensMatrix.controller.js";
 import { digiupload } from "../uploads/multer.js";
 import { checkPageAccess, checkPermission } from "../../middlewares/Auth/AdminMiddleware/rbac.middleware.js";
 import { ProtectUser } from "../../middlewares/Auth/AdminMiddleware/adminMiddleware.js";
@@ -20,6 +21,12 @@ router.get("/inventory/productCode/:productCode",checkPageAccess('INVENTORY'), g
 router.get("/inventory/:productId", checkPageAccess('INVENTORY'), getInventoryByProductId);
 // Get by category
 router.get("/category/:category", checkPageAccess('INVENTORY'), getProductsByCategory);
+// Lens Range Matrix & History routes — must be before /:id
+router.get("/lens/search", checkPageAccess("INVENTORY"), searchLensProducts);
+router.get("/lens/matrix-data", checkPageAccess("INVENTORY"), getLensMatrixData);
+router.get("/lens/history", checkPageAccess("INVENTORY"), getLensHistory);
+router.post("/lens/matrix-update", checkPermission("UPDATE_INVENTORY"), updateLensMatrix);
+
 // Get single product — keep last among GET /:param routes
 router.get("/:id", checkPageAccess('INVENTORY'), getProductById);
 
@@ -31,8 +38,7 @@ router.post("/add/inventory", checkPageAccess('INVENTORY'), addInventory);
 // Filter products
 router.post("/search", checkPageAccess('INVENTORY'), filterProducts);
 router.post("/bulk", checkPermission("UPDATE_INVENTORY"), digiupload.any(), bulkUploadProducts);
-
-
+router.post("/delete-bulk", checkPermission("UPDATE_INVENTORY"), deleteBulkProducts);
 
 // Update product
 router.put("/", checkPermission('UPDATE_INVENTORY'), digiupload.single("image"), updateProduct);

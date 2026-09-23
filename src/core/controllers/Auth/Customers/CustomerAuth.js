@@ -65,6 +65,13 @@ export const customerLogin = async (req, res) => {
       return sendErrorResponse(res, 403, "TENANT_SUSPENDED", "Your workspace has been suspended. Please contact support.",);
     }
 
+    const isDemoActive = tenantDoc?.featureFlags?.demoMode || tenantDoc?.demoMode;
+    const demoExpiryDate = tenantDoc?.featureFlags?.demoExpiry || tenantDoc?.demoExpiry;
+
+    if (isDemoActive && demoExpiryDate && new Date() > new Date(demoExpiryDate)) {
+      return sendErrorResponse(res, 403, "DEMO_EXPIRED", "Your demo access period has expired. Please contact support to renew access.");
+    }
+
     if (customer.isLocked) {
       return sendErrorResponse(res, 423, "ACCOUNT_LOCKED", "Account is temporarily locked due to too many failed login attempts",);
     }
@@ -80,7 +87,7 @@ export const customerLogin = async (req, res) => {
     }
     customer.lastLogin = new Date();
     await customer.save({ validateBeforeSave: false });
-    return sendTokenResponse(customer, 200, res, "CUSTOMER", generateToken, generateRefreshToken);
+    return sendTokenResponse(customer, 200, res, "CUSTOMER", generateToken, generateRefreshToken, tenantDoc);
 
   } catch (error) {
     console.error("Customer login error:", error);

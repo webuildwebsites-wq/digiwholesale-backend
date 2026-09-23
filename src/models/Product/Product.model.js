@@ -31,6 +31,12 @@ const productSchema = new mongoose.Schema(
       default: "",
     },
 
+    color: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     colors: [
       {
         color: {
@@ -103,6 +109,10 @@ const productSchema = new mongoose.Schema(
       uppercase: true,
     },
 
+    disposability: {
+      type: String,
+    },
+
     expiry: {
       type: Date,
     },
@@ -111,6 +121,18 @@ const productSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 0,
+    },
+
+    buyingPrice: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+
+    sellingPrice: {
+      type: Number,
+      min: 0,
+      default: 0,
     },
 
     gst: {
@@ -142,6 +164,24 @@ const productSchema = new mongoose.Schema(
       name: { type: String, default: null },
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+    lensHistory: {
+      type: [
+        {
+          action: { type: String, default: "GENERATED" },
+          priceType: { type: String, default: "" },
+          totalLenses: { type: Number, default: 0 },
+          totalStockQty: { type: Number, default: 0 },
+          sphRange: { type: String, default: "" },
+          cylRange: { type: String, default: "" },
+          buyingPrice: { type: Number, default: 0 },
+          sellingPrice: { type: Number, default: 0 },
+          mrp: { type: Number, default: 0 },
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: undefined,
+    },
+    isDeleted: { type: Boolean, default: false, index: true },
     tenantId: { type: String, trim: true, uppercase: true, default: null, index: true },
   },
   { timestamps: true }

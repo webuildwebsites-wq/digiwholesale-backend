@@ -35,13 +35,13 @@ const VendorOrderUpdatedTemplate = ({ vendorName, purchaseOrderId, orderDate, up
 
     return `
       <div style="margin-bottom:28px;">
-        <div style="background:#f59e0b;color:#fff;padding:9px 14px;border-radius:6px 6px 0 0;font-weight:bold;font-size:13px;">
+        <div style="background:#2980B9;color:#fff;padding:9px 14px;border-radius:6px 6px 0 0;font-weight:bold;font-size:13px;">
           Order ${orderIdx + 1}: ${fmt(order.orderNumber)}
           ${order.remarks ? `<span style="font-size:12px;font-weight:normal;margin-left:10px;opacity:0.9;">${order.remarks}</span>` : ""}
         </div>
         <table style="width:100%;border-collapse:collapse;">
           <thead>
-            <tr style="background:#fef3c7;font-size:12px;">
+            <tr style="background:#e0f2fe;font-size:12px;">
               <th style="padding:7px 12px;border:1px solid #e5e7eb;text-align:left;">Item</th>
               <th style="padding:7px 12px;border:1px solid #e5e7eb;text-align:center;">Qty</th>
               <th style="padding:7px 12px;border:1px solid #e5e7eb;text-align:right;">Unit Rate</th>
@@ -67,10 +67,10 @@ const VendorOrderUpdatedTemplate = ({ vendorName, purchaseOrderId, orderDate, up
             <td style="border:1px solid #e5e7eb;padding:7px 12px;text-align:right;font-size:12px;">SGST (${order.sgst || 0}%)</td>
             <td style="border:1px solid #e5e7eb;padding:7px 12px;text-align:right;font-size:12px;">₹${fmtNum(sgstAmt)}</td>
           </tr>
-          <tr style="background:#fffbeb;">
+          <tr style="background:#f0f9ff;">
             <td style="border:1px solid #e5e7eb;padding:9px 12px;"></td>
             <td style="border:1px solid #e5e7eb;padding:9px 12px;text-align:right;font-weight:bold;font-size:13px;">Grand Total</td>
-            <td style="border:1px solid #e5e7eb;padding:9px 12px;text-align:right;font-weight:bold;font-size:14px;color:#f59e0b;">₹${fmtNum(grand)}</td>
+            <td style="border:1px solid #e5e7eb;padding:9px 12px;text-align:right;font-weight:bold;font-size:14px;color:#2980B9;">₹${fmtNum(grand)}</td>
           </tr>
         </table>
       </div>`;
@@ -82,34 +82,34 @@ const VendorOrderUpdatedTemplate = ({ vendorName, purchaseOrderId, orderDate, up
 <body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Roboto,Arial,sans-serif;">
   <div style="max-width:720px;margin:40px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
 
-    <div style="background:#f59e0b;padding:22px 28px;color:#fff;">
+    <div style="background:#2980B9;padding:22px 28px;color:#fff;">
       <div style="font-size:22px;font-weight:700;">DigiOptics</div>
       <div style="font-size:13px;margin-top:4px;opacity:0.9;">Purchase Order — Update Notification</div>
     </div>
 
-    <div style="padding:18px 28px;background:#fffbeb;border-bottom:2px solid #f59e0b;">
+    <div style="padding:18px 28px;background:#f0f9ff;border-bottom:2px solid #2980B9;">
       <p style="margin:0 0 6px;font-size:15px;">Dear <b>${fmt(vendorName)}</b>,</p>
       <p style="margin:0;font-size:14px;color:#555;">
-        Please note that your purchase order has been <b style="color:#f59e0b;">updated</b>. The revised order details are attached below and in the Excel file.
+        Please note that your purchase order has been <b style="color:#2980B9;">updated</b>. The revised order details are attached below and in the Excel file.
       </p>
     </div>
 
     <div style="padding:20px 28px 8px;">
       <table style="width:100%;border-collapse:collapse;background:#f9f9f9;border:1px solid #ddd;border-radius:6px;margin-bottom:24px;">
         <tr>
-          <td style="padding:9px 14px;font-weight:bold;color:#f59e0b;font-size:12px;text-transform:uppercase;width:35%;">Purchase Order ID</td>
+          <td style="padding:9px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;width:35%;">Purchase Order ID</td>
           <td style="padding:9px 14px;font-size:13px;font-weight:bold;">${fmt(purchaseOrderId)}</td>
         </tr>
         <tr style="background:#fff;">
-          <td style="padding:9px 14px;font-weight:bold;color:#f59e0b;font-size:12px;text-transform:uppercase;">Original Order Date</td>
+          <td style="padding:9px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Original Order Date</td>
           <td style="padding:9px 14px;font-size:13px;">${fmt(orderDate)}</td>
         </tr>
         <tr>
-          <td style="padding:9px 14px;font-weight:bold;color:#f59e0b;font-size:12px;text-transform:uppercase;">Updated On</td>
+          <td style="padding:9px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Updated On</td>
           <td style="padding:9px 14px;font-size:13px;">${fmt(updatedAt)}</td>
         </tr>
         <tr style="background:#fff;">
-          <td style="padding:9px 14px;font-weight:bold;color:#f59e0b;font-size:12px;text-transform:uppercase;">Total Items</td>
+          <td style="padding:9px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Total Items</td>
           <td style="padding:9px 14px;font-size:13px;">${orders.reduce((s, o) => s + o.items.length, 0)}</td>
         </tr>
       </table>

@@ -11,12 +11,12 @@ const VendorProposalTemplate = ({ vendorName, proposalNumber, proposalDate, prod
 <body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Roboto,Arial,sans-serif;">
   <div style="max-width:660px;margin:40px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
 
-    <div style="background:#1e40af;padding:22px 28px;color:#fff;">
+    <div style="background:#2980B9;padding:22px 28px;color:#fff;">
       <div style="font-size:22px;font-weight:700;letter-spacing:0.5px;">DigiOptics Wholesale</div>
       <div style="font-size:13px;margin-top:4px;opacity:0.9;">Purchase Proposal / RFQ</div>
     </div>
 
-    <div style="padding:24px 28px;background:#eff6ff;border-bottom:2px solid #1e40af;">
+    <div style="padding:24px 28px;background:#eff6ff;border-bottom:2px solid #2980B9;">
       <p style="margin:0 0 6px;font-size:15px;">Dear <b>${fmt(vendorName)}</b>,</p>
       <p style="margin:0;font-size:14px;color:#555;">
         We would like to request a quotation for the following product. Kindly review the details and submit your best price and availability at the earliest.
@@ -27,21 +27,21 @@ const VendorProposalTemplate = ({ vendorName, proposalNumber, proposalDate, prod
 
       <table style="width:100%;border-collapse:collapse;margin-bottom:22px;background:#f9f9f9;border:1px solid #e5e7eb;border-radius:6px;">
         <tr>
-          <td style="padding:10px 14px;font-weight:bold;color:#1e40af;font-size:12px;text-transform:uppercase;white-space:nowrap;width:40%;">Proposal No.</td>
+          <td style="padding:10px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;white-space:nowrap;width:40%;">Proposal No.</td>
           <td style="padding:10px 14px;font-size:14px;">${fmt(proposalNumber)}</td>
         </tr>
         <tr style="background:#fff;">
-          <td style="padding:10px 14px;font-weight:bold;color:#1e40af;font-size:12px;text-transform:uppercase;">Date</td>
+          <td style="padding:10px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Date</td>
           <td style="padding:10px 14px;font-size:14px;">${fmt(proposalDate)}</td>
         </tr>
         ${requiredByDate ? `
         <tr>
-          <td style="padding:10px 14px;font-weight:bold;color:#1e40af;font-size:12px;text-transform:uppercase;">Required By</td>
+          <td style="padding:10px 14px;font-weight:bold;color:#2980B9;font-size:12px;text-transform:uppercase;">Required By</td>
           <td style="padding:10px 14px;font-size:14px;">${fmt(requiredByDate)}</td>
         </tr>` : ""}
       </table>
 
-      <div style="font-size:15px;font-weight:700;color:#1e40af;margin-bottom:12px;border-left:4px solid #1e40af;padding-left:10px;">
+      <div style="font-size:15px;font-weight:700;color:#2980B9;margin-bottom:12px;border-left:4px solid #2980B9;padding-left:10px;">
         Product Details
       </div>
 
@@ -67,7 +67,7 @@ const VendorProposalTemplate = ({ vendorName, proposalNumber, proposalDate, prod
         </tr>` : ""}
         <tr style="background:#f9f9f9;">
           <td style="padding:10px 14px;font-weight:bold;color:#374151;font-size:12px;text-transform:uppercase;">Required Quantity</td>
-          <td style="padding:10px 14px;font-size:15px;font-weight:bold;color:#1e40af;">${fmt(requiredQty)} ${fmt(product.unit)}</td>
+          <td style="padding:10px 14px;font-size:15px;font-weight:bold;color:#2980B9;">${fmt(requiredQty)} ${fmt(product.unit)}</td>
         </tr>
       </table>
 
@@ -78,7 +78,7 @@ const VendorProposalTemplate = ({ vendorName, proposalNumber, proposalDate, prod
       </div>` : ""}
 
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin-bottom:20px;">
-        <div style="font-size:13px;font-weight:bold;color:#1e40af;margin-bottom:8px;">Please provide your quotation including:</div>
+        <div style="font-size:13px;font-weight:bold;color:#2980B9;margin-bottom:8px;">Please provide your quotation including:</div>
         <ul style="margin:0;padding-left:20px;font-size:13px;color:#374151;line-height:2;">
           <li>Unit price per ${fmt(product.unit)}</li>
           <li>Available quantity</li>

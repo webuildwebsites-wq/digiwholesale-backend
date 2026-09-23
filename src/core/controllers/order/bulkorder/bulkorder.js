@@ -4,6 +4,7 @@ import CustomerLedger from "../../../../models/Accounting/CustomerLedger.model.j
 import LedgerTransaction from "../../../../models/Accounting/LedgerTransaction.model.js";
 import BulkOrder from "../../../../models/order/BulkOrder.js";
 import DigiProduct from "../../../../models/Product/Product.model.js";
+import ProductBatch from "../../../../models/Product/ProductBatch.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
 import VendorPurchase from "../../../../models/Purchase/VendorPurchase.model.js";
 import Employee from "../../../../models/Auth/Employee.js";
@@ -11,10 +12,11 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/respon
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
 import { handleOrderBillingNotification } from "../../../services/billing/billingNotification.service.js";
-import { sendWhatsAppMessage } from "../../../../Utils/whatsapp/whatsappService.js";
+import { sendWhatsAppMessage, customerOrderCreditDueWhatsApp } from "../../../../Utils/whatsapp/whatsappService.js";
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
 import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
 import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
+import { applyPurchaseToVendorLedger } from "../../Purchase/purchase.controller.js";
 
 const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumber }) => {
     try {
@@ -169,6 +171,9 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
                 if (!vendorItemsMap.has(vendorId)) {
                     vendorItemsMap.set(vendorId, { vendorId, vendorName, items: [], orderNumber: order.orderNumber, cgst: order.cgst, sgst: order.sgst });
                 }
+                const rxItemBuyingPrice  = item.buyingPrice != null && Number(item.buyingPrice) > 0 ? Number(item.buyingPrice) : Number(item.price || 0);
+                const rxItemSellingPrice = item.sellingPrice != null && Number(item.sellingPrice) > 0 ? Number(item.sellingPrice) : Number(item.price || 0);
+
                 vendorItemsMap.get(vendorId).items.push({
                     productId:    item.productId   || null,
                     isNewProduct: !item.productId,
@@ -178,16 +183,18 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
                     unit:         item.unit        || "PIECE",
                     brand:        item.brand       || "",
                     code:         item.code        || "",
-                    price:        item.price       ?? 0,
+                    price:        rxItemBuyingPrice,
+                    buyingPrice:  rxItemBuyingPrice,
+                    sellingPrice: rxItemSellingPrice,
                     mrp:          item.mrp         ?? 0,
                     gst:          item.gst         ?? 0,
                     hsnSac:       item.hsnSac      || "",
                     qty:          item.qty         ?? 1,
-                    sph:          item.sph,
-                    cyl:          item.cyl,
-                    axis:         item.axis,
-                    add:          item.add,
-                    index:        item.index,
+                    sph:          parseFloat(item.sph)   || null,
+                    cyl:          parseFloat(item.cyl)   || null,
+                    axis:         parseFloat(item.axis)  || null,
+                    add:          parseFloat(item.add)   || null,
+                    index:        parseFloat(item.index) || null,
                     tint:         item.tint        || "",
                     coating:      item.coating     || "",
                     discountPercent: item.discountPercent ?? 0,
@@ -251,6 +258,15 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
 
         const created = await Promise.all(poCreations);
         console.log(`[RX-PO] Created ${created.length} vendor purchase order(s) for RX items`);
+
+        for (const po of created) {
+            await applyPurchaseToVendorLedger({
+                vendorPurchase: po,
+                vendorId: po.vendor.vendorId,
+                userId: createdBy,
+                tenantId,
+            }).catch(err => console.error("[RX-PO] Vendor ledger sync error:", err.message));
+        }
     } catch (err) {
         console.error("[RX-PO] Auto vendor PO creation error:", err.message);
     }
@@ -300,11 +316,11 @@ const createStockVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy 
                     gst:             item.gst         ?? 0,
                     hsnSac:          item.hsnSac      || "",
                     qty:             item.qty         ?? 1,
-                    sph:             item.sph,
-                    cyl:             item.cyl,
-                    axis:            item.axis,
-                    add:             item.add,
-                    index:           item.index,
+                    sph:             parseFloat(item.sph)   || null,
+                    cyl:             parseFloat(item.cyl)   || null,
+                    axis:            parseFloat(item.axis)  || null,
+                    add:             parseFloat(item.add)   || null,
+                    index:           parseFloat(item.index) || null,
                     tint:            item.tint        || "",
                     coating:         item.coating     || "",
                     discountPercent: item.discountPercent ?? 0,
@@ -354,6 +370,15 @@ const createStockVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy 
 
         const created = await Promise.all(poCreations);
         console.log(`[STOCK-PO] Created ${created.length} vendor purchase order(s) for STOCK items`);
+
+        for (const po of created) {
+            await applyPurchaseToVendorLedger({
+                vendorPurchase: po,
+                vendorId: po.vendor.vendorId,
+                userId: createdBy,
+                tenantId,
+            }).catch(err => console.error("[STOCK-PO] Vendor ledger sync error:", err.message));
+        }
     } catch (err) {
         console.error("[STOCK-PO] Auto vendor PO creation error:", err.message);
     }
@@ -672,6 +697,29 @@ export const applyOrderToCustomerCreditAndLedger = async ({ bulkOrder, customerI
         }]);
 
         console.log(`[Order Credit Sync Complete] Order #${orderRef}: GrandTotal=₹${grandTotal}, AdvancePaid=₹${advancePaid}, AbsorbedAdv=₹${absorbedFromAdvance}, AddedToCredit=₹${newCreditUsedToAdd}, NewCreditUsed=₹${finalCreditUsed}, AdvanceBalance=₹${remainingAdvance}`);
+
+        // If order added to customer's outstanding credit due, send WhatsApp notification
+        const customerMobile = freshCustomer.mobileNo1 || freshCustomer.mobile;
+        if (customerMobile && newCreditUsedToAdd > 0) {
+            const creditLimit = Number(freshCustomer.creditLimit || 0);
+            const availableCredit = Math.max(0, creditLimit - finalCreditUsed);
+            const waMsg = customerOrderCreditDueWhatsApp({
+                customerName: freshCustomer.ownerName,
+                shopName: freshCustomer.shopName,
+                orderNumber: orderRef,
+                orderTotal: grandTotal,
+                advancePaid,
+                addedToDue: newCreditUsedToAdd,
+                totalOutstandingDue: finalCreditUsed,
+                creditLimit,
+                availableCredit,
+                companyName: process.env.COMPANY_NAME || "DigiOptics Wholesale",
+                companyPhone: process.env.COMPANY_PHONE || "+91 9650560526",
+            });
+            sendWhatsAppMessage({ to: customerMobile, message: waMsg }).catch(err =>
+                console.error("[OrderCreditSync] Customer WhatsApp credit notice error:", err.message)
+            );
+        }
     } catch (err) {
         console.error("[Order Credit Sync Error]:", err.message);
     }
@@ -839,7 +887,60 @@ export const createBulkOrder = async (req, res) => {
 
                 item.itemName = item.itemName || product?.productName;
                 item.category = rawCategory;
-                item.price    = item.price  ?? product?.price ?? 0;
+
+                let batchDoc = null;
+                if (item.batchId && mongoose.Types.ObjectId.isValid(item.batchId)) {
+                    batchDoc = await ProductBatch.findOne({ _id: item.batchId, tenantId: req.user.tenantId });
+                } else if (item.batchNumber && item.productId) {
+                    batchDoc = await ProductBatch.findOne({
+                        productId: item.productId,
+                        batchNumber: item.batchNumber.trim().toUpperCase(),
+                        tenantId: req.user.tenantId,
+                    });
+                }
+
+                if (batchDoc) {
+                    item.batchId = batchDoc._id;
+                    item.batchNumber = batchDoc.batchNumber;
+
+                    const hasBatchSelling = batchDoc.sellingPrice != null && Number(batchDoc.sellingPrice) > 0;
+                    const hasBatchCost = batchDoc.costPrice != null && Number(batchDoc.costPrice) > 0;
+                    const hasBatchBuying = batchDoc.buyingPrice != null && Number(batchDoc.buyingPrice) > 0;
+
+                    const batchSellingPrice = hasBatchSelling
+                        ? Number(batchDoc.sellingPrice)
+                        : (hasBatchCost
+                            ? Number(batchDoc.costPrice)
+                            : (hasBatchBuying
+                                ? Number(batchDoc.buyingPrice)
+                                : Number(product?.sellingPrice != null ? product.sellingPrice : (product?.price || 0))));
+
+                    const batchBuyingPrice = hasBatchBuying
+                        ? Number(batchDoc.buyingPrice)
+                        : (hasBatchCost
+                            ? Number(batchDoc.costPrice)
+                            : (hasBatchSelling
+                                ? Number(batchDoc.sellingPrice)
+                                : Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0))));
+
+                    if (!item.price || item.price === product?.price || item.price === product?.sellingPrice) {
+                        item.price = batchSellingPrice;
+                    }
+                    if (!item.sellingPrice || item.sellingPrice === product?.price || item.sellingPrice === product?.sellingPrice) {
+                        item.sellingPrice = item.price || batchSellingPrice;
+                    }
+                    if (!item.buyingPrice || item.buyingPrice === product?.price || item.buyingPrice === product?.buyingPrice) {
+                        item.buyingPrice = batchBuyingPrice;
+                    }
+                    if (!item.mrp && batchDoc.mrp) {
+                        item.mrp = Number(batchDoc.mrp);
+                    }
+                } else {
+                    item.price = item.price ?? product?.sellingPrice ?? product?.price ?? 0;
+                    item.sellingPrice = item.sellingPrice ?? item.price;
+                    item.buyingPrice = item.buyingPrice ?? product?.buyingPrice ?? product?.price ?? 0;
+                }
+
                 item.mrp      = item.mrp    ?? product?.mrp   ?? 0;
                 item.gst      = item.gst    ?? product?.gst   ?? 0;
                 item.hsnSac   = item.hsnSac || product?.hsnSac;
@@ -870,6 +971,13 @@ export const createBulkOrder = async (req, res) => {
                         item.tint    = item.tint    || product?.tint;
                         item.coating = item.coating || product?.coating;
                     }
+
+                    const toNum = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+                    item.sph   = toNum(item.sph);
+                    item.cyl   = toNum(item.cyl);
+                    item.axis  = toNum(item.axis);
+                    item.add   = toNum(item.add);
+                    item.index = toNum(item.index);
                 }
 
                 if (rawCategory === "CONTACT_LENS") {
@@ -957,9 +1065,63 @@ export const createBulkOrder = async (req, res) => {
                                 update: { $inc: { qty: -item.qty } },
                             },
                         });
+
+                        const deductQty = Number(item.qty || 0);
+                        if (deductQty > 0) {
+                            let batchDoc = null;
+
+                            if (item.batchId && mongoose.Types.ObjectId.isValid(item.batchId)) {
+                                batchDoc = await ProductBatch.findOne({
+                                    _id: item.batchId,
+                                    tenantId: req.user.tenantId,
+                                });
+                            }
+
+                            if (!batchDoc && item.batchNumber) {
+                                batchDoc = await ProductBatch.findOne({
+                                    productId: item.productId,
+                                    batchNumber: item.batchNumber.trim().toUpperCase(),
+                                    tenantId: req.user.tenantId,
+                                });
+                            }
+
+                            if (batchDoc) {
+                                const deduct = Math.min(batchDoc.availableQty, deductQty);
+                                batchDoc.availableQty = Math.max(0, batchDoc.availableQty - deduct);
+                                batchDoc.status = batchDoc.availableQty <= 0 ? "EXHAUSTED" : "OPEN";
+                                await batchDoc.save();
+
+                                item.batchId     = batchDoc._id;
+                                item.batchNumber = batchDoc.batchNumber;
+                            } else {
+                                let remaining = deductQty;
+                                const batches = await ProductBatch.find({
+                                    productId: item.productId,
+                                    tenantId:  req.user.tenantId,
+                                    status:    "OPEN",
+                                    availableQty: { $gt: 0 },
+                                }).sort({ createdAt: 1 });
+
+                                for (const batch of batches) {
+                                    if (remaining <= 0) break;
+                                    const deduct = Math.min(batch.availableQty, remaining);
+                                    batch.availableQty = Math.max(0, batch.availableQty - deduct);
+                                    batch.status = batch.availableQty <= 0 ? "EXHAUSTED" : "OPEN";
+                                    await batch.save();
+                                    remaining -= deduct;
+                                }
+
+                                if (batches.length > 0) {
+                                    item.batchId     = batches[0]._id;
+                                    item.batchNumber = batches[0].batchNumber;
+                                }
+                            }
+                        }
                     }
                 }
             }
+            bulkOrder.markModified("orders");
+            await bulkOrder.save();
             if (stockDeductions.length > 0) {
                 await DigiProduct.bulkWrite(stockDeductions);
             }
@@ -1010,13 +1172,17 @@ export const getBulkOrderChallan = async (req, res) => {
         const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
 
         if (bulkOrder.challanUrl) {
-            const { default: axios } = await import("axios");
-            const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer" });
-            const buffer   = Buffer.from(response.data);
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-            res.setHeader("Content-Length", buffer.length);
-            return res.end(buffer);
+            try {
+                const { default: axios } = await import("axios");
+                const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer", timeout: 4000 });
+                const buffer   = Buffer.from(response.data);
+                res.setHeader("Content-Type", "application/pdf");
+                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+                res.setHeader("Content-Length", buffer.length);
+                return res.end(buffer);
+            } catch (fetchErr) {
+                console.warn("[PDF] Failed to fetch stored challan from GCS, regenerating on the fly:", fetchErr.message);
+            }
         }
 
         const { url, buffer } = await generateAndStoreChallan(orderId, req.user.tenantId);
@@ -1046,13 +1212,17 @@ export const getBulkOrderInvoice = async (req, res) => {
         const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
 
         if (bulkOrder.invoiceUrl) {
-            const { default: axios } = await import("axios");
-            const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer" });
-            const buffer   = Buffer.from(response.data);
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-            res.setHeader("Content-Length", buffer.length);
-            return res.end(buffer);
+            try {
+                const { default: axios } = await import("axios");
+                const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer", timeout: 4000 });
+                const buffer   = Buffer.from(response.data);
+                res.setHeader("Content-Type", "application/pdf");
+                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+                res.setHeader("Content-Length", buffer.length);
+                return res.end(buffer);
+            } catch (fetchErr) {
+                console.warn("[PDF] Failed to fetch stored invoice from GCS, regenerating on the fly:", fetchErr.message);
+            }
         }
 
         const { url, buffer } = await generateAndStoreInvoice(orderId, req.user.tenantId);
@@ -1274,6 +1444,30 @@ export const updateBulkDraftOrder = async (req, res) => {
         if (submitNow) {
             const customer = await Customer.findOne({ _id: bulkOrder.customer.customerId, tenantId: req.user.tenantId }).lean();
             if (customer) {
+                applyOrderToCustomerCreditAndLedger({
+                    bulkOrder,
+                    customerId: customer._id,
+                    userId: req.user.id || req.user._id,
+                    tenantId: req.user.tenantId,
+                    reqBody: req.body,
+                }).catch(err => console.error("Customer credit/ledger sync error on draft submit:", err.message));
+
+                createRxVendorPurchaseOrders({
+                    bulkOrder,
+                    tenantId: req.user.tenantId,
+                    createdBy: req.user._id,
+                }).catch(err => console.error("RX vendor PO creation error on draft submit:", err.message));
+
+                createStockVendorPurchaseOrders({
+                    bulkOrder,
+                    tenantId: req.user.tenantId,
+                    createdBy: req.user._id,
+                }).catch(err => console.error("STOCK vendor PO creation error on draft submit:", err.message));
+
+                sendVendorRxOrderEmails({ bulkOrder, customer }).catch(err =>
+                    console.error("Vendor email notification error on draft submit:", err.message)
+                );
+
                 handleOrderBillingNotification({ bulkOrder, customer }).catch(err =>
                     console.error("Billing notification error:", err.message)
                 );

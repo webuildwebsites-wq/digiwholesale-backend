@@ -51,6 +51,9 @@ export const sendTokenResponse = (user, statusCode, res, AccountType = 'EMPLOYEE
         subscription: tenant.subscription,
         loyalty: tenant.loyalty,
         whatsappConfig: tenant.whatsappConfig,
+        featureFlags: tenant.featureFlags || {},
+        demoMode: Boolean(tenant.demoMode || tenant.featureFlags?.demoMode),
+        demoExpiry: tenant.demoExpiry || tenant.featureFlags?.demoExpiry || null,
       }
     : null;
 

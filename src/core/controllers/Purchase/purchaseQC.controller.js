@@ -4,11 +4,26 @@ import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
 import PurchaseReturn from "../../../models/Purchase/PurchaseReturn.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import DigiProduct from "../../../models/Product/Product.model.js";
+import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import Vendor from "../../../models/Vendor.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../config/Email/emailService.js";
 import { sendWhatsAppOTP } from "../../config/Whatsapp/sendWhatsappOtp.js";
 import { generateQCRejectionExcel } from "../../../Utils/excel/generateQCRejectionExcel.js";
+
+
+const getNextBatchNumber = async (productId, tenantId) => {
+    const lastBatch = await ProductBatch.findOne({ productId, tenantId })
+        .sort({ createdAt: -1 })
+        .select("batchNumber")
+        .lean();
+
+    if (!lastBatch) return "BTCN1";
+
+    const match = lastBatch.batchNumber.match(/BTCN(\d+)$/i);
+    const num = match ? parseInt(match[1], 10) : 0;
+    return `BTCN${num + 1}`;
+};
 
 const buildQCRejectionEmailHTML = ({ vendorName, purchaseOrderId, qcDate, failedItems, totalFailed, totalPassed }) => {
     const fmt    = (v) => (v !== undefined && v !== null && v !== "" ? v : "-");
@@ -172,7 +187,9 @@ export const createPurchaseQC = async (req, res) => {
                 ? photos
                 : [];
 
-            item.qcStatus = qcResult;
+            item.qcStatus  = qcResult;
+            item.passedQty = passed;
+            item.failedQty = failed;
 
             qcItems.push({
                 itemId:        item._id,
@@ -191,7 +208,7 @@ export const createPurchaseQC = async (req, res) => {
             });
 
             if (passed > 0 && item.productId && !item.isNewProduct) {
-                passedItems.push({ productId: item.productId, qty: passed });
+                passedItems.push({ productId: item.productId, qty: passed, item });
             }
 
             if (passed > 0 && (!item.productId || item.isNewProduct)) {
@@ -243,12 +260,53 @@ export const createPurchaseQC = async (req, res) => {
             const rxItems    = passedItems.filter(p => !p.productId);
 
             if (stockItems.length > 0) {
-                const bulkOps = stockItems.map(({ productId, qty }) => ({
-                    updateOne: {
-                        filter: { _id: productId, tenantId: req.user.tenantId },
-                        update: { $inc: { qty } },
-                    },
-                }));
+                for (const { productId, qty, item: pItem } of stockItems) {
+                    const batchNumber = await getNextBatchNumber(productId, req.user.tenantId);
+                    const bPrice = pItem?.buyingPrice != null ? Number(pItem.buyingPrice) : Number(pItem?.price || 0);
+                    const sPrice = pItem?.sellingPrice != null ? Number(pItem.sellingPrice) : 0;
+                    const mrpVal = pItem?.mrp != null ? Number(pItem.mrp) : 0;
+
+                    await ProductBatch.create({
+                        batchNumber,
+                        productId,
+                        purchaseOrderId:  purchaseOrderId,
+                        purchaseQCId:     purchaseQC._id,
+                        purchaseInwardId: inward._id,
+                        initialQty:       qty,
+                        availableQty:     qty,
+                        buyingPrice:      bPrice,
+                        costPrice:        bPrice,
+                        price:            bPrice,
+                        sellingPrice:     sPrice,
+                        mrp:              mrpVal,
+                        vendorId:         purchaseOrder.vendor.vendorId,
+                        vendorName:       purchaseOrder.vendor.vendorName,
+                        inwardDate:       new Date(),
+                        status:           "OPEN",
+                        invoices:         Array.isArray(inward.invoices) ? inward.invoices : [],
+                        createdBy:        req.user._id,
+                        tenantId:         req.user.tenantId,
+                    });
+                }
+
+                const bulkOps = stockItems.map(({ productId, qty, item: pItem }) => {
+                    const update = { $inc: { qty } };
+                    const set = {};
+                    if (pItem?.expiry)        set.expiry        = pItem.expiry;
+                    if (pItem?.disposability) set.disposability = pItem.disposability;
+                    if (pItem?.coating)       set.coating       = pItem.coating.toUpperCase();
+                    if (purchaseOrder.vendor?.vendorId) {
+                        set['vendor.id']   = purchaseOrder.vendor.vendorId;
+                        set['vendor.name'] = purchaseOrder.vendor.vendorName || "";
+                    }
+                    if (Object.keys(set).length > 0) update.$set = set;
+                    return {
+                        updateOne: {
+                            filter: { _id: productId, tenantId: req.user.tenantId },
+                            update,
+                        },
+                    };
+                });
                 await DigiProduct.bulkWrite(bulkOps);
             }
 
@@ -261,8 +319,18 @@ export const createPurchaseQC = async (req, res) => {
                     tenantId: req.user.tenantId,
                 });
 
+                const rxBuyingPrice  = item.buyingPrice != null ? Number(item.buyingPrice) : Number(item.price || 0);
+                const rxSellingPrice = item.sellingPrice != null ? Number(item.sellingPrice) : 0;
+                const rxMrp          = item.mrp != null ? Number(item.mrp) : 0;
+
                 if (product) {
                     product.qty += qty;
+                    if (rxBuyingPrice > 0)  product.buyingPrice  = rxBuyingPrice;
+                    if (rxSellingPrice > 0) product.sellingPrice = rxSellingPrice;
+                    if (rxMrp > 0)          product.mrp          = rxMrp;
+                    if (item.expiry)        product.expiry        = item.expiry;
+                    if (item.disposability) product.disposability = item.disposability;
+                    if (item.coating)       product.coating       = item.coating.toUpperCase();
                     await product.save();
                 } else {
                     product = await DigiProduct.create({
@@ -276,20 +344,51 @@ export const createPurchaseQC = async (req, res) => {
                         material:     item.material?.toUpperCase() || "",
                         dimensions:   item.dimensions || "",
                         coating:      item.coating?.toUpperCase() || "",
+                        disposability: item.disposability || "",
+                        expiry:       item.expiry || null,
                         sph:          item.sph?.toString() || "",
                         cyl:          item.cyl?.toString() || "",
                         axis:         item.axis?.toString() || "",
                         addition:     item.add?.toString()  || "",
                         index:        item.index?.toString() || "",
-                        price:        item.price  ?? 0,
-                        mrp:          item.mrp    ?? 0,
+                        price:        rxBuyingPrice,
+                        buyingPrice:  rxBuyingPrice,
+                        sellingPrice: rxSellingPrice,
+                        mrp:          rxMrp,
                         gst:          item.gst    ?? 0,
                         hsnSac:       item.hsnSac || "",
                         qty,
+                        vendor: {
+                            id:   purchaseOrder.vendor?.vendorId || null,
+                            name: purchaseOrder.vendor?.vendorName || "",
+                        },
                         tenantId:     req.user.tenantId,
                         createdBy:    req.user._id,
                     });
                 }
+
+                const rxBatchNumber = await getNextBatchNumber(product._id, req.user.tenantId);
+                await ProductBatch.create({
+                    batchNumber:      rxBatchNumber,
+                    productId:        product._id,
+                    purchaseOrderId:  purchaseOrderId,
+                    purchaseQCId:     purchaseQC._id,
+                    purchaseInwardId: inward._id,
+                    initialQty:       qty,
+                    availableQty:     qty,
+                    buyingPrice:      rxBuyingPrice,
+                    costPrice:        rxBuyingPrice,
+                    price:            rxBuyingPrice,
+                    sellingPrice:     rxSellingPrice,
+                    mrp:              rxMrp,
+                    vendorId:         purchaseOrder.vendor.vendorId,
+                    vendorName:       purchaseOrder.vendor.vendorName,
+                    inwardDate:       new Date(),
+                    status:           "OPEN",
+                    invoices:         Array.isArray(inward.invoices) ? inward.invoices : [],
+                    createdBy:        req.user._id,
+                    tenantId:         req.user.tenantId,
+                });
 
                 const allPO = purchaseOrder.orders.flatMap(o => o.items);
                 const poItem = allPO.find(i => i._id.toString() === item._id.toString());

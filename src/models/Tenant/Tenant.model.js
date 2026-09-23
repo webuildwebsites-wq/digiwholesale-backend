@@ -93,6 +93,8 @@ const featureFlagsSchema = new mongoose.Schema(
         // E-com frames-sunglasses catalogue page visibility for this wholesaler.
         // Only Platform Owner can set this to true. Defaults to false (hidden).
         ecomFramesSunglasses: { type: Boolean, default: false },
+        demoMode:             { type: Boolean, default: false },
+        demoExpiry:           { type: Date,    default: null },
     },
     { _id: false }
 );
@@ -114,6 +116,8 @@ const tenantSchema = new mongoose.Schema(
         subscription:     { type: subscriptionSchema,     default: () => ({}) },
         whatsappConfig:   { type: whatsappConfigSchema,   default: () => ({}) },
         featureFlags:     { type: featureFlagsSchema,     default: () => ({}) },
+        demoMode:         { type: Boolean, default: false },
+        demoExpiry:       { type: Date,    default: null },
 
         status: {
             type:    String,

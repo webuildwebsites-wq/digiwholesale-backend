@@ -126,6 +126,13 @@ export const registerTenant = async (req, res) => {
                 utilityProvider:   utilityProvider   || "META",
                 promotionProvider: promotionProvider || "META",
             },
+            demoMode:   Boolean(req.body.demoMode || req.body.featureFlags?.demoMode),
+            demoExpiry: (req.body.demoExpiry || req.body.featureFlags?.demoExpiry) ? new Date(req.body.demoExpiry || req.body.featureFlags?.demoExpiry) : null,
+            featureFlags: {
+                ecomFramesSunglasses: Boolean(req.body.ecomFramesSunglasses || req.body.featureFlags?.ecomFramesSunglasses),
+                demoMode:             Boolean(req.body.demoMode || req.body.featureFlags?.demoMode),
+                demoExpiry:           (req.body.demoExpiry || req.body.featureFlags?.demoExpiry) ? new Date(req.body.demoExpiry || req.body.featureFlags?.demoExpiry) : null,
+            },
             status:    "ACTIVE",
             createdBy: req.user._id,
         });
@@ -221,15 +228,35 @@ export const updateTenant = async (req, res) => {
         const { id } = req.params;
         const allowed = [
             "storeInformation", "owner", "loyalty",
-            "documents", "subscription", "whatsappConfig",
+            "documents", "subscription", "whatsappConfig", "featureFlags",
+            "demoMode", "demoExpiry",
         ];
         const updates = {};
         for (const key of allowed) {
             if (req.body[key] !== undefined) updates[key] = req.body[key];
         }
 
+        const existingTenant = await Tenant.findById(id);
+        if (!existingTenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
+
+        const demoModeVal = req.body.demoMode !== undefined ? req.body.demoMode : req.body.featureFlags?.demoMode;
+        const demoExpiryVal = req.body.demoExpiry !== undefined ? req.body.demoExpiry : req.body.featureFlags?.demoExpiry;
+
+        if (demoModeVal !== undefined || demoExpiryVal !== undefined) {
+            const currentFlags = existingTenant.featureFlags || {};
+            const newDemoMode = demoModeVal !== undefined ? Boolean(demoModeVal) : currentFlags.demoMode;
+            const newDemoExpiry = demoExpiryVal !== undefined ? (demoExpiryVal ? new Date(demoExpiryVal) : null) : currentFlags.demoExpiry;
+
+            updates.demoMode = newDemoMode;
+            updates.demoExpiry = newDemoExpiry;
+            updates.featureFlags = {
+                ...currentFlags,
+                demoMode: newDemoMode,
+                demoExpiry: newDemoExpiry,
+            };
+        }
+
         const tenant = await Tenant.findByIdAndUpdate(id, { $set: updates }, { new: true, runValidators: true });
-        if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
 
         return sendSuccessResponse(res, 200, { tenant }, "Tenant updated successfully");
     } catch (err) {
@@ -282,7 +309,7 @@ export const deleteTenant = async (req, res) => {
 // ─── WHOLESALER SETTINGS (Platform Owner only) ────────────────────────────────
 
 /** Keys the platform owner is allowed to toggle via the settings endpoint. */
-const ALLOWED_FEATURE_FLAGS = ["ecomFramesSunglasses"];
+const ALLOWED_FEATURE_FLAGS = ["ecomFramesSunglasses", "demoMode", "demoExpiry"];
 
 /**
  * GET /api/tenants/:id/settings
@@ -290,13 +317,17 @@ const ALLOWED_FEATURE_FLAGS = ["ecomFramesSunglasses"];
  */
 export const getTenantSettings = async (req, res) => {
     try {
-        const tenant = await Tenant.findById(req.params.id).select("tenantId storeInformation.storeName featureFlags").lean();
+        const tenant = await Tenant.findById(req.params.id).select("tenantId storeInformation.storeName featureFlags demoMode demoExpiry").lean();
         if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
 
+        const flags = { ...(tenant.featureFlags || {}) };
+        flags.demoMode   = Boolean(tenant.demoMode || tenant.featureFlags?.demoMode);
+        flags.demoExpiry = tenant.demoExpiry || tenant.featureFlags?.demoExpiry || null;
+
         return sendSuccessResponse(res, 200, {
-            tenantId:    tenant.tenantId,
-            storeName:   tenant.storeInformation?.storeName || null,
-            featureFlags: tenant.featureFlags || {},
+            tenantId:     tenant.tenantId,
+            storeName:    tenant.storeInformation?.storeName || null,
+            featureFlags: flags,
         }, "Tenant settings retrieved successfully");
     } catch (err) {
         return sendErrorResponse(res, 500, "GET_TENANT_SETTINGS_ERROR", err.message);
@@ -325,10 +356,21 @@ export const updateTenantSettings = async (req, res) => {
                 rejected.push(key);
                 continue;
             }
-            if (typeof value !== "boolean") {
+            if (key === "demoExpiry") {
+                const parsed = value ? new Date(value) : null;
+                if (value && isNaN(parsed.getTime())) {
+                    return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Feature flag '${key}' must be a valid date/time or null`);
+                }
+                setPayload[`featureFlags.${key}`] = parsed;
+                setPayload[`demoExpiry`]          = parsed;
+            } else if (typeof value !== "boolean") {
                 return sendErrorResponse(res, 400, "VALIDATION_ERROR", `Feature flag '${key}' must be a boolean (true or false)`);
+            } else {
+                setPayload[`featureFlags.${key}`] = value;
+                if (key === "demoMode") {
+                    setPayload["demoMode"] = value;
+                }
             }
-            setPayload[`featureFlags.${key}`] = value;
         }
 
         if (Object.keys(setPayload).length === 0) {

@@ -81,6 +81,8 @@ const BulkOrderItemSchema = new mongoose.Schema(
         dimensions: String,
 
         price: Number,
+        sellingPrice: Number,
+        buyingPrice: Number,
         gst: Number,
         hsnSac: String,
         mrp: Number,
@@ -112,6 +114,13 @@ const BulkOrderItemSchema = new mongoose.Schema(
             id:   { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", default: null },
             name: { type: String, default: null },
         },
+
+        batchId: {
+            type:    mongoose.Schema.Types.ObjectId,
+            ref:     "ProductBatch",
+            default: null,
+        },
+        batchNumber: { type: String, default: null, trim: true },
 
         orderSource: {
             type:    String,

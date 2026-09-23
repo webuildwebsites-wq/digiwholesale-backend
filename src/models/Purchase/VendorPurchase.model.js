@@ -21,6 +21,8 @@ const purchaseItemSchema = new mongoose.Schema(
         material:       String,
         dimensions:     String,
         price:          Number,
+        buyingPrice:    Number,
+        sellingPrice:   Number,
         gst:            Number,
         hsnSac:         String,
         mrp:            Number,
@@ -51,6 +53,8 @@ const purchaseItemSchema = new mongoose.Schema(
             default: "PENDING",
         },
         receivedQty: { type: Number, default: 0 },
+        passedQty:   { type: Number, default: 0 },
+        failedQty:   { type: Number, default: 0 },
 
         qcStatus: {
             type:    String,

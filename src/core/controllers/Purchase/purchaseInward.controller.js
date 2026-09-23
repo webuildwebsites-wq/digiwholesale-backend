@@ -5,7 +5,7 @@ import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/
 
 export const createPurchaseInward = async (req, res) => {
     try {
-        const { purchaseOrderId, items, remarks } = req.body;
+        const { purchaseOrderId, items, remarks, receivedBy, receivedOn, receivedFrom, invoices } = req.body;
 
         if (!purchaseOrderId || !mongoose.Types.ObjectId.isValid(purchaseOrderId)) {
             return sendErrorResponse(res, 400, "INVALID_ID", "Valid purchaseOrderId is required");
@@ -105,9 +105,13 @@ export const createPurchaseInward = async (req, res) => {
             vendorId:   purchaseOrder.vendor.vendorId,
             vendorName: purchaseOrder.vendor.vendorName,
             inwardDate: new Date(),
+            receivedBy:   receivedBy   ? String(receivedBy).trim()   : null,
+            receivedOn:   receivedOn   ? new Date(receivedOn)        : new Date(),
+            receivedFrom: receivedFrom ? String(receivedFrom).trim() : null,
             items:      inwardItems,
             remarks,
             status:     "Confirmed",
+            invoices:   Array.isArray(invoices) ? invoices : [],
             createdBy:  req.user._id,
             tenantId:   req.user.tenantId,
         });

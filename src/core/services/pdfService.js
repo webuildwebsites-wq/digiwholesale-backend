@@ -22,7 +22,27 @@ const LINUX_CHROME_PATHS = [
   "/snap/bin/chromium",
 ].filter(Boolean);
 
+const WINDOWS_CHROME_PATHS = [
+  process.env.CHROME_PATH,
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  (process.env.LOCALAPPDATA || '') + '\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  (process.env.LOCALAPPDATA || '') + '\\Microsoft\\Edge\\Application\\msedge.exe',
+].filter(Boolean);
+
 const getExecutablePath = async () => {
+  if (process.platform === "win32") {
+    for (const p of WINDOWS_CHROME_PATHS) {
+      if (existsSync(p)) {
+        console.log("[PDF] Windows Chrome/Edge at:", p);
+        return { executablePath: p, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"] };
+      }
+    }
+    throw new Error("Chrome or Edge executable not found on Windows. Please install Google Chrome or Microsoft Edge.");
+  }
+
   if (process.platform === "darwin") {
     for (const p of MAC_CHROME_PATHS) {
       if (existsSync(p)) {

@@ -42,13 +42,15 @@ export const getMyFeatureFlags = async (req, res) => {
       return sendErrorResponse(res, 400, "NO_TENANT", "User is not associated with a tenant");
     }
 
-    const tenant = await Tenant.findOne({ tenantId }).select("featureFlags").lean();
+    const tenant = await Tenant.findOne({ tenantId }).select("featureFlags demoMode demoExpiry").lean();
 
     if (!tenant) {
       return sendErrorResponse(res, 404, "TENANT_NOT_FOUND", "Tenant not found");
     }
 
-    const featureFlags = tenant.featureFlags || {};
+    const featureFlags = { ...(tenant.featureFlags || {}) };
+    featureFlags.demoMode   = Boolean(tenant.demoMode || tenant.featureFlags?.demoMode);
+    featureFlags.demoExpiry = tenant.demoExpiry || tenant.featureFlags?.demoExpiry || null;
 
     return sendSuccessResponse(res, 200, { featureFlags }, "Feature flags retrieved successfully");
 
