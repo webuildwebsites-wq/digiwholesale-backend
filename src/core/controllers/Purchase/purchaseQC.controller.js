@@ -289,12 +289,24 @@ export const createPurchaseQC = async (req, res) => {
                     });
                 }
 
-                const bulkOps = stockItems.map(({ productId, qty }) => ({
-                    updateOne: {
-                        filter: { _id: productId, tenantId: req.user.tenantId },
-                        update: { $inc: { qty } },
-                    },
-                }));
+                const bulkOps = stockItems.map(({ productId, qty, item: pItem }) => {
+                    const update = { $inc: { qty } };
+                    const set = {};
+                    if (pItem?.expiry)        set.expiry        = pItem.expiry;
+                    if (pItem?.disposability) set.disposability = pItem.disposability;
+                    if (pItem?.coating)       set.coating       = pItem.coating.toUpperCase();
+                    if (purchaseOrder.vendor?.vendorId) {
+                        set['vendor.id']   = purchaseOrder.vendor.vendorId;
+                        set['vendor.name'] = purchaseOrder.vendor.vendorName || "";
+                    }
+                    if (Object.keys(set).length > 0) update.$set = set;
+                    return {
+                        updateOne: {
+                            filter: { _id: productId, tenantId: req.user.tenantId },
+                            update,
+                        },
+                    };
+                });
                 await DigiProduct.bulkWrite(bulkOps);
             }
 
@@ -313,9 +325,12 @@ export const createPurchaseQC = async (req, res) => {
 
                 if (product) {
                     product.qty += qty;
-                    if (rxBuyingPrice > 0) product.buyingPrice = rxBuyingPrice;
+                    if (rxBuyingPrice > 0)  product.buyingPrice  = rxBuyingPrice;
                     if (rxSellingPrice > 0) product.sellingPrice = rxSellingPrice;
-                    if (rxMrp > 0) product.mrp = rxMrp;
+                    if (rxMrp > 0)          product.mrp          = rxMrp;
+                    if (item.expiry)        product.expiry        = item.expiry;
+                    if (item.disposability) product.disposability = item.disposability;
+                    if (item.coating)       product.coating       = item.coating.toUpperCase();
                     await product.save();
                 } else {
                     product = await DigiProduct.create({
@@ -329,6 +344,8 @@ export const createPurchaseQC = async (req, res) => {
                         material:     item.material?.toUpperCase() || "",
                         dimensions:   item.dimensions || "",
                         coating:      item.coating?.toUpperCase() || "",
+                        disposability: item.disposability || "",
+                        expiry:       item.expiry || null,
                         sph:          item.sph?.toString() || "",
                         cyl:          item.cyl?.toString() || "",
                         axis:         item.axis?.toString() || "",
@@ -341,6 +358,10 @@ export const createPurchaseQC = async (req, res) => {
                         gst:          item.gst    ?? 0,
                         hsnSac:       item.hsnSac || "",
                         qty,
+                        vendor: {
+                            id:   purchaseOrder.vendor?.vendorId || null,
+                            name: purchaseOrder.vendor?.vendorName || "",
+                        },
                         tenantId:     req.user.tenantId,
                         createdBy:    req.user._id,
                     });

@@ -34,6 +34,21 @@ export const createProduct = async (req, res) => {
           message: "Required fields missing in one of the products (productCode, productName, category, buyingPrice/price, mrp)",
         });
       }
+
+      // coating, disposability, and expiry are required for Contact Lens category
+      const normalizedCategory = p.category.trim().toUpperCase().replace(/[\s_]+/g, " ");
+      if (normalizedCategory === "CONTACT LENS" || normalizedCategory === "CONTACT_LENS") {
+        const missing = [];
+        if (!p.coating?.trim())       missing.push("coating");
+        if (!p.disposability?.trim()) missing.push("disposability");
+        if (!p.expiry)                missing.push("expiry");
+        if (missing.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: `${missing.join(", ")} ${missing.length > 1 ? "are" : "is"} required for Contact Lens category (product: ${p.productCode || p.productName})`,
+          });
+        }
+      }
     }
 
     const productCodes = products.map((p) => p.productCode.trim());
@@ -126,6 +141,7 @@ export const createProduct = async (req, res) => {
       material: p.material?.trim() || "",
       dimensions: p.dimensions?.trim() || "",
       coating: p.coating?.trim() || "",
+      disposability: p.disposability?.trim() || "",
       expiry: p.expiry || "",
       price: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
       buyingPrice: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
@@ -381,6 +397,7 @@ export const updateProduct = async (req, res) => {
     product.dimensions = p.dimensions?.trim() || "";
 
     product.coating = p.coating?.trim() || "";
+    product.disposability = p.disposability?.trim() || "";
     product.expiry = p.expiry || null;
     if (p.buyingPrice != null && p.buyingPrice !== "") product.buyingPrice = Number(p.buyingPrice);
     if (p.sellingPrice != null && p.sellingPrice !== "") product.sellingPrice = Number(p.sellingPrice);
@@ -549,12 +566,35 @@ export const addInventory = async (req, res) => {
       }
     }
 
+    // coating, disposability, and expiry are required for Contact Lens category
+    const contactLensItems = items.filter((item) => {
+      if (!item.category) return false;
+      const cat = item.category.trim().toUpperCase().replace(/[\s_]+/g, " ");
+      return cat === "CONTACT LENS" || cat === "CONTACT_LENS";
+    });
+    for (const item of contactLensItems) {
+      console.log("item  : ", item)
+
+      const missing = [];
+      if (!item.coating?.trim())       missing.push("coating");
+      if (!item.disposability?.trim()) missing.push("disposability");
+      if (!item.expiry)                missing.push("expiry");
+      if (missing.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `${missing.join(", ")} ${missing.length > 1 ? "are" : "is"} required for Contact Lens category (product: ${item.productCode})`,
+        });
+      }
+    }
+
     const productCodes = items.map((i) => i.productCode);
 
     const products = await DigiProduct.find({
       tenantId: req.user.tenantId,
       productCode: { $in: productCodes },
     });
+
+    console.log("products : ", products);
 
     if (products.length !== productCodes.length) {
       const foundCodes = products.map((p) => p.productCode);
@@ -588,6 +628,8 @@ export const addInventory = async (req, res) => {
       if (sellingP != null) product.sellingPrice = sellingP;
       if (mrpP != null && mrpP > 0) product.mrp = mrpP;
       if (item.expiry) product.expiry = item.expiry;
+      if (item.disposability?.trim()) product.disposability = item.disposability.trim();
+      if (item.coating?.trim()) product.coating = item.coating.trim();
       if (item.vendorId) {
         product.vendor = { id: item.vendorId, name: item.vendorName || "" };
       }
@@ -1203,6 +1245,7 @@ export const bulkUploadProducts = async (req, res) => {
       axis: p.axis?.toString().trim() || "",
       index: p.index?.toString().trim() || "",
       coating: p.coating?.trim()?.toUpperCase() || "",
+      disposability: p.disposability?.trim() || "",
       expiry: p.expiry || null,
       price: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
       buyingPrice: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),

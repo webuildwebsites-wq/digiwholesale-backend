@@ -190,11 +190,11 @@ const createRxVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy }) 
                     gst:          item.gst         ?? 0,
                     hsnSac:       item.hsnSac      || "",
                     qty:          item.qty         ?? 1,
-                    sph:          item.sph,
-                    cyl:          item.cyl,
-                    axis:         item.axis,
-                    add:          item.add,
-                    index:        item.index,
+                    sph:          parseFloat(item.sph)   || null,
+                    cyl:          parseFloat(item.cyl)   || null,
+                    axis:         parseFloat(item.axis)  || null,
+                    add:          parseFloat(item.add)   || null,
+                    index:        parseFloat(item.index) || null,
                     tint:         item.tint        || "",
                     coating:      item.coating     || "",
                     discountPercent: item.discountPercent ?? 0,
@@ -316,11 +316,11 @@ const createStockVendorPurchaseOrders = async ({ bulkOrder, tenantId, createdBy 
                     gst:             item.gst         ?? 0,
                     hsnSac:          item.hsnSac      || "",
                     qty:             item.qty         ?? 1,
-                    sph:             item.sph,
-                    cyl:             item.cyl,
-                    axis:            item.axis,
-                    add:             item.add,
-                    index:           item.index,
+                    sph:             parseFloat(item.sph)   || null,
+                    cyl:             parseFloat(item.cyl)   || null,
+                    axis:            parseFloat(item.axis)  || null,
+                    add:             parseFloat(item.add)   || null,
+                    index:           parseFloat(item.index) || null,
                     tint:            item.tint        || "",
                     coating:         item.coating     || "",
                     discountPercent: item.discountPercent ?? 0,
@@ -971,6 +971,13 @@ export const createBulkOrder = async (req, res) => {
                         item.tint    = item.tint    || product?.tint;
                         item.coating = item.coating || product?.coating;
                     }
+
+                    const toNum = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+                    item.sph   = toNum(item.sph);
+                    item.cyl   = toNum(item.cyl);
+                    item.axis  = toNum(item.axis);
+                    item.add   = toNum(item.add);
+                    item.index = toNum(item.index);
                 }
 
                 if (rawCategory === "CONTACT_LENS") {

@@ -109,6 +109,10 @@ const productSchema = new mongoose.Schema(
       uppercase: true,
     },
 
+    disposability: {
+      type: String,
+    },
+
     expiry: {
       type: Date,
     },

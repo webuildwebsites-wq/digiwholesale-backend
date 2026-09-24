@@ -45,7 +45,8 @@ import paymentRouter from './src/routes/Accounting/payment.routes.js';
 import ledgerRouter from './src/routes/Accounting/ledger.routes.js';
 import accountRouter from './src/routes/Accounting/account.routes.js';
 import agingRouter from './src/routes/Accounting/aging.routes.js';
-import batchRouter from './src/routes/Product/batch.routes.js';
+import batchRouter       from './src/routes/Product/batch.routes.js';
+import externalRouter   from './src/routes/external.routes.js';
 
 if (!process.env.PASSWORD_SECRET) {
   console.error('FATAL: PASSWORD_SECRET environment variable is not set. Server cannot start.');
@@ -57,10 +58,14 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5001",
+  "http://localhost:5004",
   "http://localhost:5174",
   "http://localhost:5175",
   "http://139.59.65.108",
   "http://139.59.65.108:3005",
+  "https://digiopticsretailapi.digibysr.in/api",
+  "https://digiopticsretailapi.digibysr.in",
+  "https://digiretail.digibysr.in",
   "https://digioptics-wholesale.netlify.app",
   "https://digiopticswholesaledibysr.netlify.app",
   "https://digiwholesale-frontend.digibysr.in",
@@ -79,7 +84,7 @@ app.use(cors({
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-retailer-api-key"],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   optionsSuccessStatus: 200,
 }));
@@ -189,6 +194,9 @@ try {
   app.use("/api/v1/accounts", accountRouter);
   app.use("/api/v1/reports/aging", agingRouter);
   app.use("/api/v1/batches", batchRouter);
+
+  // EXTERNAL / CROSS-PLATFORM ROUTES (Digi-Retailer ↔ Digi-Wholesaler)
+  app.use("/api/ext", externalRouter);
 
   app.use("/api/payments", paymentRouter);
   app.use("/api/ledgers", ledgerRouter);
