@@ -5,6 +5,27 @@ import { generateEmployeeCode } from "../../../Utils/Auth/customerAuthUtils.js";
 import dotenv from "dotenv";
 dotenv.config();
 
+/**
+ * Normalizes tenant object so demoMode and demoExpiry are ALWAYS explicitly present at both root and featureFlags level.
+ */
+export const formatTenantResponse = (tenant) => {
+    if (!tenant) return tenant;
+    const t = typeof tenant.toObject === "function" ? tenant.toObject() : { ...tenant };
+    const isDemoOn = Boolean(t.demoMode || t.featureFlags?.demoMode);
+    const demoExp = t.demoExpiry || t.featureFlags?.demoExpiry || null;
+    return {
+        ...t,
+        demoMode: isDemoOn,
+        demoExpiry: demoExp,
+        featureFlags: {
+            ...(t.featureFlags || {}),
+            ecomFramesSunglasses: Boolean(t.featureFlags?.ecomFramesSunglasses),
+            demoMode: isDemoOn,
+            demoExpiry: demoExp,
+        }
+    };
+};
+
 const generateTenantId = (storeName) => {
     const slug = storeName
         .toUpperCase()
@@ -198,8 +219,9 @@ export const getAllTenants = async (req, res) => {
             Tenant.countDocuments(filter),
         ]);
 
+        const formattedTenants = tenants.map(formatTenantResponse);
         return sendSuccessResponse(res, 200, {
-            tenants,
+            tenants: formattedTenants,
             pagination: {
                 currentPage:  page,
                 totalPages:   Math.ceil(total / limit),
@@ -215,8 +237,9 @@ export const getAllTenants = async (req, res) => {
 
 export const getTenantById = async (req, res) => {
     try {
-        const tenant = await Tenant.findById(req.params.id).lean();
-        if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
+        const tenantDoc = await Tenant.findById(req.params.id).lean();
+        if (!tenantDoc) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
+        const tenant = formatTenantResponse(tenantDoc);
         return sendSuccessResponse(res, 200, { tenant });
     } catch (err) {
         return sendErrorResponse(res, 500, "GET_TENANT_ERROR", err.message);
@@ -236,7 +259,7 @@ export const updateTenant = async (req, res) => {
             if (req.body[key] !== undefined) updates[key] = req.body[key];
         }
 
-        const existingTenant = await Tenant.findById(id);
+        const existingTenant = await Tenant.findById(id).lean();
         if (!existingTenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
 
         const demoModeVal = req.body.demoMode !== undefined ? req.body.demoMode : req.body.featureFlags?.demoMode;
@@ -244,19 +267,20 @@ export const updateTenant = async (req, res) => {
 
         if (demoModeVal !== undefined || demoExpiryVal !== undefined) {
             const currentFlags = existingTenant.featureFlags || {};
-            const newDemoMode = demoModeVal !== undefined ? Boolean(demoModeVal) : currentFlags.demoMode;
-            const newDemoExpiry = demoExpiryVal !== undefined ? (demoExpiryVal ? new Date(demoExpiryVal) : null) : currentFlags.demoExpiry;
+            const newDemoMode = demoModeVal !== undefined ? Boolean(demoModeVal) : Boolean(existingTenant.demoMode || currentFlags.demoMode);
+            const newDemoExpiry = demoExpiryVal !== undefined ? (demoExpiryVal ? new Date(demoExpiryVal) : null) : (existingTenant.demoExpiry || currentFlags.demoExpiry);
 
             updates.demoMode = newDemoMode;
             updates.demoExpiry = newDemoExpiry;
             updates.featureFlags = {
-                ...currentFlags,
+                ecomFramesSunglasses: Boolean(currentFlags.ecomFramesSunglasses),
                 demoMode: newDemoMode,
                 demoExpiry: newDemoExpiry,
             };
         }
 
-        const tenant = await Tenant.findByIdAndUpdate(id, { $set: updates }, { new: true, runValidators: true });
+        const tenantDoc = await Tenant.findByIdAndUpdate(id, { $set: updates }, { new: true, runValidators: true }).lean();
+        const tenant = formatTenantResponse(tenantDoc);
 
         return sendSuccessResponse(res, 200, { tenant }, "Tenant updated successfully");
     } catch (err) {
@@ -382,7 +406,7 @@ export const updateTenantSettings = async (req, res) => {
             req.params.id,
             { $set: setPayload },
             { new: true, runValidators: true }
-        ).select("tenantId storeInformation.storeName featureFlags");
+        ).select("tenantId storeInformation.storeName featureFlags demoMode demoExpiry").lean();
 
         if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
 
