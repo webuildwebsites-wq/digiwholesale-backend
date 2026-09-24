@@ -206,8 +206,6 @@ export const receiveExternalOrder = async (req, res) => {
         const ordItems = ord.items.map(formatItem);
         allItems.push(...ordItems);
 
-        // Only track order-level identifiers here.
-        // Financial totals come from the root payload only.
         processedOrders.push({
           orderNumber:           ord.orderNumber || orderReference || "",
           estimatedDeliveryDate: ord.estimatedDeliveryDate ? new Date(ord.estimatedDeliveryDate) : null,
@@ -334,10 +332,31 @@ export const getIncomingOrdersForWholesaler = async (req, res) => {
     const page   = Math.max(parseInt(req.query.page)  || 1, 1);
     const limit  = Math.min(parseInt(req.query.limit) || 20, 100);
     const skip   = (page - 1) * limit;
-    const status = req.query.status;
+    const status   = req.query.status;
+    const search   = req.query.search?.trim();
+    const fromDate = req.query.fromDate;
+    const toDate   = req.query.toDate;
 
     const query = { wholesalerTenantId };
     if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { orderNumber: { $regex: search, $options: "i" } },
+        { retailerStoreName: { $regex: search, $options: "i" } },
+        { retailerTenantId: { $regex: search, $options: "i" } },
+        { orderReference: { $regex: search, $options: "i" } },
+        { retailerMobile: { $regex: search, $options: "i" } },
+      ];
+    }
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) query.createdAt.$gte = new Date(fromDate);
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
 
     const [orders, total] = await Promise.all([
       ExternalOrder.find(query)
@@ -368,7 +387,16 @@ export const updateExternalOrderStatus = async (req, res) => {
     const { status, cancelReason } = req.body;
     const wholesalerTenantId = req.user?.tenantId;
 
-    const validStatuses = ["Submitted", "Processing", "Completed", "Cancelled"];
+    const validStatuses = [
+      "Submitted",
+      "Processing",
+      "QC",
+      "ReadyToDispatch",
+      "Dispatched",
+      "Delivered",
+      "Completed",
+      "Cancelled",
+    ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
