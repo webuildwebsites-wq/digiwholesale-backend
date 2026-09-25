@@ -409,6 +409,36 @@ export const receiveExternalOrder = async (req, res) => {
 
     const orderNumber = await generateOrderNumber();
     const firstOrder  = processedOrders[0] || {};
+    const firstOrderObj = (Array.isArray(orders) && orders.length > 0) ? orders[0] : {};
+
+    const rawSubtotal = subtotal !== undefined && subtotal !== null ? subtotal : firstOrderObj.subtotal;
+    const rawTotalGst = totalGst !== undefined && totalGst !== null ? totalGst : firstOrderObj.totalGst;
+    const rawGrossTotal = grossTotal !== undefined && grossTotal !== null ? grossTotal : firstOrderObj.grossTotal;
+    const rawShippingCharges = shippingCharges !== undefined && shippingCharges !== null ? shippingCharges : firstOrderObj.shippingCharges;
+    const rawOtherCharges = otherCharges !== undefined && otherCharges !== null ? otherCharges : firstOrderObj.otherCharges;
+    const rawAdvanceAmount = advanceAmount !== undefined && advanceAmount !== null ? advanceAmount : firstOrderObj.advanceAmount;
+    const rawGrossTotalWithCharges = grossTotalWithCharges !== undefined && grossTotalWithCharges !== null ? grossTotalWithCharges : firstOrderObj.grossTotalWithCharges;
+    const rawNetPayableTotal = netPayableTotal !== undefined && netPayableTotal !== null ? netPayableTotal : firstOrderObj.netPayableTotal;
+
+    const parsedSubtotal = parseNumber(rawSubtotal, 0, "subtotal");
+    const parsedTotalGst = parseNumber(rawTotalGst, 0, "totalGst");
+    const parsedGrossTotal = (rawGrossTotal !== undefined && rawGrossTotal !== null && rawGrossTotal !== "")
+      ? parseNumber(rawGrossTotal, 0, "grossTotal")
+      : (parsedSubtotal + parsedTotalGst);
+
+    const parsedShippingCharges = parseNumber(rawShippingCharges, 0, "shippingCharges");
+    const parsedOtherCharges    = parseNumber(rawOtherCharges, 0, "otherCharges");
+    const parsedAdvanceAmount   = parseNumber(rawAdvanceAmount, 0, "advanceAmount");
+
+    const defaultGrossWithCharges = parsedGrossTotal + parsedShippingCharges + parsedOtherCharges;
+    const parsedGrossTotalWithCharges = (rawGrossTotalWithCharges !== undefined && rawGrossTotalWithCharges !== null && rawGrossTotalWithCharges !== "")
+      ? parseNumber(rawGrossTotalWithCharges, defaultGrossWithCharges, "grossTotalWithCharges")
+      : defaultGrossWithCharges;
+
+    const defaultNetPayable = Math.max(0, parsedGrossTotalWithCharges - parsedAdvanceAmount);
+    const parsedNetPayableTotal = (rawNetPayableTotal !== undefined && rawNetPayableTotal !== null && rawNetPayableTotal !== "")
+      ? parseNumber(rawNetPayableTotal, defaultNetPayable, "netPayableTotal")
+      : defaultNetPayable;
 
     const order = await ExternalOrder.create({
       orderNumber,
@@ -423,14 +453,14 @@ export const receiveExternalOrder = async (req, res) => {
       cgst:                  firstOrder.cgst  || (req.body.cgst !== undefined ? String(req.body.cgst) : "0"),
       sgst:                  firstOrder.sgst  || (req.body.sgst !== undefined ? String(req.body.sgst) : "0"),
 
-      subtotal:              parseNumber(subtotal, 0, "subtotal"),
-      grossTotal:            parseNumber(grossTotal, 0, "grossTotal"),
-      totalGst:              parseNumber(totalGst, 0, "totalGst"),
-      advanceAmount:         parseNumber(advanceAmount, 0, "advanceAmount"),
-      shippingCharges:       parseNumber(shippingCharges, 0, "shippingCharges"),
-      otherCharges:          parseNumber(otherCharges, 0, "otherCharges"),
-      netPayableTotal:       parseNumber(netPayableTotal, 0, "netPayableTotal"),
-      grossTotalWithCharges: parseNumber(grossTotalWithCharges, 0, "grossTotalWithCharges"),
+      subtotal:              parsedSubtotal,
+      grossTotal:            parsedGrossTotal,
+      totalGst:              parsedTotalGst,
+      advanceAmount:         parsedAdvanceAmount,
+      shippingCharges:       parsedShippingCharges,
+      otherCharges:          parsedOtherCharges,
+      netPayableTotal:       parsedNetPayableTotal,
+      grossTotalWithCharges: parsedGrossTotalWithCharges,
 
       orderReference:        orderReference?.trim() || firstOrder.orderNumber || "",
       remarks:               remarks?.trim() || "",
@@ -439,15 +469,22 @@ export const receiveExternalOrder = async (req, res) => {
     });
 
     return res.status(201).json({
-      success:            true,
-      message:            "Order placed successfully.",
-      orderNumber:        order.orderNumber,
-      orderId:            order._id,
-      wholesalerTenantId: order.wholesalerTenantId,
-      retailerTenantId:   order.retailerTenantId,
-      status:             order.status,
-      totalItems:         order.items.length,
-      grossTotal:         order.grossTotal || order.netPayableTotal,
+      success:               true,
+      message:               "Order placed successfully.",
+      orderNumber:           order.orderNumber,
+      orderId:               order._id,
+      wholesalerTenantId:    order.wholesalerTenantId,
+      retailerTenantId:      order.retailerTenantId,
+      status:                order.status,
+      totalItems:            order.items.length,
+      subtotal:              order.subtotal,
+      totalGst:              order.totalGst,
+      grossTotal:            order.grossTotal,
+      shippingCharges:       order.shippingCharges,
+      otherCharges:          order.otherCharges,
+      advanceAmount:         order.advanceAmount,
+      grossTotalWithCharges: order.grossTotalWithCharges,
+      netPayableTotal:       order.netPayableTotal,
       order,
     });
   } catch (error) {
