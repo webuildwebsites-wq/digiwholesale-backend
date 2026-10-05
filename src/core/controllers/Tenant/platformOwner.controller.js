@@ -48,14 +48,14 @@ export const registerTenant = async (req, res) => {
             utilityProvider, promotionProvider,
         } = req.body;
 
-        if (!storeName || !address || !storeTiming || commissionPercentage === undefined || !expiryDate) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "storeName, address, storeTiming, commissionPercentage, expiryDate are required");
+        if (!storeName || !address || !storeTiming || !expiryDate) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "storeName, address, storeTiming, expiryDate are required");
         }
         if (!ownerName || !email || !mobile || !password) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "ownerName, email, mobile, password are required");
         }
 
-        const commission = Number(commissionPercentage);
+        const commission = commissionPercentage !== undefined ? Number(commissionPercentage) : 0;
         if (isNaN(commission) || commission < 0 || commission > 100) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "commissionPercentage must be between 0 and 100");
         }
@@ -74,8 +74,8 @@ export const registerTenant = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "selectedPages array is required for CUSTOM planType");
         }
 
-        if (!gstCertificate && !panCard && !aadhaarCard) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "At least one document URL (gstCertificate, panCard, or aadhaarCard) must be provided");
+        if (!gstCertificate && !(panCard && aadhaarCard)) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Please provide either GST Certificate OR both PAN Card & Aadhaar Card");
         }
 
         const existingTenant = await Tenant.findOne({ "owner.email": email.toLowerCase() });

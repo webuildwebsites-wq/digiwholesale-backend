@@ -5,7 +5,7 @@ const storeInformationSchema = new mongoose.Schema(
         storeName:            { type: String, required: true, trim: true },
         address:              { type: String, required: true, trim: true },
         storeTiming:          { type: String, required: true, trim: true },
-        commissionPercentage: { type: Number, required: true, min: 0, max: 100 },
+        commissionPercentage: { type: Number, default: 0, min: 0, max: 100 },
         expiryDate:           { type: Date,   required: true },
         emailApi:             { type: String, trim: true, default: null },
         showAds:              { type: Boolean, default: false },
