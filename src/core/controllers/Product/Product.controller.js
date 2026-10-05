@@ -1,4 +1,5 @@
 import DigiProduct from "../../../models/Product/Product.model.js";
+import LensHistory from "../../../models/Product/LensHistory.model.js";
 import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
@@ -1297,12 +1298,41 @@ export const bulkUploadProducts = async (req, res) => {
         buyingPrice: first.buyingPrice || first.price || 0,
         sellingPrice: first.sellingPrice || first.price || 0,
         mrp: first.mrp || 0,
+        generatedAt: new Date(),
         updatedAt: new Date(),
       };
 
+      await LensHistory.create(
+        [
+          {
+            tenantId,
+            productName: first.productName,
+            category: first.category,
+            brand: first.brand || "",
+            historyType: "GENERATION",
+            action: "GENERATED",
+            priceType: "",
+            totalLenses: saved.length,
+            totalStockQty: docs.reduce((sum, p) => sum + (p.qty || 0), 0),
+            sphRange: initialEntry.sphRange,
+            cylRange: initialEntry.cylRange,
+            buyingPrice: initialEntry.buyingPrice,
+            sellingPrice: initialEntry.sellingPrice,
+            mrp: initialEntry.mrp,
+            createdBy: req.user?._id || req.user?.id || null,
+          },
+        ],
+        { session }
+      );
+
       await DigiProduct.updateOne(
         { _id: saved[0]._id },
-        { $set: { lensHistory: [initialEntry] } },
+        {
+          $set: {
+            lensGenerationHistory: [initialEntry],
+            lensHistory: [initialEntry],
+          },
+        },
         { session }
       );
 
@@ -1310,7 +1340,13 @@ export const bulkUploadProducts = async (req, res) => {
         const otherIds = saved.slice(1).map((s) => s._id);
         await DigiProduct.updateMany(
           { _id: { $in: otherIds } },
-          { $unset: { lensHistory: 1 } },
+          {
+            $unset: {
+              lensHistory: 1,
+              lensGenerationHistory: 1,
+              lensUpdateHistory: 1,
+            },
+          },
           { session }
         );
       }

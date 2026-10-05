@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import DigiProduct from "../../../models/Product/Product.model.js";
+import LensHistory from "../../../models/Product/LensHistory.model.js";
 
 const parsePower = (val) => {
   if (val === null || val === undefined || val === "") return null;
@@ -198,7 +199,7 @@ export const updateLensMatrix = async (req, res) => {
 
     if (action === "DELETE") {
       const existingHistory = existingProducts
-        .flatMap((d) => d.lensHistory || [])
+        .flatMap((d) => d.lensUpdateHistory || d.lensHistory || [])
         .filter((h) => h && h.action);
 
       const idsToDelete = new Set();
@@ -250,11 +251,39 @@ export const updateLensMatrix = async (req, res) => {
       const combinedHistory = [...existingHistory, historyEntry];
       updatedCount = idsToDelete.size;
 
+      await LensHistory.create(
+        [
+          {
+            tenantId,
+            productName: cleanName,
+            brand: sample?.brand || existingProducts[0]?.brand || "",
+            category: sample?.category || existingProducts[0]?.category || "LENS",
+            historyType: "UPDATE",
+            action: "DELETE",
+            priceType: "",
+            totalLenses: survivingProducts.length,
+            totalStockQty: totalStock,
+            sphRange: historyEntry.sphRange,
+            cylRange: historyEntry.cylRange,
+            buyingPrice: historyEntry.buyingPrice,
+            sellingPrice: historyEntry.sellingPrice,
+            mrp: historyEntry.mrp,
+            createdBy: req.user?._id || req.user?.id || null,
+          },
+        ],
+        { session }
+      );
+
       if (survivingProducts.length > 0) {
         const keeper = survivingProducts[0];
         await DigiProduct.updateOne(
           { _id: keeper._id },
-          { $set: { lensHistory: combinedHistory } },
+          {
+            $set: {
+              lensUpdateHistory: combinedHistory,
+              lensHistory: combinedHistory,
+            },
+          },
           { session }
         );
 
@@ -267,7 +296,7 @@ export const updateLensMatrix = async (req, res) => {
           const otherIds = survivingProducts.slice(1).map((p) => p._id);
           await DigiProduct.updateMany(
             { _id: { $in: otherIds } },
-            { $unset: { lensHistory: 1 } },
+            { $unset: { lensHistory: 1, lensUpdateHistory: 1 } },
             { session }
           );
         }
@@ -279,6 +308,7 @@ export const updateLensMatrix = async (req, res) => {
             $set: {
               isDeleted: true,
               qty: 0,
+              lensUpdateHistory: combinedHistory,
               lensHistory: combinedHistory,
             },
           },
@@ -404,14 +434,42 @@ export const updateLensMatrix = async (req, res) => {
         };
 
         const existingHistory = remainingProducts
-          .flatMap((d) => d.lensHistory || [])
+          .flatMap((d) => d.lensUpdateHistory || d.lensHistory || [])
           .filter((h) => h && h.action);
         const combinedHistory = [...existingHistory, historyEntry];
+
+        await LensHistory.create(
+          [
+            {
+              tenantId,
+              productName: cleanName,
+              brand: sample?.brand || existingProducts[0]?.brand || "",
+              category: sample?.category || existingProducts[0]?.category || "LENS",
+              historyType: "UPDATE",
+              action,
+              priceType: action === "UPDATE_PRICE" ? "Buying, Selling & MRP" : "",
+              totalLenses: remainingProducts.length,
+              totalStockQty: totalStock,
+              sphRange: historyEntry.sphRange,
+              cylRange: historyEntry.cylRange,
+              buyingPrice: historyEntry.buyingPrice,
+              sellingPrice: historyEntry.sellingPrice,
+              mrp: historyEntry.mrp,
+              createdBy: req.user?._id || req.user?.id || null,
+            },
+          ],
+          { session }
+        );
 
         const keeper = remainingProducts[0];
         await DigiProduct.updateOne(
           { _id: keeper._id },
-          { $set: { lensHistory: combinedHistory } },
+          {
+            $set: {
+              lensUpdateHistory: combinedHistory,
+              lensHistory: combinedHistory,
+            },
+          },
           { session }
         );
 
@@ -419,7 +477,7 @@ export const updateLensMatrix = async (req, res) => {
           const otherIds = remainingProducts.slice(1).map((p) => p._id);
           await DigiProduct.updateMany(
             { _id: { $in: otherIds } },
-            { $unset: { lensHistory: 1 } },
+            { $unset: { lensHistory: 1, lensUpdateHistory: 1 } },
             { session }
           );
         }
@@ -452,6 +510,45 @@ export const getLensHistory = async (req, res) => {
     const tenantId = req.user.tenantId;
     const { productName } = req.query;
 
+    const historyTimeline = [];
+    const seenEventKeys = new Set();
+
+    // ── 1. Fetch from Dedicated LensHistory Collection (Primary & Fastest) ──
+    const dedicatedFilter = { tenantId };
+    if (productName && productName.trim()) {
+      dedicatedFilter.productName = { $regex: productName.trim(), $options: "i" };
+    }
+
+    const dedicatedRecords = await LensHistory.find(dedicatedFilter)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    for (const item of dedicatedRecords) {
+      const ts = item.createdAt || new Date();
+      const timeKey = `${item.productName}_${item.action}_${new Date(ts).getTime()}`;
+      if (!seenEventKeys.has(timeKey)) {
+        seenEventKeys.add(timeKey);
+        historyTimeline.push({
+          _id: item._id.toString(),
+          productName: item.productName,
+          category: item.category || "LENS",
+          brand: item.brand || "",
+          historyType: item.historyType || (item.action === "GENERATED" ? "GENERATION" : "UPDATE"),
+          action: item.action || "UPDATE",
+          priceType: item.priceType || "",
+          totalLenses: item.totalLenses || 0,
+          totalStockQty: item.totalStockQty != null ? item.totalStockQty : 0,
+          sphRange: item.sphRange || "",
+          cylRange: item.cylRange || "",
+          buyingPrice: item.buyingPrice ?? 0,
+          sellingPrice: item.sellingPrice ?? 0,
+          mrp: item.mrp ?? 0,
+          timestamp: ts,
+        });
+      }
+    }
+
+    // ── 2. Fallback / Merge with Legacy DigiProduct Documents (Zero Data Loss) ──
     const matchStage = {
       tenantId,
       productName: { $nin: [null, ""] },
@@ -459,6 +556,8 @@ export const getLensHistory = async (req, res) => {
         { sph: { $exists: true, $nin: [null, ""] } },
         { category: { $regex: /lens|glass|contact/i } },
         { lensHistory: { $exists: true, $ne: [] } },
+        { lensGenerationHistory: { $exists: true, $ne: [] } },
+        { lensUpdateHistory: { $exists: true, $ne: [] } },
       ],
     };
 
@@ -466,7 +565,7 @@ export const getLensHistory = async (req, res) => {
       matchStage.productName = { $regex: productName.trim(), $options: "i" };
     }
 
-    const grouped = await DigiProduct.aggregate([
+    const legacyGrouped = await DigiProduct.aggregate([
       { $match: matchStage },
       {
         $group: {
@@ -487,34 +586,33 @@ export const getLensHistory = async (req, res) => {
           firstGeneratedAt: { $min: "$createdAt" },
           lastUpdatedAt: { $max: "$updatedAt" },
           allHistories: { $push: "$lensHistory" },
+          generationHistories: { $push: "$lensGenerationHistory" },
+          updateHistories: { $push: "$lensUpdateHistory" },
         },
       },
       { $sort: { lastUpdatedAt: -1, firstGeneratedAt: -1 } },
     ]);
 
-    const historyTimeline = [];
+    for (const prod of legacyGrouped) {
+      const rawLogs = [
+        ...(prod.generationHistories || []).flat(),
+        ...(prod.updateHistories || []).flat(),
+        ...(prod.allHistories || []).flat(),
+      ].filter((x) => x && x.action);
 
-    for (const prod of grouped) {
-      const rawLogs = (prod.allHistories || []).flat().filter((x) => x && x.action);
-      const seen = new Set();
-      const logs = [];
-      for (const item of rawLogs) {
-        const timeKey = `${item.action}_${new Date(item.updatedAt).getTime()}`;
-        if (!seen.has(timeKey)) {
-          seen.add(timeKey);
-          logs.push(item);
-        }
-      }
-      logs.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+      for (let i = 0; i < rawLogs.length; i++) {
+        const log = rawLogs[i];
+        const timestamp = log.updatedAt || log.generatedAt || prod.lastUpdatedAt;
+        const timeKey = `${prod.productName}_${log.action}_${new Date(timestamp).getTime()}`;
 
-      if (logs.length > 0) {
-        for (let i = 0; i < logs.length; i++) {
-          const log = logs[i];
+        if (!seenEventKeys.has(timeKey)) {
+          seenEventKeys.add(timeKey);
           historyTimeline.push({
-            _id: `${prod.productName}_log_${i}_${new Date(log.updatedAt).getTime()}`,
+            _id: `${prod.productName}_legacy_${i}_${new Date(timestamp).getTime()}`,
             productName: prod.productName,
             category: prod.category,
             brand: prod.brand,
+            historyType: log.action === "GENERATED" ? "GENERATION" : "UPDATE",
             action: log.action || "UPDATE",
             priceType: log.priceType || "",
             totalLenses: log.totalLenses || prod.totalLenses,
@@ -524,39 +622,24 @@ export const getLensHistory = async (req, res) => {
             buyingPrice: log.buyingPrice ?? prod.sampleBuyingPrice ?? prod.samplePrice ?? 0,
             sellingPrice: log.sellingPrice ?? prod.sampleSellingPrice ?? prod.samplePrice ?? 0,
             mrp: log.mrp ?? prod.sampleMrp ?? 0,
-            timestamp: log.updatedAt || prod.lastUpdatedAt,
+            timestamp,
           });
         }
-      } else {
+      }
 
-        historyTimeline.push({
-          _id: `${prod.productName}_gen`,
-          productName: prod.productName,
-          category: prod.category,
-          brand: prod.brand,
-          action: "GENERATED",
-          priceType: "",
-          totalLenses: prod.totalLenses,
-          totalStockQty: prod.totalStockQty,
-          sphRange: `${prod.minSph} to ${prod.maxSph}`,
-          cylRange: `${prod.minCyl} to ${prod.maxCyl}`,
-          buyingPrice: prod.sampleBuyingPrice ?? prod.samplePrice ?? 0,
-          sellingPrice: prod.sampleSellingPrice ?? prod.samplePrice ?? 0,
-          mrp: prod.sampleMrp ?? 0,
-          timestamp: prod.firstGeneratedAt,
-        });
-
-        if (
-          prod.lastUpdatedAt &&
-          prod.firstGeneratedAt &&
-          new Date(prod.lastUpdatedAt).getTime() - new Date(prod.firstGeneratedAt).getTime() > 10000
-        ) {
+      // If product has no history logs in either collection, create virtual GENERATED entry if not seen
+      const hasProductHistory = historyTimeline.some((h) => h.productName === prod.productName);
+      if (!hasProductHistory) {
+        const genKey = `${prod.productName}_GENERATED_${new Date(prod.firstGeneratedAt).getTime()}`;
+        if (!seenEventKeys.has(genKey)) {
+          seenEventKeys.add(genKey);
           historyTimeline.push({
-            _id: `${prod.productName}_upd`,
+            _id: `${prod.productName}_gen`,
             productName: prod.productName,
             category: prod.category,
             brand: prod.brand,
-            action: "UPDATE",
+            historyType: "GENERATION",
+            action: "GENERATED",
             priceType: "",
             totalLenses: prod.totalLenses,
             totalStockQty: prod.totalStockQty,
@@ -565,7 +648,7 @@ export const getLensHistory = async (req, res) => {
             buyingPrice: prod.sampleBuyingPrice ?? prod.samplePrice ?? 0,
             sellingPrice: prod.sampleSellingPrice ?? prod.samplePrice ?? 0,
             mrp: prod.sampleMrp ?? 0,
-            timestamp: prod.lastUpdatedAt,
+            timestamp: prod.firstGeneratedAt,
           });
         }
       }
