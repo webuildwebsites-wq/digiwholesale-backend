@@ -1193,7 +1193,8 @@ export const bulkUploadProducts = async (req, res) => {
   try {
     session.startTransaction();
 
-    const { _id: userId } = req.user;
+    const userId = req.user?._id || req.user?.id;
+    const tenantId = req.user?.tenantId;
 
     let products = JSON.parse(req.body.products || "[]");
 
