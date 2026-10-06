@@ -2,6 +2,9 @@ import Tenant from "../../../models/Tenant/Tenant.model.js";
 import Employee from "../../../models/Auth/Employee.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { generateEmployeeCode } from "../../../Utils/Auth/customerAuthUtils.js";
+import { sendEmail } from "../../config/Email/emailService.js";
+import TenantRegistrationTemplate from "../../../Utils/Mail/TenantRegistrationTemplate.js";
+import { sendWhatsAppMessage, tenantRegistrationWhatsApp } from "../../../Utils/whatsapp/whatsappService.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -183,6 +186,37 @@ export const registerTenant = async (req, res) => {
         const tenantObj     = tenant.toObject();
         const superAdminObj = superAdmin.toObject();
         delete superAdminObj.password;
+
+        // ── Fire & forget: Email notification ──
+        sendEmail({
+            to:      email.toLowerCase().trim(),
+            subject: `Welcome to DigiWholesale — Your Wholesaler Account is Ready (${tenantId})`,
+            html:    TenantRegistrationTemplate({
+                ownerName:  ownerName.trim(),
+                storeName:  storeName.trim(),
+                tenantId,
+                email:      email.toLowerCase().trim(),
+                password,
+                mobile:     mobile.trim(),
+                planType:   resolvedPlanType,
+                expiryDate: expiry,
+            }),
+        }).catch(err => console.error("[Tenant Registration] Email error:", err.message));
+
+        // ── Fire & forget: WhatsApp notification ──
+        sendWhatsAppMessage({
+            to:      mobile.trim(),
+            message: tenantRegistrationWhatsApp({
+                ownerName:  ownerName.trim(),
+                storeName:  storeName.trim(),
+                tenantId,
+                email:      email.toLowerCase().trim(),
+                password,
+                mobile:     mobile.trim(),
+                planType:   resolvedPlanType,
+                expiryDate: expiry,
+            }),
+        }).catch(err => console.error("[Tenant Registration] WhatsApp error:", err.message));
 
         return sendSuccessResponse(res, 201, {
             tenant:     tenantObj,

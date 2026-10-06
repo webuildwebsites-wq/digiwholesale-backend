@@ -86,6 +86,7 @@ export const getLensMatrixData = async (req, res) => {
     const products = await DigiProduct.find({
       tenantId,
       productName: { $regex: `^${cleanName}$`, $options: "i" },
+      isDeleted: { $ne: true },
     })
       .select("productCode productName category brand sph cyl addition qty price buyingPrice sellingPrice mrp createdAt updatedAt")
       .lean();
@@ -178,21 +179,60 @@ export const updateLensMatrix = async (req, res) => {
     const existingProducts = await DigiProduct.find({
       tenantId,
       productName: { $regex: `^${cleanName}$`, $options: "i" },
+      isDeleted: { $ne: true },
     }).session(session);
 
     if (!existingProducts || existingProducts.length === 0) {
       throw new Error(`No products found for "${cleanName}"`);
     }
 
-    const productLookup = new Map();
+    // Flexible multi-attribute lookup for accurate product matching
+    const productByCode = new Map();
+    const productById = new Map();
+    const productByPowerAndAdd = new Map();
+    const productsByPower = new Map();
+
     existingProducts.forEach((p) => {
+      if (p.productCode) {
+        productByCode.set(p.productCode.trim().toUpperCase(), p);
+      }
+      productById.set(p._id.toString(), p);
+
       const s = parsePower(p.sph);
       const c = parsePower(p.cyl);
       if (s !== null && c !== null) {
-        const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
-        productLookup.set(key, p);
+        const addClean = p.addition ? String(p.addition).trim() : "";
+        const powerAddKey = `${s.toFixed(2)}_${c.toFixed(2)}_${addClean}`;
+        productByPowerAndAdd.set(powerAddKey, p);
+
+        const powerKey = `${s.toFixed(2)}_${c.toFixed(2)}`;
+        if (!productsByPower.has(powerKey)) {
+          productsByPower.set(powerKey, []);
+        }
+        productsByPower.get(powerKey).push(p);
       }
     });
+
+    const findMatchingProducts = (item) => {
+      if (item.productCode && productByCode.has(item.productCode.trim().toUpperCase())) {
+        return [productByCode.get(item.productCode.trim().toUpperCase())];
+      }
+      if (item._id && productById.has(String(item._id))) {
+        return [productById.get(String(item._id))];
+      }
+      const s = parsePower(item.sph);
+      const c = parsePower(item.cyl);
+      if (s !== null && c !== null) {
+        const addClean = item.addition ? String(item.addition).trim() : "";
+        if (addClean && productByPowerAndAdd.has(`${s.toFixed(2)}_${c.toFixed(2)}_${addClean}`)) {
+          return [productByPowerAndAdd.get(`${s.toFixed(2)}_${c.toFixed(2)}_${addClean}`)];
+        }
+        if (productsByPower.has(`${s.toFixed(2)}_${c.toFixed(2)}`)) {
+          return productsByPower.get(`${s.toFixed(2)}_${c.toFixed(2)}`);
+        }
+      }
+      return [];
+    };
 
     let updatedCount = 0;
     let summaryText = "";
@@ -204,14 +244,11 @@ export const updateLensMatrix = async (req, res) => {
 
       const idsToDelete = new Set();
       for (const item of updates) {
-        const s = parsePower(item.sph);
-        const c = parsePower(item.cyl);
-        if (s === null || c === null) continue;
-        const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
-        const prod = productLookup.get(key);
-        if (prod) {
+        if (item.isDelete === false) continue;
+        const matches = findMatchingProducts(item);
+        matches.forEach((prod) => {
           idsToDelete.add(prod._id.toString());
-        }
+        });
       }
 
       if (idsToDelete.size === 0) {
@@ -333,16 +370,16 @@ export const updateLensMatrix = async (req, res) => {
 
         if (s === null || c === null) continue;
         const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
-        const prod = productLookup.get(key);
 
-        if (!prod) continue; 
+        // Use the correctly populated Map (productsByPower)
+        const matchedProds = productsByPower.get(key) || [];
+        if (matchedProds.length === 0) continue;
 
-        if (action === "UPDATE_QTY") {
-          const val = Number(item.value);
-          if (isNaN(val)) continue;
-          const newQty = Math.max(0, Math.round(val));
-          const oldQty = prod.qty || 0;
-          if (newQty !== oldQty) {
+        for (const prod of matchedProds) {
+          if (action === "UPDATE_QTY") {
+            const val = Number(item.value);
+            if (isNaN(val)) continue;
+            const newQty = Math.max(0, Math.round(val));
             bulkOps.push({
               updateOne: {
                 filter: { _id: prod._id, tenantId },
@@ -350,38 +387,38 @@ export const updateLensMatrix = async (req, res) => {
               },
             });
             updatedCount++;
-          }
-        } else if (action === "UPDATE_PRICE") {
-          const updateFields = {};
+          } else if (action === "UPDATE_PRICE") {
+            const updateFields = {};
 
-          if (item.buyingPrice != null && !isNaN(Number(item.buyingPrice))) {
-            const bp = Math.max(0, Number(item.buyingPrice));
-            updateFields.buyingPrice = bp;
-            updateFields.price = bp;
-          }
-          if (item.sellingPrice != null && !isNaN(Number(item.sellingPrice))) {
-            updateFields.sellingPrice = Math.max(0, Number(item.sellingPrice));
-          }
-          if (item.mrp != null && !isNaN(Number(item.mrp))) {
-            updateFields.mrp = Math.max(0, Number(item.mrp));
-          }
+            if (item.buyingPrice != null && !isNaN(Number(item.buyingPrice))) {
+              const bp = Math.max(0, Number(item.buyingPrice));
+              updateFields.buyingPrice = bp;
+              updateFields.price = bp;
+            }
+            if (item.sellingPrice != null && !isNaN(Number(item.sellingPrice))) {
+              updateFields.sellingPrice = Math.max(0, Number(item.sellingPrice));
+            }
+            if (item.mrp != null && !isNaN(Number(item.mrp))) {
+              updateFields.mrp = Math.max(0, Number(item.mrp));
+            }
 
-          if (Object.keys(updateFields).length === 0 && item.value != null && !isNaN(Number(item.value))) {
-            const newPrice = Math.max(0, Number(item.value));
-            updateFields.buyingPrice = newPrice;
-            updateFields.sellingPrice = newPrice;
-            updateFields.mrp = newPrice;
-            updateFields.price = newPrice;
-          }
+            if (Object.keys(updateFields).length === 0 && item.value != null && !isNaN(Number(item.value))) {
+              const newPrice = Math.max(0, Number(item.value));
+              updateFields.buyingPrice = newPrice;
+              updateFields.sellingPrice = newPrice;
+              updateFields.mrp = newPrice;
+              updateFields.price = newPrice;
+            }
 
-          if (Object.keys(updateFields).length > 0) {
-            bulkOps.push({
-              updateOne: {
-                filter: { _id: prod._id, tenantId },
-                update: { $set: updateFields },
-              },
-            });
-            updatedCount++;
+            if (Object.keys(updateFields).length > 0) {
+              bulkOps.push({
+                updateOne: {
+                  filter: { _id: prod._id, tenantId },
+                  update: { $set: updateFields },
+                },
+              });
+              updatedCount++;
+            }
           }
         }
       }
@@ -512,6 +549,9 @@ export const getLensHistory = async (req, res) => {
 
     const historyTimeline = [];
     const seenEventKeys = new Set();
+    // Track which productNames are already covered by the dedicated collection
+    // so we don't add duplicate virtual GENERATED entries from legacy fallback
+    const dedicatedProductNames = new Set();
 
     // ── 1. Fetch from Dedicated LensHistory Collection (Primary & Fastest) ──
     const dedicatedFilter = { tenantId };
@@ -528,6 +568,7 @@ export const getLensHistory = async (req, res) => {
       const timeKey = `${item.productName}_${item.action}_${new Date(ts).getTime()}`;
       if (!seenEventKeys.has(timeKey)) {
         seenEventKeys.add(timeKey);
+        dedicatedProductNames.add(item.productName); // mark as covered
         historyTimeline.push({
           _id: item._id.toString(),
           productName: item.productName,
@@ -594,6 +635,9 @@ export const getLensHistory = async (req, res) => {
     ]);
 
     for (const prod of legacyGrouped) {
+      // ── Skip ALL legacy processing if this product is already in the dedicated collection ──
+      if (dedicatedProductNames.has(prod.productName)) continue;
+
       const rawLogs = [
         ...(prod.generationHistories || []).flat(),
         ...(prod.updateHistories || []).flat(),
@@ -627,7 +671,8 @@ export const getLensHistory = async (req, res) => {
         }
       }
 
-      // If product has no history logs in either collection, create virtual GENERATED entry if not seen
+      // If product has no history at all (not in dedicated, no embedded logs),
+      // create a single virtual GENERATED entry so it appears in history.
       const hasProductHistory = historyTimeline.some((h) => h.productName === prod.productName);
       if (!hasProductHistory) {
         const genKey = `${prod.productName}_GENERATED_${new Date(prod.firstGeneratedAt).getTime()}`;

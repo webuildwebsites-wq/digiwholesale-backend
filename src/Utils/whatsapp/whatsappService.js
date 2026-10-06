@@ -132,6 +132,39 @@ Our team will reach out to you shortly. For any queries, please contact us.
 Thank you,
 *DigiOptics Wholesale Team*`;
 
+export const tenantRegistrationWhatsApp = ({ ownerName, storeName, tenantId, email, password, mobile, planType, expiryDate }) => {
+  const expiry = expiryDate
+    ? new Date(expiryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : "N/A";
+  return `Hello ${ownerName} 👋,
+
+Welcome to *DigiWholesale*! 🎉
+
+Your wholesaler account has been successfully created.
+
+*🏪 Account Details:*
+• Store Name: *${storeName}*
+• Tenant ID: *${tenantId}*
+• Owner: ${ownerName}
+• Mobile: ${mobile}
+• Email: ${email}
+
+*🔐 Login Credentials:*
+• Email / ID: *${email}*
+• Password: *${password}*
+
+*📋 Subscription:*
+• Plan: *${planType}*
+• Valid Until: *${expiry}*
+
+⚠️ Please login and change your password immediately for security.
+
+For any queries, reply to this message or contact our support team.
+
+Thank you,
+*DigiWholesale Team*`;
+};
+
 export const vendorNewOrderWhatsApp = ({ vendorName, purchaseOrderId, orderDate, totalOrders, totalItems }) =>
   `Hello ${vendorName} 👋,
 
