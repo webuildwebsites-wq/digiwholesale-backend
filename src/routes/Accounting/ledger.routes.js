@@ -5,7 +5,8 @@ import {
   getCustomerLedgersList, 
   getVendorLedgersList, 
   upsertCustomerLedger, 
-  upsertVendorLedger 
+  upsertVendorLedger,
+  getCustomerOrdersForLedger 
 } from '../../core/controllers/Accounting/ledger.controller.js';
 import { sendPaymentDueReminder } from '../../core/controllers/Accounting/payment.controller.js';
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
@@ -17,6 +18,7 @@ router.use(ProtectUser);
 // Customer Ledgers & Khata Statements
 router.get('/customers', getCustomerLedgersList);
 router.get('/customer/:customerId', getCustomerLedgerStatement);
+router.get('/customer/:customerId/orders', getCustomerOrdersForLedger);
 router.post('/customer/upsert', upsertCustomerLedger);
 router.post('/customer/:customerId/send-due-reminder', (req, res, next) => {
   req.body = { ...req.body, partyId: req.params.customerId, entityType: 'Customer' };

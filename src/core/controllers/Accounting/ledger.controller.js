@@ -6,12 +6,13 @@ import Payment from "../../../models/Accounting/Payment.model.js";
 import Customer from "../../../models/Auth/Customer.js";
 import Vendor from "../../../models/Vendor.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
+import BulkOrder from "../../../models/order/BulkOrder.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
 } from "../../../Utils/response/responseHandler.js";
 
-const parseCreditDays = (cd) => {
+export const parseCreditDays = (cd) => {
   if (!cd) return 0;
   if (typeof cd === "number") return cd;
   if (typeof cd === "string") {
@@ -24,6 +25,89 @@ const parseCreditDays = (cd) => {
     return isNaN(num) ? 0 : num;
   }
   return 0;
+};
+
+/**
+ * Helper to calculate order totals, tax amounts, paid advances, and part-payment status
+ */
+export const calculateBulkOrderTotals = (bulkOrder) => {
+  let taxableAmount = 0;
+  let gstAmount = 0;
+  let itemsCount = 0;
+
+  if (Array.isArray(bulkOrder.orders)) {
+    bulkOrder.orders.forEach((order) => {
+      if (Array.isArray(order.items)) {
+        order.items.forEach((item) => {
+          const price = Number(item.price || 0);
+          const qty = Number(item.qty || 0);
+          const gstPercent = Number(item.gst || 0);
+          const discount = Number(item.discountAmount || 0);
+          const base = price * qty - discount;
+          taxableAmount += base;
+          gstAmount += (base * gstPercent) / 100;
+          itemsCount += qty;
+        });
+      }
+    });
+  }
+
+  const shippingCharges = Number(bulkOrder.shippingCharges || 0);
+  const otherCharges = Number(bulkOrder.otherCharges || 0);
+  const grandTotal = Number((taxableAmount + gstAmount + shippingCharges + otherCharges).toFixed(2));
+  const paidAmount = Number((bulkOrder.advanceAmount || 0).toFixed(2));
+  const balanceDue = Math.max(0, Number((grandTotal - paidAmount).toFixed(2)));
+
+  let paymentStatus = "UNPAID";
+  if (paidAmount >= grandTotal && grandTotal > 0) {
+    paymentStatus = "PAID";
+  } else if (paidAmount > 0) {
+    paymentStatus = "PARTIAL";
+  }
+
+  const partPaymentPercentage = grandTotal > 0 ? Math.min(100, Math.round((paidAmount / grandTotal) * 100)) : 0;
+
+  return {
+    itemsCount,
+    taxableAmount: Number(taxableAmount.toFixed(2)),
+    gstAmount: Number(gstAmount.toFixed(2)),
+    grandTotal,
+    paidAmount,
+    balanceDue,
+    paymentStatus,
+    partPaymentPercentage,
+  };
+};
+
+/**
+ * Helper to calculate credit limit utilization and alert flags:
+ * - 20% Threshold Alert: utilization >= 80% and < 100%
+ * - Color indicators: Healthy (<80% - Green), Warning (80%-99% - Amber), Exceeded (>=100% - Red)
+ */
+export const calculateCreditStatus = (creditLimit, creditUsed) => {
+  const limit = Number(creditLimit || 0);
+  const used = Number(creditUsed || 0);
+  const percentage = limit > 0 ? Number(((used / limit) * 100).toFixed(1)) : 0;
+  const availableCredit = Math.max(0, Number((limit - used).toFixed(2)));
+  const exceededAmount = used > limit ? Number((used - limit).toFixed(2)) : 0;
+
+  let creditStatus = "HEALTHY";
+  if (limit > 0 && used >= limit) {
+    creditStatus = "EXCEEDED";
+  } else if (limit > 0 && used >= 0.8 * limit) {
+    creditStatus = "WARNING_20_PERCENT";
+  }
+
+  return {
+    creditLimit: limit,
+    creditUsed: used,
+    availableCredit,
+    creditPercentage: percentage,
+    creditStatus,
+    exceededAmount,
+    is20PercentAlert: creditStatus === "WARNING_20_PERCENT",
+    isExceededAlert: creditStatus === "EXCEEDED",
+  };
 };
 
 /**
@@ -117,7 +201,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
     const activeCreditLimit = inheritedCreditLimit;
     const activeCreditUsed = inheritedCreditUsed;
     const activeAdvance = inheritedAdvance;
-    const availableCredit = Math.max(0, activeCreditLimit - activeCreditUsed);
+    const creditAlerts = calculateCreditStatus(activeCreditLimit, activeCreditUsed);
 
     const ledgerObj = ledger.toObject ? ledger.toObject() : ledger;
 
@@ -150,7 +234,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
         .limit(parseInt(limit, 10));
     }
 
-    const transactions = await transactionsQuery.lean();
+    const rawTransactions = await transactionsQuery.lean();
     const totalTransactions = await LedgerTransaction.countDocuments(query);
 
     let totalDebit = 0;
@@ -161,6 +245,95 @@ export const getCustomerLedgerStatement = async (req, res) => {
       totalDebit += Number(txn.debit || 0);
       totalCredit += Number(txn.credit || 0);
     });
+
+    // 1. Fetch all customer bulk orders for Part-Payment & Order Status tracking
+    const bulkOrders = await BulkOrder.find({ "customer.customerId": customer._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const ordersMap = new Map();
+    const customerOrdersList = bulkOrders.map((bo) => {
+      const totals = calculateBulkOrderTotals(bo);
+      const firstOrder = bo.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || bo._id.toString().slice(-6).toUpperCase();
+      const orderEntry = {
+        _id: bo._id,
+        orderId: bo._id,
+        orderNumber,
+        createdAt: bo.createdAt,
+        orderDate: bo.createdAt,
+        orderStatus: firstOrder.status || "Submitted",
+        statusHistory: firstOrder.statusHistory || [],
+        trackingId: firstOrder.trackingId || null,
+        itemsCount: totals.itemsCount,
+        taxableAmount: totals.taxableAmount,
+        gstAmount: totals.gstAmount,
+        grandTotal: totals.grandTotal,
+        totalOrderPrice: totals.grandTotal,
+        paidAmount: totals.paidAmount,
+        advanceAmount: totals.paidAmount,
+        balanceDue: totals.balanceDue,
+        paymentStatus: totals.paymentStatus,
+        partPaymentPercentage: totals.partPaymentPercentage,
+        isGSTRegistered: Boolean(customer.isGSTRegistered),
+        gstNumber: customer.gstNumber || customer.gstin || customer.GSTNo || "",
+        items: firstOrder.items || [],
+      };
+      ordersMap.set(bo._id.toString(), orderEntry);
+      ordersMap.set(orderNumber, orderEntry);
+      return orderEntry;
+    });
+
+    // 2. Enrich transactions with order details, part-payment info, and GST flag
+    const transactions = rawTransactions.map((t) => {
+      let matchedOrder = null;
+      if (t.voucherId && ordersMap.has(t.voucherId.toString())) {
+        matchedOrder = ordersMap.get(t.voucherId.toString());
+      } else if (t.referenceNumber && ordersMap.has(t.referenceNumber)) {
+        matchedOrder = ordersMap.get(t.referenceNumber);
+      }
+
+      return {
+        ...t,
+        orderStatus: matchedOrder ? matchedOrder.orderStatus : null,
+        orderGrandTotal: matchedOrder ? matchedOrder.grandTotal : null,
+        orderPaidAmount: matchedOrder ? matchedOrder.paidAmount : null,
+        orderBalanceDue: matchedOrder ? matchedOrder.balanceDue : null,
+        partPaymentStatus: matchedOrder ? matchedOrder.paymentStatus : null,
+        partPaymentPercentage: matchedOrder ? matchedOrder.partPaymentPercentage : null,
+        isGSTInvoice: Boolean(customer.isGSTRegistered),
+        taxableAmount: matchedOrder ? matchedOrder.taxableAmount : null,
+        gstAmount: matchedOrder ? matchedOrder.gstAmount : null,
+      };
+    });
+
+    // 3. Build monthly breakdown aggregations for Monthly View
+    const monthlyMap = new Map();
+    allTxnsForSummary.forEach((t) => {
+      const d = new Date(t.transactionDate || t.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const monthLabel = d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, {
+          month: key,
+          monthLabel,
+          totalDebit: 0,
+          totalCredit: 0,
+          transactionsCount: 0,
+        });
+      }
+      const entry = monthlyMap.get(key);
+      entry.totalDebit += Number(t.debit || 0);
+      entry.totalCredit += Number(t.credit || 0);
+      entry.transactionsCount += 1;
+    });
+
+    const monthlyBreakdown = Array.from(monthlyMap.values())
+      .map((m) => ({
+        ...m,
+        netMovement: m.totalDebit - m.totalCredit,
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month));
 
     const rawAddr = customer.address || customer.billToAddress;
     const formattedAddr =
@@ -190,7 +363,11 @@ export const getCustomerLedgerStatement = async (req, res) => {
           customer.mobileNo1 || customer.mobile || customer.mobileNo2 || "—",
         email: customer.businessEmail || customer.emailId,
         address: formattedAddr,
-        gstin: customer.gstNumber || customer.gstin || customer.GSTNo,
+        gstin: customer.gstNumber || customer.gstin || customer.GSTNo || "Unregistered",
+        isGSTRegistered: Boolean(customer.isGSTRegistered),
+        gstType: customer.gstType?.name || customer.gstType || (customer.isGSTRegistered ? "Regular" : "Non-GST"),
+        panCard: customer.panCard || "",
+        aadharCard: customer.aadharCard || "",
       },
       ledgerMaster: {
         ledgerCode: ledgerObj.ledgerCode,
@@ -198,7 +375,12 @@ export const getCustomerLedgerStatement = async (req, res) => {
         creditDays: ledgerObj.creditDays || inheritedCreditDays,
         creditUsed: activeCreditUsed,
         advanceAmount: activeAdvance,
-        availableCredit,
+        availableCredit: creditAlerts.availableCredit,
+        creditPercentage: creditAlerts.creditPercentage,
+        creditStatus: creditAlerts.creditStatus,
+        exceededAmount: creditAlerts.exceededAmount,
+        is20PercentAlert: creditAlerts.is20PercentAlert,
+        isExceededAlert: creditAlerts.isExceededAlert,
         interestRate: ledgerObj.interestRate || 0,
         openingBalance: ledgerObj.openingBalance || 0,
         openingBalanceType: ledgerObj.openingBalanceType || "Debit",
@@ -226,6 +408,8 @@ export const getCustomerLedgerStatement = async (req, res) => {
       {
         summary: statementSummary,
         transactions,
+        orders: customerOrdersList,
+        monthlyBreakdown,
         pagination: isPaginationRequested
           ? {
               total: totalTransactions,
@@ -426,7 +610,7 @@ export const getVendorLedgerStatement = async (req, res) => {
  */
 export const getCustomerLedgersList = async (req, res) => {
   try {
-    const { search, status, branchId, page = 1, limit = 50 } = req.query;
+    const { search, status, creditFilter, gstFilter, month, branchId, page = 1, limit = 50 } = req.query;
     const tenantId = req.user?.tenantId || null;
 
     const customerQuery = {
@@ -437,6 +621,12 @@ export const getCustomerLedgersList = async (req, res) => {
       customerQuery.tenantId = tenantId;
     }
 
+    if (gstFilter === "GST") {
+      customerQuery.isGSTRegistered = true;
+    } else if (gstFilter === "NON_GST") {
+      customerQuery.isGSTRegistered = { $ne: true };
+    }
+
     if (search) {
       customerQuery.$or = [
         { shopName: { $regex: search, $options: "i" } },
@@ -444,17 +634,77 @@ export const getCustomerLedgersList = async (req, res) => {
         { mobileNo1: { $regex: search, $options: "i" } },
         { mobile: { $regex: search, $options: "i" } },
         { customerCode: { $regex: search, $options: "i" } },
+        { gstNumber: { $regex: search, $options: "i" } },
       ];
     }
 
     const customers = await Customer.find(customerQuery)
       .select(
-        "shopName ownerName mobileNo1 mobileNo2 mobile businessEmail address branchId tenantId creditLimit creditDays creditUsed customerBalance customerCode serialNumber GSTNo gstNumber createdAt",
+        "shopName ownerName mobileNo1 mobileNo2 mobile businessEmail address branchId tenantId creditLimit creditDays creditUsed customerBalance customerCode serialNumber GSTNo gstNumber isGSTRegistered gstType panCard aadharCard createdAt",
       )
       .sort({ createdAt: -1 })
       .lean();
 
+    // Batch query bulk orders for all customers to compute order statuses and counts
+    const customerIds = customers.map((c) => c._id);
+    const bulkOrders = await BulkOrder.find({ "customer.customerId": { $in: customerIds } })
+      .select("customer orders advanceAmount shippingCharges otherCharges createdAt")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const ordersByCustomer = new Map();
+    bulkOrders.forEach((bo) => {
+      const cId = bo.customer?.customerId?.toString();
+      if (!cId) return;
+      if (!ordersByCustomer.has(cId)) {
+        ordersByCustomer.set(cId, []);
+      }
+      ordersByCustomer.get(cId).push(bo);
+    });
+
+    // Optional monthly date range if month filter provided (YYYY-MM)
+    let monthStart = null;
+    let monthEnd = null;
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [yr, mo] = month.split("-").map(Number);
+      monthStart = new Date(yr, mo - 1, 1);
+      monthEnd = new Date(yr, mo, 0, 23, 59, 59, 999);
+    }
+
+    // Pre-fetch monthly transactions if month is selected
+    let monthlyTxnsMap = new Map();
+    if (monthStart && monthEnd) {
+      const mTxns = await LedgerTransaction.find({
+        partyId: { $in: customerIds },
+        entityType: "Customer",
+        transactionDate: { $gte: monthStart, $lte: monthEnd },
+      }).lean();
+
+      mTxns.forEach((t) => {
+        const cId = t.partyId?.toString();
+        if (!cId) return;
+        if (!monthlyTxnsMap.has(cId)) {
+          monthlyTxnsMap.set(cId, { debit: 0, credit: 0, count: 0 });
+        }
+        const entry = monthlyTxnsMap.get(cId);
+        entry.debit += Number(t.debit || 0);
+        entry.credit += Number(t.credit || 0);
+        entry.count += 1;
+      });
+    }
+
+    let totalReceivable = 0;
+    let totalAdvances = 0;
+    let totalCreditLimit = 0;
+    let activeCount = 0;
+    let exceededLimitCount = 0;
+    let warning20PercentCount = 0;
+    let healthyCreditCount = 0;
+    let gstCustomerCount = 0;
+    let nonGstCustomerCount = 0;
+
     const ledgers = [];
+
     for (const cust of customers) {
       let l = await CustomerLedger.findOne({ customerId: cust._id })
         .populate("branchId", "name")
@@ -505,25 +755,95 @@ export const getCustomerLedgersList = async (req, res) => {
 
       const lObj = l.toObject ? l.toObject() : l;
 
+      const activeCreditLimit = custCreditLimit;
+      const activeCreditUsed = custCreditUsed;
+      const activeAdvance = custAdvance;
+      const creditAlerts = calculateCreditStatus(activeCreditLimit, activeCreditUsed);
+
+      // Global Counters across all customers
+      totalReceivable += activeCreditUsed;
+      totalAdvances += activeAdvance;
+      totalCreditLimit += activeCreditLimit;
+      if (lObj.ledgerStatus === "Active") activeCount++;
+
+      if (creditAlerts.creditStatus === "EXCEEDED") {
+        exceededLimitCount++;
+      } else if (creditAlerts.creditStatus === "WARNING_20_PERCENT") {
+        warning20PercentCount++;
+      } else {
+        healthyCreditCount++;
+      }
+
+      const isGSTReg = Boolean(cust.isGSTRegistered);
+      if (isGSTReg) {
+        gstCustomerCount++;
+      } else {
+        nonGstCustomerCount++;
+      }
+
+      // Filter by credit alert state if specified
+      if (creditFilter && creditFilter !== "ALL") {
+        if (creditFilter === "EXCEEDED" && creditAlerts.creditStatus !== "EXCEEDED") continue;
+        if (creditFilter === "WARNING_20_PERCENT" && creditAlerts.creditStatus !== "WARNING_20_PERCENT") continue;
+        if (creditFilter === "HEALTHY" && creditAlerts.creditStatus !== "HEALTHY") continue;
+      }
+
+      // Order metrics for this customer
+      const custOrders = ordersByCustomer.get(cust._id.toString()) || [];
+      const totalOrdersCount = custOrders.length;
+      const activeOrders = custOrders.filter((bo) => {
+        const st = bo.orders?.[0]?.status;
+        return st && !["Delivered", "Cancelled", "Completed"].includes(st);
+      });
+      const activeOrdersCount = activeOrders.length;
+      const latestOrder = custOrders[0] || null;
+      const latestOrderStatus = latestOrder ? (latestOrder.orders?.[0]?.status || "Submitted") : null;
+      const latestOrderNumber = latestOrder ? (latestOrder.orders?.[0]?.orderNumber || latestOrder._id.toString().slice(-6).toUpperCase()) : null;
+      const latestOrderDate = latestOrder ? latestOrder.createdAt : null;
+
+      // Monthly metrics
+      const mStats = monthlyTxnsMap.get(cust._id.toString()) || { debit: 0, credit: 0, count: 0 };
+
       cust.mobile = cust.mobileNo1 || cust.mobile || cust.mobileNo2 || "—";
       cust.creditLimit = custCreditLimit;
       cust.creditDays = custCreditDays;
       cust.creditUsed = custCreditUsed;
       cust.customerBalance = custAdvance;
-
-      const activeCreditLimit = custCreditLimit;
-      const activeCreditUsed = custCreditUsed;
-      const activeAdvance = custAdvance;
-      const availableCredit = Math.max(0, activeCreditLimit - activeCreditUsed);
+      cust.isGSTRegistered = isGSTReg;
+      cust.gstNumber = cust.gstNumber || cust.GSTNo || "";
+      cust.gstType = cust.gstType?.name || cust.gstType || (isGSTReg ? "Regular" : "Non-GST");
 
       lObj.customerId = cust;
       lObj.creditLimit = activeCreditLimit;
       lObj.creditDays = lObj.creditDays || custCreditDays;
       lObj.creditUsed = activeCreditUsed;
       lObj.advanceAmount = activeAdvance;
-      lObj.availableCredit = availableCredit;
-      lObj.currentBalance =
-        activeCreditUsed > 0 ? activeCreditUsed : -activeAdvance;
+      lObj.availableCredit = creditAlerts.availableCredit;
+      lObj.creditPercentage = creditAlerts.creditPercentage;
+      lObj.creditStatus = creditAlerts.creditStatus;
+      lObj.exceededAmount = creditAlerts.exceededAmount;
+      lObj.is20PercentAlert = creditAlerts.is20PercentAlert;
+      lObj.isExceededAlert = creditAlerts.isExceededAlert;
+      lObj.currentBalance = activeCreditUsed > 0 ? activeCreditUsed : -activeAdvance;
+      lObj.pendingDue = activeCreditUsed;
+      lObj.isGSTRegistered = isGSTReg;
+      lObj.gstNumber = cust.gstNumber;
+
+      lObj.ordersSummary = {
+        totalOrders: totalOrdersCount,
+        activeOrders: activeOrdersCount,
+        latestOrderStatus,
+        latestOrderNumber,
+        latestOrderDate,
+      };
+
+      lObj.monthlySummary = {
+        month: month || null,
+        monthlyInvoiced: mStats.debit,
+        monthlyReceived: mStats.credit,
+        netMovement: mStats.debit - mStats.credit,
+        transactionsCount: mStats.count,
+      };
 
       if (!status || lObj.ledgerStatus === status) {
         ledgers.push(lObj);
@@ -535,6 +855,17 @@ export const getCustomerLedgersList = async (req, res) => {
       200,
       {
         ledgers,
+        metrics: {
+          totalReceivable,
+          totalAdvances,
+          totalCreditLimit,
+          activeCount,
+          exceededLimitCount,
+          warning20PercentCount,
+          healthyCreditCount,
+          gstCustomerCount,
+          nonGstCustomerCount,
+        },
         pagination: {
           total: ledgers.length,
           page: parseInt(page, 10),
@@ -844,3 +1175,83 @@ export const upsertVendorLedger = async (req, res) => {
     );
   }
 };
+
+/**
+ * 7. Get Customer Orders for Ledger & Part-Payment Tracking
+ */
+export const getCustomerOrdersForLedger = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "INVALID_CUSTOMER_ID",
+        "Invalid customer ID.",
+      );
+    }
+
+    const customer = await Customer.findById(customerId)
+      .select("shopName ownerName isGSTRegistered gstNumber customerBalance creditUsed creditLimit")
+      .lean();
+
+    if (!customer) {
+      return sendErrorResponse(
+        res,
+        404,
+        "CUSTOMER_NOT_FOUND",
+        "Customer not found.",
+      );
+    }
+
+    const bulkOrders = await BulkOrder.find({ "customer.customerId": customerId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const orders = bulkOrders.map((bo) => {
+      const totals = calculateBulkOrderTotals(bo);
+      const firstOrder = bo.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || bo._id.toString().slice(-6).toUpperCase();
+
+      return {
+        _id: bo._id,
+        orderId: bo._id,
+        orderNumber,
+        createdAt: bo.createdAt,
+        orderDate: bo.createdAt,
+        orderStatus: firstOrder.status || "Submitted",
+        statusHistory: firstOrder.statusHistory || [],
+        trackingId: firstOrder.trackingId || null,
+        itemsCount: totals.itemsCount,
+        taxableAmount: totals.taxableAmount,
+        gstAmount: totals.gstAmount,
+        grandTotal: totals.grandTotal,
+        totalOrderPrice: totals.grandTotal,
+        paidAmount: totals.paidAmount,
+        advanceAmount: totals.paidAmount,
+        balanceDue: totals.balanceDue,
+        paymentStatus: totals.paymentStatus,
+        partPaymentPercentage: totals.partPaymentPercentage,
+        isGSTRegistered: Boolean(customer.isGSTRegistered),
+        gstNumber: customer.gstNumber || "",
+        items: firstOrder.items || [],
+      };
+    });
+
+    return sendSuccessResponse(
+      res,
+      200,
+      { orders },
+      "Customer orders loaded for part-payment tracking.",
+    );
+  } catch (error) {
+    console.error("getCustomerOrdersForLedger error:", error);
+    return sendErrorResponse(
+      res,
+      500,
+      "GET_CUSTOMER_ORDERS_FAILED",
+      error.message,
+    );
+  }
+};
+

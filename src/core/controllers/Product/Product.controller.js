@@ -143,9 +143,9 @@ export const createProduct = async (req, res) => {
       coating: p.coating?.trim() || "",
       disposability: p.disposability?.trim() || "",
       expiry: p.expiry || "",
-      price: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      price: Number(p.sellingPrice != null && Number(p.sellingPrice) > 0 ? p.sellingPrice : (p.price != null ? p.price : (p.buyingPrice ?? 0))),
       buyingPrice: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
-      sellingPrice: Number(p.sellingPrice != null ? p.sellingPrice : (p.price ?? 0)),
+      sellingPrice: Number(p.sellingPrice != null && Number(p.sellingPrice) > 0 ? p.sellingPrice : (p.price ?? 0)),
       gst: Number(p.gst) || 0,
       hsnSac: p.hsnSac?.trim() || "",
       mrp: Number(p.mrp ?? 0),
@@ -264,6 +264,19 @@ export const suggestionProduct = async (req, res) => {
 };
 
 
+export const normalizeProductPrices = (product) => {
+  if (!product) return product;
+  const doc = product.toObject ? product.toObject() : { ...product };
+  const effectiveSelling = doc.sellingPrice != null && Number(doc.sellingPrice) > 0
+    ? Number(doc.sellingPrice)
+    : Number(doc.price || 0);
+  const effectiveBuying = Number(doc.buyingPrice != null ? doc.buyingPrice : (doc.price || 0));
+  doc.price = effectiveSelling;
+  doc.sellingPrice = effectiveSelling;
+  doc.buyingPrice = effectiveBuying;
+  return doc;
+};
+
 export const getProducts = async (req, res) => {
   try {
     const page = Number(req.query.page) || 1;
@@ -287,7 +300,7 @@ export const getProducts = async (req, res) => {
       totalPages: Math.ceil(total / limit),
       totalProducts: total,
       hasMore,
-      products,
+      products: products.map(normalizeProductPrices),
     });
   } catch (error) {
     res.status(500).json({
@@ -316,7 +329,7 @@ export const getProductsByCategory = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data,
+      data: data.map(normalizeProductPrices),
     });
   } catch (error) {
     console.error("Get by category error:", error);
@@ -344,7 +357,7 @@ export const getProductById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      product,
+      product: normalizeProductPrices(product),
     });
   } catch (error) {
     res.status(400).json({
@@ -400,11 +413,17 @@ export const updateProduct = async (req, res) => {
     product.disposability = p.disposability?.trim() || "";
     product.expiry = p.expiry || null;
     if (p.buyingPrice != null && p.buyingPrice !== "") product.buyingPrice = Number(p.buyingPrice);
-    if (p.sellingPrice != null && p.sellingPrice !== "") product.sellingPrice = Number(p.sellingPrice);
-    if (p.price != null && p.price !== "") {
+    if (p.sellingPrice != null && p.sellingPrice !== "") {
+      product.sellingPrice = Number(p.sellingPrice);
+      product.price = Number(p.sellingPrice);
+    } else if (p.price != null && p.price !== "") {
       product.price = Number(p.price);
-      if (product.buyingPrice == null) product.buyingPrice = product.price;
+      if (!product.sellingPrice) product.sellingPrice = product.price;
     }
+    if (product.sellingPrice != null && Number(product.sellingPrice) > 0) {
+      product.price = Number(product.sellingPrice);
+    }
+    if (product.buyingPrice == null) product.buyingPrice = product.price || 0;
     product.gst = p.gst != null ? Number(p.gst) : 0;
     product.hsnSac = p.hsnSac?.trim() || "";
     if (p.mrp != null && p.mrp !== "") product.mrp = Number(p.mrp);
@@ -623,9 +642,13 @@ export const addInventory = async (req, res) => {
 
       if (buyingP != null) {
         product.buyingPrice = buyingP;
-        product.price = buyingP;
       }
-      if (sellingP != null) product.sellingPrice = sellingP;
+      if (sellingP != null && Number(sellingP) > 0) {
+        product.sellingPrice = Number(sellingP);
+        product.price = Number(sellingP);
+      } else if (product.sellingPrice != null && Number(product.sellingPrice) > 0) {
+        product.price = Number(product.sellingPrice);
+      }
       if (mrpP != null && mrpP > 0) product.mrp = mrpP;
       if (item.expiry) product.expiry = item.expiry;
       if (item.disposability?.trim()) product.disposability = item.disposability.trim();
