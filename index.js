@@ -72,6 +72,7 @@ const allowedOrigins = [
   "http://testing-digiwholesale-backend.digibysr.in",
   "http://testing-digiwholesale-frontend.digibysr.in",
   "https://digiwholesale-backend.digibysr.in",
+  "https://digibysr.in",
   "http://digiwholesale-frontend.digibysr.in"
 ];
 

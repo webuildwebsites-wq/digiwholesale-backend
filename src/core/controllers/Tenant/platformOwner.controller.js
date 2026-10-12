@@ -2,6 +2,9 @@ import Tenant from "../../../models/Tenant/Tenant.model.js";
 import Employee from "../../../models/Auth/Employee.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { generateEmployeeCode } from "../../../Utils/Auth/customerAuthUtils.js";
+import { sendEmail } from "../../config/Email/emailService.js";
+import TenantRegistrationTemplate from "../../../Utils/Mail/TenantRegistrationTemplate.js";
+import { sendWhatsAppMessage, tenantRegistrationWhatsApp } from "../../../Utils/whatsapp/whatsappService.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -48,14 +51,14 @@ export const registerTenant = async (req, res) => {
             utilityProvider, promotionProvider,
         } = req.body;
 
-        if (!storeName || !address || !storeTiming || commissionPercentage === undefined || !expiryDate) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "storeName, address, storeTiming, commissionPercentage, expiryDate are required");
+        if (!storeName || !address || !storeTiming || !expiryDate) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "storeName, address, storeTiming, expiryDate are required");
         }
         if (!ownerName || !email || !mobile || !password) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "ownerName, email, mobile, password are required");
         }
 
-        const commission = Number(commissionPercentage);
+        const commission = commissionPercentage !== undefined ? Number(commissionPercentage) : 0;
         if (isNaN(commission) || commission < 0 || commission > 100) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "commissionPercentage must be between 0 and 100");
         }
@@ -74,8 +77,8 @@ export const registerTenant = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "selectedPages array is required for CUSTOM planType");
         }
 
-        if (!gstCertificate && !panCard && !aadhaarCard) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "At least one document URL (gstCertificate, panCard, or aadhaarCard) must be provided");
+        if (!gstCertificate && !(panCard && aadhaarCard)) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Please provide either GST Certificate OR both PAN Card & Aadhaar Card");
         }
 
         const existingTenant = await Tenant.findOne({ "owner.email": email.toLowerCase() });
@@ -183,6 +186,37 @@ export const registerTenant = async (req, res) => {
         const tenantObj     = tenant.toObject();
         const superAdminObj = superAdmin.toObject();
         delete superAdminObj.password;
+
+        // ── Fire & forget: Email notification ──
+        sendEmail({
+            to:      email.toLowerCase().trim(),
+            subject: `Welcome to DigiWholesale — Your Wholesaler Account is Ready (${tenantId})`,
+            html:    TenantRegistrationTemplate({
+                ownerName:  ownerName.trim(),
+                storeName:  storeName.trim(),
+                tenantId,
+                email:      email.toLowerCase().trim(),
+                password,
+                mobile:     mobile.trim(),
+                planType:   resolvedPlanType,
+                expiryDate: expiry,
+            }),
+        }).catch(err => console.error("[Tenant Registration] Email error:", err.message));
+
+        // ── Fire & forget: WhatsApp notification ──
+        sendWhatsAppMessage({
+            to:      mobile.trim(),
+            message: tenantRegistrationWhatsApp({
+                ownerName:  ownerName.trim(),
+                storeName:  storeName.trim(),
+                tenantId,
+                email:      email.toLowerCase().trim(),
+                password,
+                mobile:     mobile.trim(),
+                planType:   resolvedPlanType,
+                expiryDate: expiry,
+            }),
+        }).catch(err => console.error("[Tenant Registration] WhatsApp error:", err.message));
 
         return sendSuccessResponse(res, 201, {
             tenant:     tenantObj,

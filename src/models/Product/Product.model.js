@@ -1,5 +1,118 @@
 import mongoose from "mongoose";
 
+// ─────────────────────────────────────────────────────────────
+// 1. Initial Lens Generation History Schema
+// ─────────────────────────────────────────────────────────────
+export const lensGenerationHistorySchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      default: "GENERATED",
+    },
+    totalLenses: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalStockQty: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    sphRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    cylRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    buyingPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    sellingPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    mrp: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    generatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+// ─────────────────────────────────────────────────────────────
+// 2. Lens Matrix Updates (Price / Quantity / Delete) Schema
+// ─────────────────────────────────────────────────────────────
+export const lensUpdateHistorySchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      enum: ["GENERATED", "UPDATE_PRICE", "UPDATE_QTY", "DELETE", "UPDATE"],
+      default: "UPDATE",
+    },
+    priceType: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    totalLenses: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalStockQty: {
+      type: Number,
+      default: 0,
+    },
+    sphRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    cylRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    buyingPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    sellingPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    mrp: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const productSchema = new mongoose.Schema(
   {
     productCode: {
@@ -164,21 +277,21 @@ const productSchema = new mongoose.Schema(
       name: { type: String, default: null },
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "employee" },
+    // 1. Initial Lens Generation History
+    lensGenerationHistory: {
+      type: [lensGenerationHistorySchema],
+      default: undefined,
+    },
+
+    // 2. Matrix Updates / Price & Stock Changes History
+    lensUpdateHistory: {
+      type: [lensUpdateHistorySchema],
+      default: undefined,
+    },
+
+    // Combined / Legacy Lens History (backward compatibility)
     lensHistory: {
-      type: [
-        {
-          action: { type: String, default: "GENERATED" },
-          priceType: { type: String, default: "" },
-          totalLenses: { type: Number, default: 0 },
-          totalStockQty: { type: Number, default: 0 },
-          sphRange: { type: String, default: "" },
-          cylRange: { type: String, default: "" },
-          buyingPrice: { type: Number, default: 0 },
-          sellingPrice: { type: Number, default: 0 },
-          mrp: { type: Number, default: 0 },
-          updatedAt: { type: Date, default: Date.now },
-        },
-      ],
+      type: [lensUpdateHistorySchema],
       default: undefined,
     },
     isDeleted: { type: Boolean, default: false, index: true },
