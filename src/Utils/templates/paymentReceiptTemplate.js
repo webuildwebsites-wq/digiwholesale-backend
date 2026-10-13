@@ -121,6 +121,9 @@ export const generatePaymentReceiptHTML = (data) => {
     isVendorPayout = false,
     partyType = "Customer",
     vendor = {},
+    isOrderReceipt = false,
+    orderSummary = null,
+    orderPayments = [],
   } = data;
 
   const isVendor = isVendorPayout || partyType === "Vendor" || Boolean(vendor && (vendor.name || vendor.firm) && !customer?.shopName);
@@ -465,10 +468,10 @@ export const generatePaymentReceiptHTML = (data) => {
     <!-- HEADER BAR -->
     <div class="header-bar">
         <div>
-            <div class="receipt-title">${isVendor ? "Vendor Payment Advice" : "Payment Receipt"}</div>
+            <div class="receipt-title">${isOrderReceipt ? "Order Payment Receipt" : isVendor ? "Vendor Payment Advice" : "Payment Receipt"}</div>
             <div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">DigiOptics Wholesale Management System</div>
         </div>
-        <div class="receipt-badge">${isVendor ? "Payment Disbursed" : "Payment Received"}</div>
+        <div class="receipt-badge">${isOrderReceipt ? (orderSummary?.paymentStatus === "PAID" ? "Fully Paid" : orderSummary?.paymentStatus === "PARTIAL" ? "Part Payment Cleared" : "Payment Due") : isVendor ? "Payment Disbursed" : "Payment Received"}</div>
     </div>
 
     <!-- SUPPLIER & RECEIPT METADATA -->
@@ -482,20 +485,20 @@ export const generatePaymentReceiptHTML = (data) => {
         <div class="meta-cell">
             <table class="meta-table">
                 <tr>
-                    <td class="meta-label">Voucher / Ref No</td>
-                    <td class="meta-val">: ${receiptNo}</td>
+                    <td class="meta-label">${isOrderReceipt ? "Order / Ref No" : "Voucher / Ref No"}</td>
+                    <td class="meta-val">: ${isOrderReceipt && orderSummary ? orderSummary.orderNumber : receiptNo}</td>
                 </tr>
                 <tr>
-                    <td class="meta-label">Date & Time</td>
-                    <td class="meta-val">: ${formattedDate}</td>
+                    <td class="meta-label">${isOrderReceipt ? "Order Date" : "Date & Time"}</td>
+                    <td class="meta-val">: ${isOrderReceipt && orderSummary?.orderDate ? new Date(orderSummary.orderDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : formattedDate}</td>
                 </tr>
                 <tr>
-                    <td class="meta-label">Payment Mode</td>
-                    <td class="meta-val">: <span style="background:#e0f2fe;color:#1f618d;padding:1px 6px;border-radius:4px;font-weight:700;">${modeName}</span></td>
+                    <td class="meta-label">${isOrderReceipt ? "Order Status" : "Payment Mode"}</td>
+                    <td class="meta-val">: <span style="background:#e0f2fe;color:#1f618d;padding:1px 6px;border-radius:4px;font-weight:700;">${isOrderReceipt && orderSummary ? orderSummary.orderStatus : modeName}</span></td>
                 </tr>
                 <tr>
-                    <td class="meta-label">Disbursement Status</td>
-                    <td class="meta-val">: <span style="color:#15803d;font-weight:700;">COMPLETED / CLEARED</span></td>
+                    <td class="meta-label">Payment Status</td>
+                    <td class="meta-val">: <span style="color:${isOrderReceipt && orderSummary?.balanceDue > 0 ? '#b91c1c' : '#15803d'};font-weight:700;">${isOrderReceipt && orderSummary ? (orderSummary.balanceDue <= 0 ? "FULLY PAID / SETTLED" : "PARTIAL / BALANCE DUE") : "COMPLETED / CLEARED"}</span></td>
                 </tr>
             </table>
         </div>
@@ -537,17 +540,38 @@ export const generatePaymentReceiptHTML = (data) => {
     <!-- AMOUNT HIGHLIGHT BOX -->
     <div class="amount-highlight-box">
         <div>
-            <div class="amount-label">${isVendor ? "Amount Disbursed in Words" : "Amount Received in Words"}</div>
-            <div class="amount-words">${amountInWords}</div>
+            <div class="amount-label">${isOrderReceipt ? "Total Order Value in Words" : isVendor ? "Amount Disbursed in Words" : "Amount Received in Words"}</div>
+            <div class="amount-words">${numberToWordsINR(isOrderReceipt && orderSummary ? orderSummary.grandTotal : grossAmount)}</div>
         </div>
         <div style="text-align: right;">
-            <div class="amount-label" style="text-align: right;">${isVendor ? "Total Amount Paid" : "Total Received"}</div>
-            <div class="amount-value">₹ ${fmtNum(grossAmount)}</div>
+            <div class="amount-label" style="text-align: right;">${isOrderReceipt ? "Total Payments Received" : isVendor ? "Total Amount Paid" : "Total Received"}</div>
+            <div class="amount-value">₹ ${fmtNum(isOrderReceipt && orderSummary ? orderSummary.paidAmount : grossAmount)}</div>
         </div>
     </div>
 
     <!-- PAYMENT / REFERENCE DETAILS & ACCOUNT IMPACT -->
     <div class="summary-grid">
+        ${isOrderReceipt && orderSummary ? `
+        <div class="info-card">
+            <div class="section-heading">Order Financial Overview</div>
+            <p><strong>Taxable Value:</strong> ₹${fmtNum(orderSummary.taxableAmount)}</p>
+            <p><strong>GST Total:</strong> ₹${fmtNum(orderSummary.gstAmount)}</p>
+            <p><strong>Shipping & Extra:</strong> ₹${fmtNum((orderSummary.shippingCharges || 0) + (orderSummary.otherCharges || 0))}</p>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
+                <p><strong>Total Order Value:</strong> <span style="font-weight:800;color:#0f172a;">₹${fmtNum(orderSummary.grandTotal)}</span></p>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <div class="section-heading">Order Settlement Status</div>
+            <p><strong>Total Order Value:</strong> ₹${fmtNum(orderSummary.grandTotal)}</p>
+            <p><strong>Total Payments Received:</strong> <span style="font-weight:700;color:#15803d;">₹${fmtNum(orderSummary.paidAmount)}</span></p>
+            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
+                <p><strong>Remaining Order Balance Due:</strong> <span style="font-weight:800;color:${orderSummary.balanceDue > 0 ? '#b91c1c' : '#15803d'};">₹${fmtNum(orderSummary.balanceDue)}</span></p>
+                <p style="margin-top:3px;font-size:10.5px;color:#64748b;"><strong>Status:</strong> ${orderSummary.balanceDue <= 0 ? '<span style="color:#15803d;font-weight:700;">Fully Paid / Settled</span>' : '<span style="color:#b91c1c;font-weight:700;">Partially Paid (Pending Balance)</span>'}</p>
+            </div>
+        </div>
+        ` : `
         <div class="info-card">
             <div class="section-heading">Transaction & Reference Info</div>
             <p><strong>Payment Mode:</strong> ${modeName}</p>
@@ -571,22 +595,62 @@ export const generatePaymentReceiptHTML = (data) => {
             </div>
             `}
         </div>
+        `}
     </div>
 
     <!-- INVOICE / ORDER ALLOCATIONS TABLE -->
     <div class="table-section">
-        <div class="section-heading" style="margin-bottom:6px;">${isVendor ? "Purchase Bill & Voucher Settlement Details" : "Invoice Settlement & Order Allocation Details"}</div>
+        <div class="section-heading" style="margin-bottom:6px;">${isOrderReceipt ? `Payments Received Against Order #${orderSummary?.orderNumber || receiptNo}` : isVendor ? "Purchase Bill & Voucher Settlement Details" : "Invoice Settlement & Order Allocation Details"}</div>
         <table class="receipt-table">
             <thead>
+                ${isOrderReceipt ? `
+                <tr>
+                    <th style="width: 6%; text-align:center;">#</th>
+                    <th style="width: 18%; text-align:left;">Payment Date</th>
+                    <th style="width: 26%; text-align:left;">Voucher / Ref No.</th>
+                    <th style="width: 22%; text-align:left;">Payment Mode</th>
+                    <th style="width: 14%; text-align:right;">Amount (₹)</th>
+                    <th style="width: 14%; text-align:center;">Status</th>
+                </tr>
+                ` : `
                 <tr>
                     <th style="width: 8%; text-align:center;">#</th>
                     <th style="width: 44%; text-align:left;">${isVendor ? "Purchase / Bill Ref No." : "Invoice / Order Ref No."}</th>
                     <th style="width: 24%; text-align:right;">${isVendor ? "Bill Amount" : "Invoice Total"}</th>
                     <th style="width: 24%; text-align:right;">Amount Settled</th>
                 </tr>
+                `}
             </thead>
             <tbody>
-                ${allocationRows}
+                ${isOrderReceipt ? (
+                  orderPayments && orderPayments.length > 0 ? orderPayments.map((p, idx) => `
+                    <tr style="background:${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+                        <td style="text-align:center;color:#64748b;font-weight:600;padding:8px 10px;">${idx + 1}</td>
+                        <td style="padding:8px 10px;color:#334155;">${new Date(p.paymentDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                        <td style="font-weight:700;color:#2980B9;padding:8px 10px;">${p.referenceNumber || p.paymentNumber}</td>
+                        <td style="padding:8px 10px;color:#475569;">${modeLabels[p.paymentMode] || p.paymentMode}</td>
+                        <td style="text-align:right;font-weight:700;color:#059669;padding:8px 10px;">₹${fmtNum(p.amount)}</td>
+                        <td style="text-align:center;padding:8px 10px;"><span style="color:#15803d;font-weight:700;background:#dcfce7;padding:1px 6px;border-radius:4px;font-size:10px;">CLEARED</span></td>
+                    </tr>
+                  `).join("") + `
+                    <tr style="background:#f1f5f9;font-weight:700;border-top:1.5px solid #cbd5e1;">
+                        <td colspan="4" style="text-align:right;padding:8px 10px;color:#1e293b;">Total Payments Received:</td>
+                        <td style="text-align:right;padding:8px 10px;color:#059669;font-size:12px;">₹${fmtNum(orderSummary?.paidAmount || 0)}</td>
+                        <td></td>
+                    </tr>
+                    <tr style="background:#fff1f2;font-weight:700;">
+                        <td colspan="4" style="text-align:right;padding:8px 10px;color:#9f1239;">Remaining Order Balance Due:</td>
+                        <td style="text-align:right;padding:8px 10px;color:#be123c;font-size:12px;">₹${fmtNum(orderSummary?.balanceDue || 0)}</td>
+                        <td></td>
+                    </tr>
+                  ` : `
+                    <tr>
+                        <td colspan="6" style="text-align:center;padding:14px;color:#64748b;font-style:italic;">
+                            No payments recorded yet for this order. Remaining balance of ₹${fmtNum(orderSummary?.grandTotal || 0)} is due.
+                        </td>
+                    </tr>
+                  `
+                ) : allocationRows}
             </tbody>
         </table>
     </div>
