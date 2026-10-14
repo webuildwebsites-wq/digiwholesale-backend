@@ -7,6 +7,7 @@ import Customer from "../../../models/Auth/Customer.js";
 import Vendor from "../../../models/Vendor.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import BulkOrder from "../../../models/order/BulkOrder.js";
+import Employee from "../../../models/Auth/Employee.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
@@ -251,11 +252,76 @@ export const getCustomerLedgerStatement = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    // 2. Fetch all payments for this customer to map installments / part payments
+    const customerPayments = await Payment.find({ partyId: customer._id })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // 3. Resolve salesperson / employee names for transactions
+    const creatorIds = [
+      ...rawTransactions.map((t) => t.createdBy).filter(Boolean),
+    ];
+    const employees = await Employee.find({ _id: { $in: creatorIds } }).lean();
+    const employeeMap = new Map();
+    employees.forEach((emp) => {
+      employeeMap.set(emp._id.toString(), emp.employeeName || emp.username || "Staff");
+    });
+
     const ordersMap = new Map();
     const customerOrdersList = bulkOrders.map((bo) => {
       const totals = calculateBulkOrderTotals(bo);
       const firstOrder = bo.orders?.[0] || {};
       const orderNumber = firstOrder.orderNumber || bo._id.toString().slice(-6).toUpperCase();
+
+      // Find all payments allocated to this specific bulk order
+      const matchedPayments = customerPayments.filter((p) =>
+        (p.allocations || []).some(
+          (a) =>
+            String(a.invoiceId) === String(bo._id) ||
+            a.invoiceNumber === orderNumber,
+        ),
+      );
+
+      let allocatedSum = 0;
+      const orderPayments = [];
+      matchedPayments.forEach((p) => {
+        const alloc = (p.allocations || []).find(
+          (a) =>
+            String(a.invoiceId) === String(bo._id) ||
+            a.invoiceNumber === orderNumber,
+        );
+        const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
+        allocatedSum += amt;
+        orderPayments.push({
+          paymentId: p._id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.createdAt,
+          paymentMode: p.paymentMode || "BANK_TRANSFER",
+          referenceNumber: p.paymentDetails?.referenceNumber || p.paymentNumber,
+          amount: amt,
+          remarks: p.paymentDetails?.remarks || "Part Payment",
+          status: "CLEARED",
+        });
+      });
+
+      // Include initial booking advance payment if advance was recorded
+      const initialAdvance = Math.max(
+        0,
+        Number((Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)),
+      );
+      if (initialAdvance > 0) {
+        orderPayments.unshift({
+          paymentId: `ADV-${orderNumber}`,
+          paymentNumber: `ADV-${orderNumber}`,
+          paymentDate: bo.createdAt,
+          paymentMode: "ADVANCE_ADJUSTMENT",
+          referenceNumber: `ADV-${orderNumber}`,
+          amount: initialAdvance,
+          remarks: "Booking Advance Payment",
+          status: "CLEARED",
+        });
+      }
+
       const orderEntry = {
         _id: bo._id,
         orderId: bo._id,
@@ -278,13 +344,19 @@ export const getCustomerLedgerStatement = async (req, res) => {
         isGSTRegistered: Boolean(customer.isGSTRegistered),
         gstNumber: customer.gstNumber || customer.gstin || customer.GSTNo || "",
         items: firstOrder.items || [],
+        orderPayments,
+        challanUrl: bo.challanUrl || null,
+        invoiceUrl: bo.invoiceUrl || null,
+        hasChallan: Boolean(bo.challanUrl),
+        hasInvoice: Boolean(bo.invoiceUrl),
+        salesPersonName: firstOrder.statusHistory?.[0]?.changedByName || "Sales Staff",
       };
       ordersMap.set(bo._id.toString(), orderEntry);
       ordersMap.set(orderNumber, orderEntry);
       return orderEntry;
     });
 
-    // 2. Enrich transactions with order details, part-payment info, and GST flag
+    // 4. Enrich transactions with order details, part payments, and salesperson info
     const transactions = rawTransactions.map((t) => {
       let matchedOrder = null;
       if (t.voucherId && ordersMap.has(t.voucherId.toString())) {
@@ -293,8 +365,22 @@ export const getCustomerLedgerStatement = async (req, res) => {
         matchedOrder = ordersMap.get(t.referenceNumber);
       }
 
+      const createdByName =
+        employeeMap.get(t.createdBy?.toString()) ||
+        matchedOrder?.salesPersonName ||
+        "Sales Staff";
+
       return {
         ...t,
+        orderId: matchedOrder ? (matchedOrder.orderId || matchedOrder._id) : (t.voucherId || null),
+        orderNumber: matchedOrder ? matchedOrder.orderNumber : (t.referenceNumber || null),
+        challanUrl: matchedOrder ? matchedOrder.challanUrl : null,
+        invoiceUrl: matchedOrder ? matchedOrder.invoiceUrl : null,
+        hasChallan: matchedOrder ? Boolean(matchedOrder.challanUrl) : false,
+        hasInvoice: matchedOrder ? Boolean(matchedOrder.invoiceUrl) : false,
+        createdByName,
+        orderDate: matchedOrder ? matchedOrder.orderDate : t.transactionDate,
+        orderPayments: matchedOrder ? matchedOrder.orderPayments : [],
         orderStatus: matchedOrder ? matchedOrder.orderStatus : null,
         orderGrandTotal: matchedOrder ? matchedOrder.grandTotal : null,
         orderPaidAmount: matchedOrder ? matchedOrder.paidAmount : null,

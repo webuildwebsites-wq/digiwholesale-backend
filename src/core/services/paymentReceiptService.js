@@ -5,6 +5,8 @@ import Vendor from "../../models/Vendor.model.js";
 import CustomerLedger from "../../models/Accounting/CustomerLedger.model.js";
 import VendorLedger from "../../models/Accounting/VendorLedger.model.js";
 import LedgerTransaction from "../../models/Accounting/LedgerTransaction.model.js";
+import BulkOrder from "../../models/order/BulkOrder.js";
+import { calculateBulkOrderTotals } from "../controllers/Accounting/ledger.controller.js";
 import generatePDF from "./pdfService.js";
 import {
   generatePaymentReceiptHTML,
@@ -26,20 +28,20 @@ import {
 export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
   try {
     const isObjectId = mongoose.Types.ObjectId.isValid(paymentId);
-    const pQuery = isObjectId
-      ? {
-          $or: [
-            { _id: paymentId },
-            { paymentNumber: paymentId },
-            { "paymentDetails.referenceNumber": paymentId },
-          ],
-        }
-      : { paymentNumber: paymentId };
+    let bulkOrder = null;
 
-    if (tenantId) pQuery.tenantId = tenantId;
+    // 1. Check if paymentId directly matches a BulkOrder
+    const boQuery = {
+      $or: [
+        ...(isObjectId ? [{ _id: paymentId }] : []),
+        { "orders.orderNumber": paymentId },
+        { invoiceNumber: paymentId },
+      ],
+    };
+    if (tenantId) boQuery.tenantId = tenantId;
+    bulkOrder = await BulkOrder.findOne(boQuery).lean();
 
-    let payment = await Payment.findOne(pQuery).lean();
-
+    let payment = null;
     let customer = null;
     let vendor = null;
     let ledger = null;
@@ -51,115 +53,299 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
     let allocations = [];
     let narration = "";
     let isVendor = false;
+    let isOrderReceipt = false;
+    let orderSummary = null;
+    let orderPayments = [];
 
-    if (payment) {
-      receiptNo = payment.paymentNumber;
-      receiptDate = payment.createdAt || new Date();
-      paymentMode = payment.paymentMode || "CASH";
-      grossAmount = payment.grossAmount || payment.netAmountPaid || 0;
-      paymentDetails = payment.paymentDetails || {};
-      allocations = payment.allocations || [];
-      narration = payment.paymentDetails?.remarks || "";
-      isVendor =
-        payment.partyModel === "Vendor" ||
-        payment.type === "VENDOR_OUTFLOW" ||
-        payment.paymentNumber?.startsWith("VPAY");
+    if (bulkOrder) {
+      isOrderReceipt = true;
+      const totals = calculateBulkOrderTotals(bulkOrder);
+      const firstOrder = bulkOrder.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || bulkOrder._id.toString().slice(-6).toUpperCase();
+      receiptNo = orderNumber;
+      receiptDate = bulkOrder.createdAt || new Date();
+      grossAmount = totals.paidAmount;
 
-      if (isVendor) {
-        vendor = await Vendor.findById(payment.partyId).lean();
-        ledger = await VendorLedger.findOne({
-          vendorId: payment.partyId,
-        }).lean();
-      } else {
-        customer = await Customer.findById(payment.partyId).lean();
-        ledger = await CustomerLedger.findOne({
-          customerId: payment.partyId,
-        }).lean();
+      customer = await Customer.findById(bulkOrder.customer?.customerId).lean();
+      ledger = await CustomerLedger.findOne({ customerId: bulkOrder.customer?.customerId }).lean();
 
-        // Fallback: If customer not found, check if partyId was a Vendor
-        if (!customer) {
-          const vCheck = await Vendor.findById(payment.partyId).lean();
-          if (vCheck) {
-            vendor = vCheck;
-            ledger = await VendorLedger.findOne({
-              vendorId: payment.partyId,
-            }).lean();
-            isVendor = true;
-          }
-        }
+      // Find all payments allocated to this bulk order
+      const customerPayments = await Payment.find({
+        $or: [
+          { "allocations.invoiceId": bulkOrder._id },
+          { "allocations.invoiceNumber": orderNumber },
+        ],
+      }).sort({ createdAt: 1 }).lean();
+
+      let allocatedSum = 0;
+      orderPayments = [];
+
+      for (const cp of customerPayments) {
+        const matchedAlloc = (cp.allocations || []).find(
+          (a) => String(a.invoiceId) === String(bulkOrder._id) || a.invoiceNumber === orderNumber,
+        );
+        const allocAmt = Number(matchedAlloc?.allocatedAmount || cp.grossAmount || 0);
+        allocatedSum += allocAmt;
+        orderPayments.push({
+          paymentNumber: cp.paymentNumber || "PAYMENT",
+          paymentDate: cp.createdAt,
+          paymentMode: cp.paymentMode || "BANK_TRANSFER",
+          referenceNumber: cp.paymentDetails?.referenceNumber || cp.paymentDetails?.transactionRef || cp.paymentNumber,
+          amount: allocAmt,
+          status: "CLEARED",
+          remarks: cp.paymentDetails?.remarks || "Part Payment Received",
+        });
       }
+
+      // If initial advance payment exists at order booking
+      const initialAdvance = Math.max(0, Number((Number(bulkOrder.advanceAmount || 0) - allocatedSum).toFixed(2)));
+      if (initialAdvance > 0) {
+        orderPayments.unshift({
+          paymentNumber: "ORDER-ADVANCE",
+          paymentDate: bulkOrder.createdAt,
+          paymentMode: "ADVANCE_ADJUSTMENT",
+          referenceNumber: `ADV-${orderNumber}`,
+          amount: initialAdvance,
+          status: "CLEARED",
+          remarks: "Initial Order Booking Advance",
+        });
+      }
+
+      paymentMode = orderPayments[0]?.paymentMode || (totals.paidAmount > 0 ? "ADVANCE_ADJUSTMENT" : "PENDING");
+      allocations = orderPayments.map((op) => ({
+        invoiceNumber: op.referenceNumber || op.paymentNumber,
+        invoiceTotal: totals.grandTotal,
+        allocatedAmount: op.amount,
+      }));
+
+      orderSummary = {
+        orderNumber,
+        orderDate: bulkOrder.createdAt,
+        orderStatus: firstOrder.status || "Submitted",
+        itemsCount: totals.itemsCount,
+        taxableAmount: totals.taxableAmount,
+        gstAmount: totals.gstAmount,
+        shippingCharges: Number(bulkOrder.shippingCharges || 0),
+        otherCharges: Number(bulkOrder.otherCharges || 0),
+        grandTotal: totals.grandTotal,
+        paidAmount: totals.paidAmount,
+        balanceDue: totals.balanceDue,
+        paymentStatus: totals.paymentStatus,
+        partPaymentPercentage: totals.partPaymentPercentage,
+      };
+
+      narration = `Order #${orderNumber} Statement. Total: ₹${totals.grandTotal.toLocaleString("en-IN")}, Received: ₹${totals.paidAmount.toLocaleString("en-IN")}, Balance Due: ₹${totals.balanceDue.toLocaleString("en-IN")}.`;
     } else {
-      // Fallback: Check LedgerTransaction collection (e.g. for historical transactions)
-      const tQuery = isObjectId
+      const pQuery = isObjectId
         ? {
             $or: [
               { _id: paymentId },
-              { voucherId: paymentId },
-              { referenceNumber: paymentId },
+              { paymentNumber: paymentId },
+              { "paymentDetails.referenceNumber": paymentId },
             ],
           }
-        : { referenceNumber: paymentId };
+        : { paymentNumber: paymentId };
 
-      if (tenantId) tQuery.tenantId = tenantId;
+      if (tenantId) pQuery.tenantId = tenantId;
 
-      const txn = await LedgerTransaction.findOne(tQuery).lean();
-      if (!txn) {
-        throw new Error(
-          `Payment or Transaction record '${paymentId}' not found.`,
-        );
-      }
+      payment = await Payment.findOne(pQuery).lean();
 
-      receiptNo = txn.referenceNumber;
-      receiptDate = txn.transactionDate || txn.createdAt || new Date();
-      grossAmount = Number(txn.credit || txn.debit || 0);
-      narration = txn.narration || "";
-      isVendor =
-        txn.entityType === "Vendor" ||
-        txn.voucherType === "Payment Voucher" ||
-        txn.referenceNumber?.startsWith("VPAY");
+      if (payment) {
+        receiptNo = payment.paymentNumber;
+        receiptDate = payment.createdAt || new Date();
+        paymentMode = payment.paymentMode || "CASH";
+        grossAmount = payment.grossAmount || payment.netAmountPaid || 0;
+        paymentDetails = payment.paymentDetails || {};
+        allocations = payment.allocations || [];
+        narration = payment.paymentDetails?.remarks || "";
+        isVendor =
+          payment.partyModel === "Vendor" ||
+          payment.type === "VENDOR_OUTFLOW" ||
+          payment.paymentNumber?.startsWith("VPAY");
 
-      // Detect payment mode from narration
-      const narrUpper = narration.toUpperCase();
-      if (narrUpper.includes("UPI")) paymentMode = "UPI";
-      else if (narrUpper.includes("CHEQUE")) paymentMode = "CHEQUE";
-      else if (
-        narrUpper.includes("BANK") ||
-        narrUpper.includes("NEFT") ||
-        narrUpper.includes("RTGS")
-      )
-        paymentMode = "BANK_TRANSFER";
-      else if (narrUpper.includes("ADVANCE"))
-        paymentMode = "ADVANCE_ADJUSTMENT";
-      else paymentMode = "CASH";
+        if (isVendor) {
+          vendor = await Vendor.findById(payment.partyId).lean();
+          ledger = await VendorLedger.findOne({
+            vendorId: payment.partyId,
+          }).lean();
+        } else {
+          customer = await Customer.findById(payment.partyId).lean();
+          ledger = await CustomerLedger.findOne({
+            customerId: payment.partyId,
+          }).lean();
 
-      if (isVendor) {
-        vendor = await Vendor.findById(txn.partyId).lean();
-        ledger =
-          (await VendorLedger.findById(txn.ledgerId).lean()) ||
-          (await VendorLedger.findOne({ vendorId: txn.partyId }).lean());
-
-        payment = {
-          paymentNumber: receiptNo,
-          partyId: txn.partyId,
-          partyName: vendor?.firm || vendor?.name || "Vendor",
-          paymentMode,
-          grossAmount,
-          createdAt: receiptDate,
-        };
+          if (!customer) {
+            const vCheck = await Vendor.findById(payment.partyId).lean();
+            if (vCheck) {
+              vendor = vCheck;
+              ledger = await VendorLedger.findOne({
+                vendorId: payment.partyId,
+              }).lean();
+              isVendor = true;
+            }
+          }
+        }
       } else {
-        customer = await Customer.findById(txn.partyId).lean();
-        ledger =
-          (await CustomerLedger.findById(txn.ledgerId).lean()) ||
-          (await CustomerLedger.findOne({ customerId: txn.partyId }).lean());
+        // Fallback: Check LedgerTransaction collection
+        const tQuery = isObjectId
+          ? {
+              $or: [
+                { _id: paymentId },
+                { voucherId: paymentId },
+                { referenceNumber: paymentId },
+              ],
+            }
+          : { referenceNumber: paymentId };
 
-        payment = {
-          paymentNumber: receiptNo,
-          partyId: txn.partyId,
-          partyName: customer?.shopName || customer?.ownerName || "Customer",
-          paymentMode,
-          grossAmount,
-          createdAt: receiptDate,
+        if (tenantId) tQuery.tenantId = tenantId;
+
+        const txn = await LedgerTransaction.findOne(tQuery).lean();
+        if (!txn) {
+          throw new Error(
+            `Payment or Transaction record '${paymentId}' not found.`,
+          );
+        }
+
+        // If transaction has voucherId or referenceNumber pointing to BulkOrder
+        const boFromTxnQuery = {
+          $or: [
+            ...(txn.voucherId && mongoose.Types.ObjectId.isValid(txn.voucherId) ? [{ _id: txn.voucherId }] : []),
+            { "orders.orderNumber": txn.referenceNumber },
+            { invoiceNumber: txn.referenceNumber },
+          ],
         };
+        if (tenantId) boFromTxnQuery.tenantId = tenantId;
+        const linkedBO = await BulkOrder.findOne(boFromTxnQuery).lean();
+
+        if (linkedBO) {
+          isOrderReceipt = true;
+          const totals = calculateBulkOrderTotals(linkedBO);
+          const firstOrder = linkedBO.orders?.[0] || {};
+          const orderNumber = firstOrder.orderNumber || linkedBO._id.toString().slice(-6).toUpperCase();
+          receiptNo = orderNumber;
+          receiptDate = linkedBO.createdAt || txn.transactionDate || new Date();
+          grossAmount = totals.paidAmount;
+
+          customer = await Customer.findById(linkedBO.customer?.customerId || txn.partyId).lean();
+          ledger = await CustomerLedger.findOne({ customerId: linkedBO.customer?.customerId || txn.partyId }).lean();
+
+          const customerPayments = await Payment.find({
+            $or: [
+              { "allocations.invoiceId": linkedBO._id },
+              { "allocations.invoiceNumber": orderNumber },
+            ],
+          }).sort({ createdAt: 1 }).lean();
+
+          let allocatedSum = 0;
+          orderPayments = [];
+
+          for (const cp of customerPayments) {
+            const matchedAlloc = (cp.allocations || []).find(
+              (a) => String(a.invoiceId) === String(linkedBO._id) || a.invoiceNumber === orderNumber,
+            );
+            const allocAmt = Number(matchedAlloc?.allocatedAmount || cp.grossAmount || 0);
+            allocatedSum += allocAmt;
+            orderPayments.push({
+              paymentNumber: cp.paymentNumber || "PAYMENT",
+              paymentDate: cp.createdAt,
+              paymentMode: cp.paymentMode || "BANK_TRANSFER",
+              referenceNumber: cp.paymentDetails?.referenceNumber || cp.paymentDetails?.transactionRef || cp.paymentNumber,
+              amount: allocAmt,
+              status: "CLEARED",
+              remarks: cp.paymentDetails?.remarks || "Part Payment Received",
+            });
+          }
+
+          const initialAdvance = Math.max(0, Number((Number(linkedBO.advanceAmount || 0) - allocatedSum).toFixed(2)));
+          if (initialAdvance > 0) {
+            orderPayments.unshift({
+              paymentNumber: "ORDER-ADVANCE",
+              paymentDate: linkedBO.createdAt,
+              paymentMode: "ADVANCE_ADJUSTMENT",
+              referenceNumber: `ADV-${orderNumber}`,
+              amount: initialAdvance,
+              status: "CLEARED",
+              remarks: "Initial Order Booking Advance",
+            });
+          }
+
+          paymentMode = orderPayments[0]?.paymentMode || (totals.paidAmount > 0 ? "ADVANCE_ADJUSTMENT" : "PENDING");
+          allocations = orderPayments.map((op) => ({
+            invoiceNumber: op.referenceNumber || op.paymentNumber,
+            invoiceTotal: totals.grandTotal,
+            allocatedAmount: op.amount,
+          }));
+
+          orderSummary = {
+            orderNumber,
+            orderDate: linkedBO.createdAt,
+            orderStatus: firstOrder.status || "Submitted",
+            itemsCount: totals.itemsCount,
+            taxableAmount: totals.taxableAmount,
+            gstAmount: totals.gstAmount,
+            shippingCharges: Number(linkedBO.shippingCharges || 0),
+            otherCharges: Number(linkedBO.otherCharges || 0),
+            grandTotal: totals.grandTotal,
+            paidAmount: totals.paidAmount,
+            balanceDue: totals.balanceDue,
+            paymentStatus: totals.paymentStatus,
+            partPaymentPercentage: totals.partPaymentPercentage,
+          };
+
+          narration = `Order #${orderNumber} Statement. Total: ₹${totals.grandTotal.toLocaleString("en-IN")}, Received: ₹${totals.paidAmount.toLocaleString("en-IN")}, Balance Due: ₹${totals.balanceDue.toLocaleString("en-IN")}.`;
+        } else {
+          receiptNo = txn.referenceNumber;
+          receiptDate = txn.transactionDate || txn.createdAt || new Date();
+          grossAmount = Number(txn.credit || txn.debit || 0);
+          narration = txn.narration || "";
+          isVendor =
+            txn.entityType === "Vendor" ||
+            txn.voucherType === "Payment Voucher" ||
+            txn.referenceNumber?.startsWith("VPAY");
+
+          const narrUpper = narration.toUpperCase();
+          if (narrUpper.includes("UPI")) paymentMode = "UPI";
+          else if (narrUpper.includes("CHEQUE")) paymentMode = "CHEQUE";
+          else if (
+            narrUpper.includes("BANK") ||
+            narrUpper.includes("NEFT") ||
+            narrUpper.includes("RTGS")
+          )
+            paymentMode = "BANK_TRANSFER";
+          else if (narrUpper.includes("ADVANCE"))
+            paymentMode = "ADVANCE_ADJUSTMENT";
+          else paymentMode = "CASH";
+
+          if (isVendor) {
+            vendor = await Vendor.findById(txn.partyId).lean();
+            ledger =
+              (await VendorLedger.findById(txn.ledgerId).lean()) ||
+              (await VendorLedger.findOne({ vendorId: txn.partyId }).lean());
+
+            payment = {
+              paymentNumber: receiptNo,
+              partyId: txn.partyId,
+              partyName: vendor?.firm || vendor?.name || "Vendor",
+              paymentMode,
+              grossAmount,
+              createdAt: receiptDate,
+            };
+          } else {
+            customer = await Customer.findById(txn.partyId).lean();
+            ledger =
+              (await CustomerLedger.findById(txn.ledgerId).lean()) ||
+              (await CustomerLedger.findOne({ customerId: txn.partyId }).lean());
+
+            payment = {
+              paymentNumber: receiptNo,
+              partyId: txn.partyId,
+              partyName: customer?.shopName || customer?.ownerName || "Customer",
+              paymentMode,
+              grossAmount,
+              createdAt: receiptDate,
+            };
+          }
+        }
       }
     }
 
@@ -235,6 +421,9 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
             0;
 
       receiptData = {
+        isOrderReceipt,
+        orderSummary,
+        orderPayments,
         isVendorPayout: false,
         partyType: "Customer",
         receiptNo,
@@ -260,7 +449,9 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
         },
       };
 
-      fileName = `Receipt-${receiptNo}.pdf`;
+      fileName = isOrderReceipt
+        ? `OrderReceipt-${receiptNo}.pdf`
+        : `Receipt-${receiptNo}.pdf`;
     }
 
     const html = generatePaymentReceiptHTML(receiptData);
