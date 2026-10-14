@@ -264,7 +264,6 @@ export const suggestionProduct = async (req, res) => {
   }
 };
 
-
 export const normalizeProductPrices = (product) => {
   if (!product) return product;
   const doc = product.toObject ? product.toObject() : { ...product };

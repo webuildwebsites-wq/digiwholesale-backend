@@ -110,6 +110,28 @@ export const registerTenant = async (req, res) => {
             finalPermissions = Array.isArray(autoPermissions) ? autoPermissions : [];
         }
 
+        const inv = req.body.invoiceDetails || {};
+        const invoiceDetails = {
+            invoiceNo:          (req.body.invoiceNo || inv.invoiceNo || "").trim(),
+            invoiceDate:        req.body.invoiceDate || inv.invoiceDate || new Date(),
+            clientGSTIN:        (req.body.clientGSTIN || inv.clientGSTIN || "").trim().toUpperCase(),
+            clientStateName:    (req.body.clientStateName || inv.clientStateName || "").trim(),
+            clientStateCode:    (req.body.clientStateCode || inv.clientStateCode || "").trim(),
+            clientPAN:          (req.body.clientPAN || inv.clientPAN || "").trim().toUpperCase(),
+            hsnSac:             (req.body.hsnSac || inv.hsnSac || "998313").trim(),
+            subscriptionAmount: Number(req.body.subscriptionAmount ?? inv.subscriptionAmount) || 0,
+            serverCostAmount:   Number(req.body.serverCostAmount ?? inv.serverCostAmount) || 0,
+            cgstRate:           req.body.cgstRate != null ? Number(req.body.cgstRate) : (inv.cgstRate != null ? Number(inv.cgstRate) : 9),
+            sgstRate:           req.body.sgstRate != null ? Number(req.body.sgstRate) : (inv.sgstRate != null ? Number(inv.sgstRate) : 9),
+            igstRate:           req.body.igstRate != null ? Number(req.body.igstRate) : (inv.igstRate != null ? Number(inv.igstRate) : 18),
+            applyIGST:          Boolean(req.body.applyIGST !== undefined ? req.body.applyIGST : inv.applyIGST),
+            bankName:           (req.body.bankName || inv.bankName || "HDFC Bank").trim(),
+            bankAccountNo:      (req.body.bankAccountNo || inv.bankAccountNo || "50200118392316").trim(),
+            bankBranch:         (req.body.bankBranch || inv.bankBranch || "Hauz Khas, New Delhi").trim(),
+            bankIFSC:           (req.body.bankIFSC || inv.bankIFSC || "HDFC0000467").trim().toUpperCase(),
+            companyPAN:         (req.body.companyPAN || inv.companyPAN || "AAMCD1973C").trim().toUpperCase(),
+        };
+
         const tenant = await Tenant.create({
             tenantId,
             storeInformation: {
@@ -157,6 +179,7 @@ export const registerTenant = async (req, res) => {
                 demoMode:             Boolean(req.body.demoMode || req.body.featureFlags?.demoMode),
                 demoExpiry:           (req.body.demoExpiry || req.body.featureFlags?.demoExpiry) ? new Date(req.body.demoExpiry || req.body.featureFlags?.demoExpiry) : null,
             },
+            invoiceDetails,
             status:    "ACTIVE",
             createdBy: req.user._id,
         });
@@ -286,7 +309,7 @@ export const updateTenant = async (req, res) => {
         const allowed = [
             "storeInformation", "owner", "loyalty",
             "documents", "subscription", "whatsappConfig", "featureFlags",
-            "demoMode", "demoExpiry",
+            "demoMode", "demoExpiry", "invoiceDetails",
         ];
         const updates = {};
         for (const key of allowed) {

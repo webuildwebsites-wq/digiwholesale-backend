@@ -99,6 +99,30 @@ const featureFlagsSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const invoiceDetailsSchema = new mongoose.Schema(
+    {
+        invoiceNo:          { type: String, trim: true, default: "" },
+        invoiceDate:        { type: Date,   default: Date.now },
+        clientGSTIN:        { type: String, trim: true, default: "" },
+        clientStateName:    { type: String, trim: true, default: "" },
+        clientStateCode:    { type: String, trim: true, default: "" },
+        clientPAN:          { type: String, trim: true, default: "" },
+        hsnSac:             { type: String, trim: true, default: "998313" },
+        subscriptionAmount: { type: Number, default: 0 },
+        serverCostAmount:   { type: Number, default: 0 },
+        cgstRate:           { type: Number, default: 9 },
+        sgstRate:           { type: Number, default: 9 },
+        igstRate:           { type: Number, default: 18 },
+        applyIGST:          { type: Boolean, default: false },
+        bankName:           { type: String, trim: true, default: "HDFC Bank" },
+        bankAccountNo:      { type: String, trim: true, default: "50200118392316" },
+        bankBranch:         { type: String, trim: true, default: "Hauz Khas, New Delhi" },
+        bankIFSC:           { type: String, trim: true, default: "HDFC0000467" },
+        companyPAN:         { type: String, trim: true, default: "AAMCD1973C" },
+    },
+    { _id: false }
+);
+
 const tenantSchema = new mongoose.Schema(
     {
         tenantId: {
@@ -118,6 +142,7 @@ const tenantSchema = new mongoose.Schema(
         featureFlags:     { type: featureFlagsSchema,     default: () => ({}) },
         demoMode:         { type: Boolean, default: false },
         demoExpiry:       { type: Date,    default: null },
+        invoiceDetails:   { type: invoiceDetailsSchema,   default: () => ({}) },
 
         status: {
             type:    String,
