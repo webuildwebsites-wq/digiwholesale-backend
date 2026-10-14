@@ -8,6 +8,7 @@ import Vendor from "../../../models/Vendor.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import BulkOrder from "../../../models/order/BulkOrder.js";
 import Employee from "../../../models/Auth/Employee.js";
+import Tenant from "../../../models/Tenant/Tenant.model.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
@@ -247,6 +248,20 @@ export const getCustomerLedgerStatement = async (req, res) => {
       totalCredit += Number(txn.credit || 0);
     });
 
+    const activeTenantId = customer.tenantId || req.tenantId || req.user?.tenantId;
+    let tenantInfo = null;
+    if (activeTenantId) {
+      tenantInfo = await Tenant.findOne({ tenantId: activeTenantId }).lean();
+    }
+    const wholesalerProfile = {
+      tenantId: tenantInfo?.tenantId || activeTenantId || "DEFAULT",
+      companyName: tenantInfo?.companyName || tenantInfo?.name || "Digi-Optics Wholesaler",
+      email: tenantInfo?.email || "",
+      phone: tenantInfo?.phone || tenantInfo?.mobile || "",
+      gstin: tenantInfo?.gstNumber || tenantInfo?.gstin || "",
+      address: tenantInfo?.address || "",
+    };
+
     // 1. Fetch all customer bulk orders for Part-Payment & Order Status tracking
     const bulkOrders = await BulkOrder.find({ "customer.customerId": customer._id })
       .sort({ createdAt: -1 })
@@ -344,6 +359,8 @@ export const getCustomerLedgerStatement = async (req, res) => {
         isGSTRegistered: Boolean(customer.isGSTRegistered),
         gstNumber: customer.gstNumber || customer.gstin || customer.GSTNo || "",
         items: firstOrder.items || [],
+        customerName: customer.shopName || customer.ownerName || "Customer",
+        vendorName: wholesalerProfile.companyName,
         orderPayments,
         challanUrl: bo.challanUrl || null,
         invoiceUrl: bo.invoiceUrl || null,
@@ -374,6 +391,9 @@ export const getCustomerLedgerStatement = async (req, res) => {
         ...t,
         orderId: matchedOrder ? (matchedOrder.orderId || matchedOrder._id) : (t.voucherId || null),
         orderNumber: matchedOrder ? matchedOrder.orderNumber : (t.referenceNumber || null),
+        customerName: customer.shopName || customer.ownerName || "Customer",
+        vendorName: wholesalerProfile.companyName,
+        items: matchedOrder ? (matchedOrder.items || []) : [],
         challanUrl: matchedOrder ? matchedOrder.challanUrl : null,
         invoiceUrl: matchedOrder ? matchedOrder.invoiceUrl : null,
         hasChallan: matchedOrder ? Boolean(matchedOrder.challanUrl) : false,
@@ -455,6 +475,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
         panCard: customer.panCard || "",
         aadharCard: customer.aadharCard || "",
       },
+      wholesaler: wholesalerProfile,
       ledgerMaster: {
         ledgerCode: ledgerObj.ledgerCode,
         creditLimit: activeCreditLimit,
