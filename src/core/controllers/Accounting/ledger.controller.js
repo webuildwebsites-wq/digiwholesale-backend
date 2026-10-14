@@ -420,6 +420,26 @@ export const getCustomerLedgerStatement = async (req, res) => {
       return orderEntry;
     });
 
+    const allocatedPaymentMap = new Map();
+    customerPayments.forEach((p) => {
+      if (Array.isArray(p.allocations) && p.allocations.length > 0) {
+        p.allocations.forEach((alloc) => {
+          if (alloc.invoiceId || alloc.invoiceNumber) {
+            const info = {
+              orderId: alloc.invoiceId,
+              orderNumber: alloc.invoiceNumber,
+              allocatedAmount: alloc.allocatedAmount,
+            };
+            if (p.paymentNumber) allocatedPaymentMap.set(p.paymentNumber, info);
+            if (p._id) allocatedPaymentMap.set(p._id.toString(), info);
+            if (p.paymentDetails?.referenceNumber) {
+              allocatedPaymentMap.set(p.paymentDetails.referenceNumber, info);
+            }
+          }
+        });
+      }
+    });
+
     // 4. Enrich transactions with order details, part payments, and salesperson info
     const transactions = rawTransactions.map((t) => {
       let matchedOrder = null;
@@ -429,6 +449,12 @@ export const getCustomerLedgerStatement = async (req, res) => {
         matchedOrder = ordersMap.get(t.referenceNumber);
       }
 
+      const paymentAllocInfo =
+        allocatedPaymentMap.get(t.referenceNumber) ||
+        (t.voucherId && allocatedPaymentMap.get(t.voucherId.toString())) ||
+        null;
+      const isOrderAllocatedPayment = Boolean(paymentAllocInfo);
+
       const createdByName =
         employeeMap.get(t.createdBy?.toString()) ||
         matchedOrder?.salesPersonName ||
@@ -436,8 +462,11 @@ export const getCustomerLedgerStatement = async (req, res) => {
 
       return {
         ...t,
-        orderId: matchedOrder ? (matchedOrder.orderId || matchedOrder._id) : (t.voucherId || null),
-        orderNumber: matchedOrder ? matchedOrder.orderNumber : (t.referenceNumber || null),
+        isOrderAllocatedPayment,
+        allocatedOrderNumber: paymentAllocInfo?.orderNumber || null,
+        allocatedOrderId: paymentAllocInfo?.orderId || null,
+        orderId: matchedOrder ? (matchedOrder.orderId || matchedOrder._id) : (paymentAllocInfo?.orderId || t.voucherId || null),
+        orderNumber: matchedOrder ? matchedOrder.orderNumber : (paymentAllocInfo?.orderNumber || t.referenceNumber || null),
         customerName: customer.shopName || customer.ownerName || "Customer",
         vendorName: wholesalerProfile.companyName,
         items: matchedOrder ? (matchedOrder.items || []) : [],
