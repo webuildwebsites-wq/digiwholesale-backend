@@ -140,6 +140,7 @@ export async function getOrderService(orderId, tenantId) {
 
   return {
     ...bulkOrder,
+    totalOrderPrice: grandTotal,
     orders: (bulkOrder.orders || []).map((order) => {
       const orderItemsTotal = Number(
         (order.items || []).reduce((sum, item) => {

@@ -238,6 +238,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
     }
 
     const rawTransactions = await transactionsQuery.lean();
+    let allTxnsForSummary = [];
 
     const activeTenantId = customer.tenantId || req.tenantId || req.user?.tenantId;
     let tenantInfo = null;
@@ -306,7 +307,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
 
     let totalDebit = 0;
     let totalCredit = 0;
-    const allTxnsForSummary = await LedgerTransaction.find(query).lean();
+    allTxnsForSummary = await LedgerTransaction.find(query).lean();
     allTxnsForSummary.forEach((txn) => {
       totalDebit += Number(txn.debit || 0);
       totalCredit += Number(txn.credit || 0);
@@ -461,7 +462,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
 
     // 3. Build monthly breakdown aggregations for Monthly View
     const monthlyMap = new Map();
-    allTxnsForSummary.forEach((t) => {
+    (allTxnsForSummary || []).forEach((t) => {
       const d = new Date(t.transactionDate || t.createdAt);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const monthLabel = d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
