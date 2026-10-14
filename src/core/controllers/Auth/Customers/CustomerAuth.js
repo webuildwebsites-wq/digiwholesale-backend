@@ -505,7 +505,15 @@ export const customerBasicRegistration = async (req, res) => {
       return sendErrorResponse(res, 400, "MONGOOSE_VALIDATION_ERROR", messages.join(", "),);
     }
     if (error.code === 11000) {
-      const field = Object.keys(error.keyValue)[0];
+      const keyValue = error.keyValue || {};
+      // Compound index on {businessEmail, tenantId} — duplicate within THIS wholesaler's tenant
+      if (keyValue.businessEmail) {
+        return sendErrorResponse(res, 409, "DUPLICATE_FIELD", `A customer with this business email already exists in your store`);
+      }
+      if (keyValue.customerCode) {
+        return sendErrorResponse(res, 409, "DUPLICATE_FIELD", `Customer code already exists. Please try again.`);
+      }
+      const field = Object.keys(keyValue)[0] || "field";
       return sendErrorResponse(res, 409, "DUPLICATE_FIELD", `${field} already exists`);
     }
     return sendErrorResponse(res, 500, "INTERNAL_ERROR", "Customer registration failed");

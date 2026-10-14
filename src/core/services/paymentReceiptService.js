@@ -6,6 +6,7 @@ import CustomerLedger from "../../models/Accounting/CustomerLedger.model.js";
 import VendorLedger from "../../models/Accounting/VendorLedger.model.js";
 import LedgerTransaction from "../../models/Accounting/LedgerTransaction.model.js";
 import BulkOrder from "../../models/order/BulkOrder.js";
+import Tenant from "../../models/Tenant/Tenant.model.js";
 import { calculateBulkOrderTotals } from "../controllers/Accounting/ledger.controller.js";
 import generatePDF from "./pdfService.js";
 import {
@@ -349,14 +350,37 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
       }
     }
 
-    const companyInfo = {
+    let companyInfo = {
       name: process.env.COMPANY_NAME || "DigiOptics Wholesale",
+      logo: "",
       addressLine1: "WeWork Eldeco Centre, Block A, Shivalik Colony",
       addressLine2: "Malviya Nagar, New Delhi, Delhi 110017",
       phone: process.env.COMPANY_PHONE || "+91 9650560526",
       email: process.env.COMPANY_EMAIL || "support@digioptics.com",
       gstin: process.env.COMPANY_GSTIN || "GST9876543210",
     };
+
+    const effectiveTenantId = tenantId || bulkOrder?.tenantId || payment?.tenantId;
+    if (effectiveTenantId) {
+      try {
+        const tenantDoc = await Tenant.findOne({ tenantId: effectiveTenantId }).lean();
+        if (tenantDoc) {
+          const store = tenantDoc.storeInformation || {};
+          const owner = tenantDoc.owner || {};
+          companyInfo = {
+            name: store.storeName || tenantDoc.companyName || companyInfo.name,
+            logo: store.storeLogo || "",
+            addressLine1: store.address || companyInfo.addressLine1,
+            addressLine2: store.city ? `${store.city}${store.pincode ? ' - ' + store.pincode : ''}` : companyInfo.addressLine2,
+            phone: store.storeMobileNumber || owner.mobileNumber || companyInfo.phone,
+            email: owner.email || companyInfo.email,
+            gstin: tenantDoc.gstNumber || companyInfo.gstin,
+          };
+        }
+      } catch (tErr) {
+        console.warn("[PaymentReceipt] Failed to load tenant details:", tErr.message);
+      }
+    }
 
     let receiptData = {};
     let fileName = "";

@@ -5,10 +5,11 @@ import LedgerTransaction from "../../../models/Accounting/LedgerTransaction.mode
 import Payment from "../../../models/Accounting/Payment.model.js";
 import Customer from "../../../models/Auth/Customer.js";
 import Vendor from "../../../models/Vendor.model.js";
-import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import BulkOrder from "../../../models/order/BulkOrder.js";
 import Employee from "../../../models/Auth/Employee.js";
 import Tenant from "../../../models/Tenant/Tenant.model.js";
+import Location from "../../../models/Location/Location.js";
+import Account from "../../../models/Accounting/Account.model.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
@@ -237,16 +238,6 @@ export const getCustomerLedgerStatement = async (req, res) => {
     }
 
     const rawTransactions = await transactionsQuery.lean();
-    const totalTransactions = await LedgerTransaction.countDocuments(query);
-
-    let totalDebit = 0;
-    let totalCredit = 0;
-
-    const allTxnsForSummary = await LedgerTransaction.find(query).lean();
-    allTxnsForSummary.forEach((txn) => {
-      totalDebit += Number(txn.debit || 0);
-      totalCredit += Number(txn.credit || 0);
-    });
 
     const activeTenantId = customer.tenantId || req.tenantId || req.user?.tenantId;
     let tenantInfo = null;
@@ -266,6 +257,61 @@ export const getCustomerLedgerStatement = async (req, res) => {
     const bulkOrders = await BulkOrder.find({ "customer.customerId": customer._id })
       .sort({ createdAt: -1 })
       .lean();
+
+    // Auto-sync: Check if any confirmed bulkOrder is missing from LedgerTransactions
+    const existingTxnVoucherKeys = new Set(
+      rawTransactions.flatMap((t) => [
+        t.voucherId ? String(t.voucherId) : '',
+        t.referenceNumber || '',
+      ]).filter(Boolean)
+    );
+
+    for (const bo of bulkOrders) {
+      const firstOrder = bo.orders?.[0] || {};
+      if (firstOrder.status === 'Draft' || bo.isDraft) continue;
+
+      const orderRef = firstOrder.orderNumber || bo._id.toString();
+      const hasTxn = existingTxnVoucherKeys.has(String(bo._id)) || existingTxnVoucherKeys.has(orderRef);
+
+      if (!hasTxn) {
+        const totals = calculateBulkOrderTotals(bo);
+        const advancePaid = Number(bo.advanceAmount || 0);
+        try {
+          const [newTxn] = await LedgerTransaction.create([{
+            entityType: 'Customer',
+            ledgerId: ledgerObj._id,
+            partyId: customer._id,
+            transactionDate: bo.createdAt || new Date(),
+            voucherType: 'Sales Invoice',
+            voucherId: bo._id,
+            referenceNumber: orderRef,
+            debit: totals.grandTotal,
+            credit: advancePaid,
+            runningBalance: totals.balanceDue,
+            narration: `Sales Invoice for Order #${orderRef}. Total: ₹${totals.grandTotal.toLocaleString()}, Advance Paid: ₹${advancePaid.toLocaleString()}`,
+            branchId: ledgerObj.branchId || null,
+            tenantId: activeTenantId,
+            createdBy: null,
+          }]);
+          if (newTxn) {
+            rawTransactions.push(newTxn.toObject ? newTxn.toObject() : newTxn);
+            existingTxnVoucherKeys.add(String(bo._id));
+            existingTxnVoucherKeys.add(orderRef);
+          }
+        } catch (syncErr) {
+          console.warn("[Ledger] Auto-sync missing transaction error for order:", bo._id, syncErr.message);
+        }
+      }
+    }
+
+    let totalDebit = 0;
+    let totalCredit = 0;
+    const allTxnsForSummary = await LedgerTransaction.find(query).lean();
+    allTxnsForSummary.forEach((txn) => {
+      totalDebit += Number(txn.debit || 0);
+      totalCredit += Number(txn.credit || 0);
+    });
+    const totalTransactions = allTxnsForSummary.length;
 
     // 2. Fetch all payments for this customer to map installments / part payments
     const customerPayments = await Payment.find({ partyId: customer._id })

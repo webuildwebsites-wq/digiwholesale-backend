@@ -73,8 +73,6 @@ const customerSchema = new mongoose.Schema(
     businessEmail: {
       type: String,
       required: true,
-      unique: true,
-      sparse: true,
       trim: true,
       lowercase: true,
       match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid businessEmail']
@@ -532,5 +530,7 @@ customerSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 customerSchema.index({ expireAt: 1 }, { expireAfterSeconds: 0, partialFilterExpression: { expireAt: { $ne: null } } });
+// Compound unique index: same email can be registered under different wholesalers (tenants)
+customerSchema.index({ businessEmail: 1, tenantId: 1 }, { unique: true, sparse: true });
 const Customer = mongoose.model('Customer', customerSchema);
 export default Customer;

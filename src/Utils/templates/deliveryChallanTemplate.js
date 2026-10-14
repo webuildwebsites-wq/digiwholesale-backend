@@ -91,7 +91,12 @@ export const generateDeliveryChallanHTML = (data) => {
         }
     }
 
-    const grandTotal = subTotal + totalCgst + totalSgst + totalIgst;
+    const shippingCharges = Number(data.shippingCharges || 0);
+    const otherCharges    = Number(data.otherCharges || 0);
+    const advanceAmount   = Number(data.advanceAmount || 0);
+    const grossTotal      = subTotal + totalCgst + totalSgst + totalIgst + shippingCharges + otherCharges;
+    const balanceDue      = Math.max(0, grossTotal - advanceAmount);
+    const grandTotal      = grossTotal;
 
     const itemRows = allItems
         .map(
@@ -421,8 +426,7 @@ export const generateDeliveryChallanHTML = (data) => {
     <!-- TOP HEADER -->
     <div class="header-bar">
         <div class="brand-section">
-            ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : ''}
-           
+            ${(data.companyLogo || data.storeLogo || data.company?.logo || logoDataUrl) ? `<img src="${data.companyLogo || data.storeLogo || data.company?.logo || logoDataUrl}" alt="${companyName}" class="brand-logo" />` : `<div style="font-size:18px;font-weight:800;color:#0284c7;">${companyName}</div>`}
         </div>
         <div class="document-badge">
             <div class="badge-title">Sale Challan</div>
@@ -512,10 +516,29 @@ export const generateDeliveryChallanHTML = (data) => {
                 <span>IGST</span>
                 <span>₹${fmtNum(totalIgst)}</span>
             </div>` : ''}
-            <div class="totals-row grand">
-                <span>Grand Total</span>
-                <span>₹${fmtNum(grandTotal)}</span>
+            ${shippingCharges > 0 ? `
+            <div class="totals-row">
+                <span>Shipping Charges</span>
+                <span style="color:#0284c7;font-weight:600;">+₹${fmtNum(shippingCharges)}</span>
+            </div>` : ''}
+            ${otherCharges > 0 ? `
+            <div class="totals-row">
+                <span>Other Charges</span>
+                <span style="color:#0284c7;font-weight:600;">+₹${fmtNum(otherCharges)}</span>
+            </div>` : ''}
+            <div class="totals-row grand" style="background:#1b6496;">
+                <span>Gross Total</span>
+                <span>₹${fmtNum(grossTotal)}</span>
             </div>
+            ${advanceAmount > 0 ? `
+            <div class="totals-row" style="background:#fffbeb;color:#b45309;font-weight:700;">
+                <span>Advance Paid</span>
+                <span>-₹${fmtNum(advanceAmount)}</span>
+            </div>
+            <div class="totals-row grand" style="background:linear-gradient(135deg, #0284c7, #0369a1);">
+                <span>Adjusted Total (Advance Deducted)</span>
+                <span>₹${fmtNum(balanceDue)}</span>
+            </div>` : ''}
         </div>
     </div>
 
@@ -551,11 +574,24 @@ export const generatedorderInvoice = (data) => {
         cgstAmount = 0,
         sgstAmount = 0,
         igstAmount = 0,
+        shippingCharges = 0,
+        otherCharges = 0,
+        advanceAmount = 0,
         grandTotal = 0,
+        balanceDue,
         qrCode = '',
     } = data;
 
     const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const shipping = Number(shippingCharges || 0);
+    const other = Number(otherCharges || 0);
+    const advance = Number(advanceAmount || 0);
+    const totalTax = Number(cgstAmount || 0) + Number(sgstAmount || 0) + Number(igstAmount || 0);
+    const computedGrandTotal = Number(grandTotal) || (Number(taxableAmount || 0) + totalTax + shipping + other);
+    const computedBalanceDue = balanceDue !== undefined && balanceDue !== null
+        ? Number(balanceDue)
+        : Math.max(0, computedGrandTotal - advance);
 
     const itemRows = items
         .map(
@@ -826,10 +862,11 @@ body {
     <div class="header-grid">
         <div class="company-cell">
             <div class="company-name" style="margin-bottom: 8px;">
-                ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" style="height:70px;max-width:300px;object-fit:contain;display:block;" />` : ''}
+                ${(company.logo || data.companyLogo || data.storeLogo || logoDataUrl) ? `<img src="${company.logo || data.companyLogo || data.storeLogo || logoDataUrl}" alt="${company.name || 'DigiOptics'}" style="height:70px;max-width:300px;object-fit:contain;display:block;" />` : `<div style="font-size:18px;font-weight:800;color:#0284c7;">${company.name || 'DigiOptics Wholesale'}</div>`}
             </div>
-            <div class="company-info">WeWork Eldeco Centre, Block A, Shivalik Colony</div>
-            <div class="company-info">Malviya Nagar, New Delhi, Delhi 110017</div>
+            ${company.name ? `<div class="company-info" style="font-weight:700;color:#0f172a;">${company.name}</div>` : ''}
+            <div class="company-info">${company.addressLine1 || 'WeWork Eldeco Centre, Block A, Shivalik Colony'}</div>
+            ${company.addressLine2 ? `<div class="company-info">${company.addressLine2}</div>` : ''}
             ${company.gstin ? `<div class="company-info" style="margin-top:4px;"><strong>GSTIN:</strong> ${company.gstin}</div>` : ''}
             ${company.stateCode ? `<div class="company-info"><strong>State Code:</strong> ${company.stateCode}</div>` : ''}
         </div>
@@ -903,7 +940,11 @@ body {
         <div class="words-box">
             <div>
                 <div class="words-title">Amount in Words</div>
-                <div class="words-val">₹ ${fmtNum(grandTotal)} Only</div>
+                <div class="words-val">₹ ${fmtNum(computedGrandTotal)} Only</div>
+                ${advance > 0 ? `
+                <div style="font-size:10px;color:#0284c7;font-weight:700;margin-top:6px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;padding:4px 8px;">
+                    Advance: ₹ ${fmtNum(advance)} &nbsp;|&nbsp; Balance Due: ₹ ${fmtNum(computedBalanceDue)}
+                </div>` : ''}
             </div>
             <div style="font-size:10px;color:#94a3b8;margin-top:8px;">
                 Total Items: <strong>${items.length}</strong> | Total Pieces: <strong>${totalQty}</strong>
@@ -932,10 +973,29 @@ body {
                 <span>IGST</span>
                 <span>₹ ${fmtNum(igstAmount)}</span>
             </div>` : ''}
-            <div class="summary-row grand">
-                <span>Grand Total</span>
-                <span>₹ ${fmtNum(grandTotal)}</span>
+            ${shipping > 0 ? `
+            <div class="summary-row">
+                <span>Shipping Charges</span>
+                <span style="color:#0284c7;font-weight:600;">+₹ ${fmtNum(shipping)}</span>
+            </div>` : ''}
+            ${other > 0 ? `
+            <div class="summary-row">
+                <span>Other Charges</span>
+                <span style="color:#0284c7;font-weight:600;">+₹ ${fmtNum(other)}</span>
+            </div>` : ''}
+            <div class="summary-row grand" style="background:#1b6496;">
+                <span>Gross Total</span>
+                <span>₹ ${fmtNum(computedGrandTotal)}</span>
             </div>
+            ${advance > 0 ? `
+            <div class="summary-row" style="background:#fffbeb;color:#b45309;font-weight:700;">
+                <span>Advance Paid</span>
+                <span>-₹ ${fmtNum(advance)}</span>
+            </div>
+            <div class="summary-row grand" style="background:linear-gradient(135deg, #0284c7, #0369a1);">
+                <span>Adjusted Total (Advance Deducted)</span>
+                <span>₹ ${fmtNum(computedBalanceDue)}</span>
+            </div>` : ''}
         </div>
     </div>
 

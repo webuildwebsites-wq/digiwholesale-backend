@@ -477,7 +477,8 @@ export const generatePaymentReceiptHTML = (data) => {
     <!-- SUPPLIER & RECEIPT METADATA -->
     <div class="meta-grid">
         <div class="company-cell">
-            ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : '<div style="font-size:18px;font-weight:800;color:#2980B9;margin-bottom:6px;">DigiOptics Wholesale</div>'}
+            ${(company.logo || data.companyLogo || data.storeLogo) ? `<img src="${company.logo || data.companyLogo || data.storeLogo}" alt="${company.name || 'Company'}" class="brand-logo" />` : (logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : `<div style="font-size:18px;font-weight:800;color:#2980B9;margin-bottom:6px;">${company.name || 'DigiOptics Wholesale'}</div>`)}
+            ${company.name ? `<div style="font-weight:700;color:#0f172a;margin-top:2px;">${company.name}</div>` : ''}
             <div class="company-info">${company.addressLine1 || "WeWork Eldeco Centre, Block A, Shivalik Colony"}</div>
             <div class="company-info">${company.addressLine2 || "Malviya Nagar, New Delhi, Delhi 110017"}</div>
             <div class="company-info" style="margin-top:4px;"><strong>GSTIN:</strong> ${company.gstin || "GST9876543210"} | <strong>Phone:</strong> ${company.phone || "+91 9650560526"}</div>

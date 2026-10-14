@@ -693,7 +693,7 @@ export const applyOrderToCustomerCreditAndLedger = async ({ bulkOrder, customerI
             narration: `Sales Invoice for Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}, Advance Paid: ₹${advancePaid.toLocaleString()}${absorbedFromAdvance > 0 ? (', Absorbed from Advance: ₹' + absorbedFromAdvance.toLocaleString()) : ''}, Added to Credit Used: ₹${newCreditUsedToAdd.toLocaleString()}`,
             branchId: ledger.branchId || null,
             tenantId,
-            createdBy: userId
+            createdBy: (userId && mongoose.Types.ObjectId.isValid(userId)) ? userId : null
         }]);
 
         console.log(`[Order Credit Sync Complete] Order #${orderRef}: GrandTotal=₹${grandTotal}, AdvancePaid=₹${advancePaid}, AbsorbedAdv=₹${absorbedFromAdvance}, AddedToCredit=₹${newCreditUsedToAdd}, NewCreditUsed=₹${finalCreditUsed}, AdvanceBalance=₹${remainingAdvance}`);
@@ -1170,8 +1170,9 @@ export const getBulkOrderChallan = async (req, res) => {
         }
 
         const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+        const forceRegenerate = req.query.regenerate === 'true' || req.query.refresh === 'true';
 
-        if (bulkOrder.challanUrl) {
+        if (bulkOrder.challanUrl && !forceRegenerate) {
             try {
                 const { default: axios } = await import("axios");
                 const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer", timeout: 4000 });
@@ -1210,8 +1211,9 @@ export const getBulkOrderInvoice = async (req, res) => {
         }
 
         const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
+        const forceRegenerate = req.query.regenerate === 'true' || req.query.refresh === 'true';
 
-        if (bulkOrder.invoiceUrl) {
+        if (bulkOrder.invoiceUrl && !forceRegenerate) {
             try {
                 const { default: axios } = await import("axios");
                 const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer", timeout: 4000 });

@@ -80,7 +80,8 @@ const LedgerTransactionSchema = new mongoose.Schema({
   createdBy: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'employee', 
-    required: true 
+    required: false,
+    default: null
   }
 }, { timestamps: true });
 

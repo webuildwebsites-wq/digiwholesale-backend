@@ -259,8 +259,7 @@ td:last-child { border-right: none; }
     <!-- HEADER -->
     <div class="header-bar">
         <div class="brand-group">
-            ${logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : ''}
-           
+            ${(data.companyLogo || data.storeLogo || data.logoUrl || logoDataUrl) ? `<img src="${data.companyLogo || data.storeLogo || data.logoUrl || logoDataUrl}" alt="${companyName || 'Company'}" class="brand-logo" />` : `<div style="font-size:18px;font-weight:800;color:#0284c7;">${companyName}</div>`}
         </div>
         <div class="invoice-badge">
             <div class="pill">Purchase Invoice</div>

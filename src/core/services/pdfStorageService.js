@@ -1,6 +1,7 @@
 import { bucket } from "../config/bucket/gcs.js";
 import BulkOrder from "../../models/order/BulkOrder.js";
 import Customer from "../../models/Auth/Customer.js";
+import Tenant from "../../models/Tenant/Tenant.model.js";
 import generatePDF from "./pdfService.js";
 import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../Utils/templates/deliveryChallanTemplate.js";
 
@@ -30,22 +31,45 @@ const uploadPDFToGCS = async (buffer, fileName) => {
     }
 };
 
-const buildChallanData = (bulkOrder, customer) => ({
-    billNumber:     bulkOrder.orders[0]?.orderNumber,
-    orderDate:      bulkOrder.createdAt,
-    deliveryDate:   bulkOrder.createdAt,
-    companyName:    process.env.COMPANY_NAME    || "DigiOptics Wholesale",
-    companyAddress: process.env.COMPANY_ADDRESS || "WeWork Eldeco Centre, Block A, Malviya Nagar, New Delhi",
-    companyEmail:   process.env.COMPANY_EMAIL   || "support@digioptics.com",
-    companyPhone:   process.env.COMPANY_PHONE   || "+91 9650560526",
-    companyGstin:   process.env.COMPANY_GSTIN   || "GST9876543210",
-    customerName:   bulkOrder.customer.customerName,
-    customerAddress:bulkOrder.customer.customerShipToBranchName || customer?.billToAddress?.address || "",
-    customerPhone:  customer?.mobileNo1 || "",
-    orders:         bulkOrder.orders,
-});
+const buildChallanData = (bulkOrder, customer, tenantDoc = null) => {
+    const store = tenantDoc?.storeInformation || {};
+    const owner = tenantDoc?.owner || {};
+    const wholesalerLogo = store.storeLogo || "";
+    const wholesalerName = store.storeName || tenantDoc?.companyName || process.env.COMPANY_NAME || "DigiOptics Wholesale";
+    const wholesalerAddress = store.address || process.env.COMPANY_ADDRESS || "WeWork Eldeco Centre, Block A, Malviya Nagar, New Delhi";
+    const wholesalerEmail = owner.email || process.env.COMPANY_EMAIL || "support@digioptics.com";
+    const wholesalerPhone = store.storeMobileNumber || owner.mobileNumber || process.env.COMPANY_PHONE || "+91 9650560526";
+    const wholesalerGstin = tenantDoc?.gstNumber || process.env.COMPANY_GSTIN || "GST9876543210";
 
-const buildInvoiceData = (bulkOrder, customer) => {
+    return {
+        billNumber:     bulkOrder.orders[0]?.orderNumber,
+        orderDate:      bulkOrder.createdAt,
+        deliveryDate:   bulkOrder.createdAt,
+        companyLogo:    wholesalerLogo,
+        companyName:    wholesalerName,
+        companyAddress: wholesalerAddress,
+        companyEmail:   wholesalerEmail,
+        companyPhone:   wholesalerPhone,
+        companyGstin:   wholesalerGstin,
+        customerName:   bulkOrder.customer.customerName,
+        customerAddress:bulkOrder.customer.customerShipToBranchName || customer?.billToAddress?.address || "",
+        customerPhone:  customer?.mobileNo1 || "",
+        orders:         bulkOrder.orders,
+        shippingCharges:Number(bulkOrder.shippingCharges || 0),
+        otherCharges:   Number(bulkOrder.otherCharges || 0),
+        advanceAmount:  Number(bulkOrder.advanceAmount || 0),
+    };
+};
+
+const buildInvoiceData = (bulkOrder, customer, tenantDoc = null) => {
+    const store = tenantDoc?.storeInformation || {};
+    const owner = tenantDoc?.owner || {};
+    const wholesalerLogo = store.storeLogo || "";
+    const wholesalerName = store.storeName || tenantDoc?.companyName || "DigiOptics Wholesale";
+    const wholesalerAddress = store.address || "WeWork Eldeco Centre, Block A, Shivalik Colony, Malviya Nagar, New Delhi, Delhi 110017";
+    const wholesalerCity = store.city || "New Delhi";
+    const wholesalerGstin = tenantDoc?.gstNumber || process.env.COMPANY_GSTIN || "GST9876543210";
+
     const billTo        = customer?.billToAddress || {};
     const shipToAddress = bulkOrder.customer.customerShipToId
         ? customer?.customerShipToDetails?.find(s => s._id.toString() === bulkOrder.customer.customerShipToId.toString())
@@ -81,7 +105,11 @@ const buildInvoiceData = (bulkOrder, customer) => {
     const taxableAmount  = grossAmount - discountAmount;
     const cgstAmount     = bulkOrder.orders.reduce((s, o) => s + (parseFloat(o.cgst) || 0), 0);
     const sgstAmount     = bulkOrder.orders.reduce((s, o) => s + (parseFloat(o.sgst) || 0), 0);
-    const grandTotal     = taxableAmount + cgstAmount + sgstAmount;
+    const shippingCharges= Number(bulkOrder.shippingCharges || 0);
+    const otherCharges   = Number(bulkOrder.otherCharges || 0);
+    const advanceAmount  = Number(bulkOrder.advanceAmount || 0);
+    const grandTotal     = taxableAmount + cgstAmount + sgstAmount + shippingCharges + otherCharges;
+    const balanceDue     = Math.max(0, grandTotal - advanceAmount);
 
     return {
         invoiceNo:     bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
@@ -89,13 +117,15 @@ const buildInvoiceData = (bulkOrder, customer) => {
         irnNo:         "",
         placeOfSupply: billTo.state || "",
         company: {
-            name:         "DigiOptics Wholesale",
-            addressLine1: "WeWork Eldeco Centre, Block A, Shivalik Colony",
-            addressLine2: "Malviya Nagar, New Delhi, Delhi 110017",
-            city:         "New Delhi",
-            gstin:        process.env.COMPANY_GSTIN || "GST9876543210",
+            name:         wholesalerName,
+            logo:         wholesalerLogo,
+            addressLine1: wholesalerAddress,
+            addressLine2: store.city ? `${store.city}${store.pincode ? ' - ' + store.pincode : ''}` : "",
+            city:         wholesalerCity,
+            gstin:        wholesalerGstin,
             stateCode:    "",
         },
+        companyLogo: wholesalerLogo,
         billTo: {
             name:          bulkOrder.customer.customerName,
             branchName:    billTo.branchName            || "",
@@ -125,7 +155,11 @@ const buildInvoiceData = (bulkOrder, customer) => {
         cgstAmount,
         sgstAmount,
         igstAmount:     0,
+        shippingCharges,
+        otherCharges,
+        advanceAmount,
         grandTotal:     grandTotal.toFixed(2),
+        balanceDue:     balanceDue.toFixed(2),
     };
 };
 
@@ -134,9 +168,14 @@ export const generateAndStoreChallan = async (orderId, tenantId) => {
         const bulkOrder = await BulkOrder.findOne({ _id: orderId, ...(tenantId ? { tenantId } : {}) }).lean();
         if (!bulkOrder) throw new Error("BulkOrder not found");
 
-        const customerDoc = await Customer.findOne({ _id: bulkOrder.customer?.customerId }).lean();
+        const effectiveTenantId = tenantId || bulkOrder.tenantId;
+        const [customerDoc, tenantDoc] = await Promise.all([
+            Customer.findOne({ _id: bulkOrder.customer?.customerId }).lean(),
+            effectiveTenantId ? Tenant.findOne({ tenantId: effectiveTenantId }).lean() : null
+        ]);
+
         const customer    = customerDoc;
-        const challanHTML = generateDeliveryChallanHTML(buildChallanData(bulkOrder, customer));
+        const challanHTML = generateDeliveryChallanHTML(buildChallanData(bulkOrder, customer, tenantDoc));
         const pdfBuffer   = await generatePDF(challanHTML);
         const fileName    = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
         
@@ -166,8 +205,13 @@ export const generateAndStoreInvoice = async (orderId, tenantId) => {
         const bulkOrder = await BulkOrder.findOne({ _id: orderId, ...(tenantId ? { tenantId } : {}) }).lean();
         if (!bulkOrder) throw new Error("BulkOrder not found");
 
-        const customer    = await Customer.findOne({ _id: bulkOrder.customer?.customerId }).lean();
-        const invoiceHTML = generatedorderInvoice(buildInvoiceData(bulkOrder, customer));
+        const effectiveTenantId = tenantId || bulkOrder.tenantId;
+        const [customer, tenantDoc] = await Promise.all([
+            Customer.findOne({ _id: bulkOrder.customer?.customerId }).lean(),
+            effectiveTenantId ? Tenant.findOne({ tenantId: effectiveTenantId }).lean() : null
+        ]);
+
+        const invoiceHTML = generatedorderInvoice(buildInvoiceData(bulkOrder, customer, tenantDoc));
         const pdfBuffer   = await generatePDF(invoiceHTML);
         const fileName    = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
         
