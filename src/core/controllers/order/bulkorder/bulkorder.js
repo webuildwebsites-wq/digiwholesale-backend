@@ -925,22 +925,60 @@ export const createBulkOrder = async (req, res) => {
                                 ? Number(batchDoc.sellingPrice)
                                 : Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0))));
 
-                    if (!item.price || item.price === product?.price || item.price === product?.sellingPrice) {
-                        item.price = batchSellingPrice;
+                    const effectiveProductSelling = product?.sellingPrice != null && Number(product.sellingPrice) > 0
+                        ? Number(product.sellingPrice)
+                        : Number(product?.price || 0);
+                    const effectiveProductBuying = Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0));
+
+                    if (item.price == null || Number(item.price) <= 0) {
+                        item.price = effectiveProductSelling || batchSellingPrice || 0;
+                    } else {
+                        item.price = Number(item.price);
                     }
-                    if (!item.sellingPrice || item.sellingPrice === product?.price || item.sellingPrice === product?.sellingPrice) {
-                        item.sellingPrice = item.price || batchSellingPrice;
+
+                    if (item.sellingPrice == null || Number(item.sellingPrice) <= 0) {
+                        item.sellingPrice = item.price;
+                    } else {
+                        item.sellingPrice = Number(item.sellingPrice);
                     }
-                    if (!item.buyingPrice || item.buyingPrice === product?.price || item.buyingPrice === product?.buyingPrice) {
-                        item.buyingPrice = batchBuyingPrice;
+
+                    if (item.buyingPrice == null || Number(item.buyingPrice) <= 0) {
+                        item.buyingPrice = effectiveProductBuying || batchBuyingPrice || 0;
+                    } else {
+                        item.buyingPrice = Number(item.buyingPrice);
                     }
-                    if (!item.mrp && batchDoc.mrp) {
-                        item.mrp = Number(batchDoc.mrp);
+
+                    if (item.mrp == null || Number(item.mrp) <= 0) {
+                        item.mrp = Number(product?.mrp || batchDoc.mrp || 0);
+                    } else {
+                        item.mrp = Number(item.mrp);
                     }
                 } else {
-                    item.price = item.price ?? product?.sellingPrice ?? product?.price ?? 0;
-                    item.sellingPrice = item.sellingPrice ?? item.price;
-                    item.buyingPrice = item.buyingPrice ?? product?.buyingPrice ?? product?.price ?? 0;
+                    const effectiveProductSelling = product?.sellingPrice != null && Number(product.sellingPrice) > 0
+                        ? Number(product.sellingPrice)
+                        : Number(product?.price || 0);
+                    const effectiveProductBuying = Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0));
+
+                    if (item.price == null || Number(item.price) <= 0) {
+                        item.price = effectiveProductSelling;
+                    } else {
+                        item.price = Number(item.price);
+                    }
+                    if (item.sellingPrice == null || Number(item.sellingPrice) <= 0) {
+                        item.sellingPrice = item.price;
+                    } else {
+                        item.sellingPrice = Number(item.sellingPrice);
+                    }
+                    if (item.buyingPrice == null || Number(item.buyingPrice) <= 0) {
+                        item.buyingPrice = effectiveProductBuying;
+                    } else {
+                        item.buyingPrice = Number(item.buyingPrice);
+                    }
+                    if (item.mrp == null || Number(item.mrp) <= 0) {
+                        item.mrp = Number(product?.mrp || 0);
+                    } else {
+                        item.mrp = Number(item.mrp);
+                    }
                 }
 
                 item.mrp      = item.mrp    ?? product?.mrp   ?? 0;

@@ -447,6 +447,24 @@ export const updateProduct = async (req, res) => {
 
     await product.save();
 
+    // Keep ProductBatch records in sync with updated product prices
+    const batchUpdates = {};
+    if (product.sellingPrice != null && Number(product.sellingPrice) > 0) {
+      batchUpdates.sellingPrice = Number(product.sellingPrice);
+    }
+    if (product.buyingPrice != null && Number(product.buyingPrice) > 0) {
+      batchUpdates.buyingPrice = Number(product.buyingPrice);
+    }
+    if (product.mrp != null && Number(product.mrp) > 0) {
+      batchUpdates.mrp = Number(product.mrp);
+    }
+    if (Object.keys(batchUpdates).length > 0) {
+      await ProductBatch.updateMany(
+        { productId: product._id, tenantId: req.user.tenantId },
+        { $set: batchUpdates }
+      );
+    }
+
     res.status(200).json({
       success: true,
       product,

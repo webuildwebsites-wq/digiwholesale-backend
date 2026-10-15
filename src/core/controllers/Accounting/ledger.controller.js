@@ -888,6 +888,20 @@ export const getCustomerLedgersList = async (req, res) => {
     let gstCustomerCount = 0;
     let nonGstCustomerCount = 0;
 
+    const collectedAgg = await Payment.aggregate([
+      {
+        $match: {
+          type: "CUSTOMER_INFLOW",
+          partyModel: "Customer",
+          partyId: { $in: customerIds },
+          status: { $nin: ["CANCELLED", "BOUNCED"] },
+          ...(monthStart && monthEnd ? { createdAt: { $gte: monthStart, $lte: monthEnd } } : {}),
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$netAmountPaid" } } },
+    ]);
+    const totalCollected = Number((collectedAgg[0]?.total || 0).toFixed(2));
+
     const ledgers = [];
 
     for (const cust of customers) {
@@ -1044,6 +1058,7 @@ export const getCustomerLedgersList = async (req, res) => {
           totalReceivable,
           totalAdvances,
           totalCreditLimit,
+          totalCollected,
           activeCount,
           exceededLimitCount,
           warning20PercentCount,
