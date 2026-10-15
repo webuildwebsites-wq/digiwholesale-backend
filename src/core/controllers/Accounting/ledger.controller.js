@@ -386,6 +386,43 @@ export const getCustomerLedgerStatement = async (req, res) => {
         });
       }
 
+      // Check if matching LedgerTransaction recorded any advance absorbed from previous customer balance
+      const matchingTxn = rawTransactions.find(
+        (t) =>
+          (t.voucherId && String(t.voucherId) === String(bo._id)) ||
+          (t.referenceNumber && t.referenceNumber === orderNumber),
+      );
+      const ledgerCredit = matchingTxn ? Number(matchingTxn.credit || 0) : 0;
+      const absorbedAdvance = Math.max(
+        0,
+        Number((ledgerCredit - Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)),
+      );
+      if (absorbedAdvance > 0) {
+        orderPayments.push({
+          paymentId: `ADV-ADJ-${orderNumber}`,
+          paymentNumber: `ADV-ADJ-${orderNumber}`,
+          paymentDate: bo.createdAt,
+          paymentMode: "ADVANCE_ADJUSTMENT",
+          referenceNumber: `ADV-ADJ-${orderNumber}`,
+          amount: absorbedAdvance,
+          remarks: "Adjusted from Customer Advance Balance",
+          status: "CLEARED",
+        });
+      }
+
+      const totalOrderPaid = Number((Number(bo.advanceAmount || 0) + allocatedSum + absorbedAdvance).toFixed(2));
+      const effectiveBalanceDue = Math.max(0, Number((totals.grandTotal - totalOrderPaid).toFixed(2)));
+      const effectivePaymentStatus =
+        totalOrderPaid >= totals.grandTotal && totals.grandTotal > 0
+          ? "PAID"
+          : totalOrderPaid > 0
+            ? "PARTIAL"
+            : "UNPAID";
+      const effectivePct =
+        totals.grandTotal > 0
+          ? Math.min(100, Math.round((totalOrderPaid / totals.grandTotal) * 100))
+          : 0;
+
       const orderEntry = {
         _id: bo._id,
         orderId: bo._id,
@@ -400,11 +437,11 @@ export const getCustomerLedgerStatement = async (req, res) => {
         gstAmount: totals.gstAmount,
         grandTotal: totals.grandTotal,
         totalOrderPrice: totals.grandTotal,
-        paidAmount: totals.paidAmount,
-        advanceAmount: totals.paidAmount,
-        balanceDue: totals.balanceDue,
-        paymentStatus: totals.paymentStatus,
-        partPaymentPercentage: totals.partPaymentPercentage,
+        paidAmount: totalOrderPaid,
+        advanceAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        paymentStatus: effectivePaymentStatus,
+        partPaymentPercentage: effectivePct,
         isGSTRegistered: Boolean(customer.isGSTRegistered),
         gstNumber: customer.gstNumber || customer.gstin || customer.GSTNo || "",
         items: firstOrder.items || [],
