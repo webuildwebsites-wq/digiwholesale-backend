@@ -93,10 +93,16 @@ export const generateDeliveryChallanHTML = (data) => {
 
     const shippingCharges = Number(data.shippingCharges || 0);
     const otherCharges    = Number(data.otherCharges || 0);
-    const advanceAmount   = Number(data.advanceAmount || 0);
+    const orderPayments   = Array.isArray(data.orderPayments) ? data.orderPayments : [];
+    const totalPaidAmount = orderPayments.length > 0
+        ? orderPayments.reduce((s, p) => s + Number(p.amount || 0), 0)
+        : Number(data.advanceAmount || 0);
     const grossTotal      = subTotal + totalCgst + totalSgst + totalIgst + shippingCharges + otherCharges;
-    const balanceDue      = Math.max(0, grossTotal - advanceAmount);
+    const balanceDue      = Math.max(0, grossTotal - totalPaidAmount);
     const grandTotal      = grossTotal;
+    const isFullyPaid     = balanceDue <= 0 && grossTotal > 0;
+    const isPartPaid      = totalPaidAmount > 0 && !isFullyPaid;
+    const paidPercentage  = grossTotal > 0 ? Math.min(100, Math.round((totalPaidAmount / grossTotal) * 100)) : 0;
 
     const itemRows = allItems
         .map(
@@ -481,6 +487,69 @@ export const generateDeliveryChallanHTML = (data) => {
         </tbody>
     </table>
 
+    <!-- ORDER PART-PAYMENT & TRANSACTION HISTORY -->
+    <div style="margin-bottom: 16px; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #ffffff;">
+        <div style="background: #f1f5f9; padding: 7px 12px; border-bottom: 1px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 10.5px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px;">
+                <span>💳 Part-Payment &amp; Transaction History</span>
+                <span style="font-size: 9.5px; background: #e0f2fe; color: #0369a1; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+                    ${orderPayments.length} Transaction${orderPayments.length === 1 ? '' : 's'} Recorded
+                </span>
+            </div>
+            <div style="font-size: 10px; font-weight: 700; color: ${isFullyPaid ? '#15803d' : isPartPaid ? '#b45309' : '#dc2626'};">
+                ${isFullyPaid ? '● Fully Settled (100% Paid)' : isPartPaid ? `● Part Paid (${paidPercentage}% Received)` : '● Payment Pending / Unpaid'}
+            </div>
+        </div>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 0; border: none;">
+            <thead>
+                <tr style="background: #f8fafc; color: #475569; border-bottom: 1px solid #e2e8f0;">
+                    <th style="width: 5%; text-align: center; padding: 5px 6px; font-size: 9px; color: #475569;">#</th>
+                    <th style="width: 16%; text-align: left; padding: 5px 8px; font-size: 9px; color: #475569;">Payment Date</th>
+                    <th style="width: 22%; text-align: left; padding: 5px 8px; font-size: 9px; color: #475569;">Ref / Voucher #</th>
+                    <th style="width: 18%; text-align: center; padding: 5px 8px; font-size: 9px; color: #475569;">Payment Mode</th>
+                    <th style="width: 23%; text-align: left; padding: 5px 8px; font-size: 9px; color: #475569;">Particulars / Remarks</th>
+                    <th style="width: 16%; text-align: right; padding: 5px 8px; font-size: 9px; color: #475569;">Amount Paid</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${orderPayments.length === 0 ? `
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 10px; color: #94a3b8; font-style: italic; font-size: 10px;">
+                        No part-payments recorded yet for this order. Total order balance is pending.
+                    </td>
+                </tr>
+                ` : orderPayments.map((p, idx) => `
+                <tr style="background: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'}; border-bottom: 1px solid #f1f5f9;">
+                    <td style="text-align: center; color: #64748b; font-weight: 600; padding: 5px 6px; font-size: 10px;">${idx + 1}</td>
+                    <td style="text-align: left; color: #334155; padding: 5px 8px; white-space: nowrap; font-size: 10px;">${fmt(p.paymentDate)}</td>
+                    <td style="text-align: left; font-family: monospace; font-weight: 700; color: #0284c7; padding: 5px 8px; font-size: 10px;">${p.referenceNumber || p.paymentNumber || '—'}</td>
+                    <td style="text-align: center; padding: 5px 8px;">
+                        <span style="display: inline-block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; border-radius: 4px; padding: 1px 5px; font-size: 8.5px; font-weight: 700;">
+                            ${(p.paymentMode || 'PAID').replace(/_/g, ' ')}
+                        </span>
+                    </td>
+                    <td style="text-align: left; color: #475569; padding: 5px 8px; font-size: 10px;">${p.remarks || 'Part Payment Allocation'}</td>
+                    <td style="text-align: right; font-weight: 700; color: #15803d; padding: 5px 8px; font-size: 10px;">₹${fmtNum(p.amount)}</td>
+                </tr>
+                `).join('')}
+            </tbody>
+        </table>
+        
+        <div style="background: #f8fafc; padding: 6px 12px; border-top: 1px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+            <div>
+                <strong>Total Collected across Part Payments:</strong> 
+                <span style="color: #15803d; font-weight: 700; font-size: 10.5px;">₹${fmtNum(totalPaidAmount)}</span> of ₹${fmtNum(grossTotal)} (${paidPercentage}% Received)
+            </div>
+            <div>
+                <strong>Current Balance Due:</strong> 
+                <span style="color: ${balanceDue > 0 ? '#dc2626' : '#15803d'}; font-weight: 800; font-size: 11px;">
+                    ${balanceDue > 0 ? `₹${fmtNum(balanceDue)} (Pending)` : '₹0.00 (Fully Settled)'}
+                </span>
+            </div>
+        </div>
+    </div>
+
     <!-- SUMMARY SECTION -->
     <div class="summary-section">
         <div class="terms-card">
@@ -527,18 +596,22 @@ export const generateDeliveryChallanHTML = (data) => {
                 <span style="color:#0284c7;font-weight:600;">+₹${fmtNum(otherCharges)}</span>
             </div>` : ''}
             <div class="totals-row grand" style="background:#1b6496;">
-                <span>Gross Total</span>
+                <span>Gross Order Total</span>
                 <span>₹${fmtNum(grossTotal)}</span>
             </div>
-            ${advanceAmount > 0 ? `
-            <div class="totals-row" style="background:#fffbeb;color:#b45309;font-weight:700;">
-                <span>Advance Paid</span>
-                <span>-₹${fmtNum(advanceAmount)}</span>
+            ${totalPaidAmount > 0 ? `
+            <div class="totals-row" style="background:#ecfdf5;color:#065f46;font-weight:700;">
+                <span>Total Paid (${orderPayments.length} Part Payment${orderPayments.length === 1 ? '' : 's'})</span>
+                <span>-₹${fmtNum(totalPaidAmount)}</span>
             </div>
-            <div class="totals-row grand" style="background:linear-gradient(135deg, #0284c7, #0369a1);">
-                <span>Adjusted Total (Advance Deducted)</span>
+            <div class="totals-row grand" style="background:linear-gradient(135deg, ${balanceDue > 0 ? '#b91c1c, #991b1b' : '#059669, #047857'});">
+                <span>${balanceDue > 0 ? 'Remaining Balance Due' : 'Balance Settled (Fully Paid)'}</span>
                 <span>₹${fmtNum(balanceDue)}</span>
-            </div>` : ''}
+            </div>` : `
+            <div class="totals-row grand" style="background:linear-gradient(135deg, #b91c1c, #991b1b);">
+                <span>Balance Due (Unpaid)</span>
+                <span>₹${fmtNum(balanceDue)}</span>
+            </div>`}
         </div>
     </div>
 

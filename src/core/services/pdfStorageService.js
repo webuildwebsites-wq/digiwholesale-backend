@@ -2,6 +2,7 @@ import { bucket } from "../config/bucket/gcs.js";
 import BulkOrder from "../../models/order/BulkOrder.js";
 import Customer from "../../models/Auth/Customer.js";
 import Tenant from "../../models/Tenant/Tenant.model.js";
+import Payment from "../../models/Accounting/Payment.model.js";
 import generatePDF from "./pdfService.js";
 import { generateDeliveryChallanHTML, generatedorderInvoice } from "../../Utils/templates/deliveryChallanTemplate.js";
 
@@ -31,7 +32,7 @@ const uploadPDFToGCS = async (buffer, fileName) => {
     }
 };
 
-const buildChallanData = (bulkOrder, customer, tenantDoc = null) => {
+const buildChallanData = (bulkOrder, customer, tenantDoc = null, orderPayments = []) => {
     const store = tenantDoc?.storeInformation || {};
     const owner = tenantDoc?.owner || {};
     const wholesalerLogo = store.storeLogo || "";
@@ -58,6 +59,7 @@ const buildChallanData = (bulkOrder, customer, tenantDoc = null) => {
         shippingCharges:Number(bulkOrder.shippingCharges || 0),
         otherCharges:   Number(bulkOrder.otherCharges || 0),
         advanceAmount:  Number(bulkOrder.advanceAmount || 0),
+        orderPayments,
     };
 };
 
@@ -174,10 +176,55 @@ export const generateAndStoreChallan = async (orderId, tenantId) => {
             effectiveTenantId ? Tenant.findOne({ tenantId: effectiveTenantId }).lean() : null
         ]);
 
-        const customer    = customerDoc;
-        const challanHTML = generateDeliveryChallanHTML(buildChallanData(bulkOrder, customer, tenantDoc));
+        const customer = customerDoc;
+        const orderNumber = bulkOrder.orders?.[0]?.orderNumber || bulkOrder._id.toString();
+
+        // Fetch customer payments to map all part payments allocated to this order
+        const customerPayments = await Payment.find({
+            partyId: bulkOrder.customer?.customerId,
+            ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {})
+        }).sort({ createdAt: 1 }).lean();
+
+        let allocatedSum = 0;
+        const orderPayments = [];
+        customerPayments.forEach((p) => {
+            const alloc = (p.allocations || []).find((a) =>
+                String(a.invoiceId) === String(bulkOrder._id) || a.invoiceNumber === orderNumber
+            );
+            if (alloc) {
+                const amt = Number(alloc.allocatedAmount || p.grossAmount || 0);
+                allocatedSum += amt;
+                orderPayments.push({
+                    paymentId: p._id,
+                    paymentNumber: p.paymentNumber,
+                    paymentDate: p.createdAt,
+                    paymentMode: p.paymentMode || "BANK_TRANSFER",
+                    referenceNumber: p.paymentDetails?.referenceNumber || p.paymentNumber,
+                    amount: amt,
+                    remarks: p.paymentDetails?.remarks || "Part Payment Allocation",
+                    status: p.chequeDetails?.chequeStatus === "BOUNCED" ? "BOUNCED" : "CLEARED"
+                });
+            }
+        });
+
+        const initialAdvance = Math.max(0, Number((Number(bulkOrder.advanceAmount || 0) - allocatedSum).toFixed(2)));
+        if (initialAdvance > 0) {
+            orderPayments.unshift({
+                paymentId: `ADV-${orderNumber}`,
+                paymentNumber: `ADV-${orderNumber}`,
+                paymentDate: bulkOrder.createdAt,
+                paymentMode: "ADVANCE_ADJUSTMENT",
+                referenceNumber: `ADV-${orderNumber}`,
+                amount: initialAdvance,
+                remarks: "Booking Advance Payment",
+                status: "CLEARED"
+            });
+        }
+
+        const challanData = buildChallanData(bulkOrder, customer, tenantDoc, orderPayments);
+        const challanHTML = generateDeliveryChallanHTML(challanData);
         const pdfBuffer   = await generatePDF(challanHTML);
-        const fileName    = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}-${Date.now()}.pdf`;
+        const fileName    = `challan-${orderNumber}-${Date.now()}.pdf`;
         
         let url = null;
         try {

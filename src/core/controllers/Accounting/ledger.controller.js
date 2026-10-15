@@ -14,6 +14,8 @@ import {
   sendSuccessResponse,
   sendErrorResponse,
 } from "../../../Utils/response/responseHandler.js";
+import generatePDF from "../../services/pdfService.js";
+import { bucket } from "../../config/bucket/gcs.js";
 
 export const parseCreditDays = (cd) => {
   if (!cd) return 0;
@@ -1438,3 +1440,414 @@ export const getCustomerOrdersForLedger = async (req, res) => {
   }
 };
 
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Customer Ledger Statement PDF (GCS-cached)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const uploadLedgerPDFToGCS = async (buffer, fileName) => {
+  try {
+    if (!bucket || !process.env.GOOGLE_CLOUD_BUCKET_NAME) return null;
+    return await new Promise((resolve) => {
+      const blob = bucket.file(`ledgers/${fileName}`);
+      const stream = blob.createWriteStream({ resumable: false, metadata: { contentType: "application/pdf" } });
+      stream.on("error", (err) => { console.warn("[PDF] Ledger GCS upload skipped:", err.message); resolve(null); });
+      stream.on("finish", () => { resolve(`https://storage.googleapis.com/${bucket.name}/ledgers/${fileName}`); });
+      stream.end(buffer);
+    });
+  } catch (err) {
+    console.warn("[PDF] Ledger GCS upload error:", err.message);
+    return null;
+  }
+};
+
+const buildLedgerStatementHTML = (data) => {
+  const {
+    customerName, ownerName, mobile, email, gstin, addr,
+    isGST, ledgerCode, creditLimit, creditDays, creditUsed,
+    advanceAmount, creditPercentage, availableCredit,
+    totalDebit, totalCredit, generatedOn, wholesalerName,
+    transactions,
+  } = data;
+
+  const rowsHtml = (!transactions || transactions.length === 0)
+    ? `<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748B;font-size:12px;">No transactions recorded for this customer account.</td></tr>`
+    : transactions.map((t, idx) => {
+        const d = t.transactionDate ? new Date(t.transactionDate).toLocaleDateString("en-IN") : "—";
+        const orderTotal = Number(t.orderGrandTotal != null ? t.orderGrandTotal : t.debit || 0);
+        const paidAmount = Number(t.orderPaidAmount != null ? t.orderPaidAmount : t.credit || 0);
+        const dueAmount  = Number(t.orderBalanceDue != null ? t.orderBalanceDue : Math.max(0, orderTotal - paidAmount));
+        const debit  = orderTotal > 0 ? `Rs.${orderTotal.toLocaleString("en-IN")}` : (t.debit > 0 ? `Rs.${Number(t.debit).toLocaleString("en-IN")}` : "—");
+        const credit = paidAmount > 0 ? `Rs.${paidAmount.toLocaleString("en-IN")}` : (t.credit > 0 ? `Rs.${Number(t.credit).toLocaleString("en-IN")}` : "—");
+        const bal = dueAmount > 0 ? `Rs.${dueAmount.toLocaleString("en-IN")} (Due)` : orderTotal > 0 ? "Paid (Rs.0)" : t.runningBalance > 0 ? `Rs.${Number(t.runningBalance).toLocaleString("en-IN")} (Due)` : "Rs.0";
+        const ref = t.orderNumber || t.referenceNumber || t.voucherId || "—";
+        const particulars = t.narration || t.description || t.voucherType || (t.orderNumber ? `Wholesale Order #${t.orderNumber}` : "Sales Invoice");
+
+        const paymentsRow = (t.orderPayments && t.orderPayments.length > 0)
+          ? `<tr style="background:#f8fafc;"><td colspan="7" style="padding:4px 12px;font-size:10px;color:#64748B;"><strong>Grouped Payment History:</strong> ${t.orderPayments.map(p => `${p.referenceNumber || p.paymentNumber || "Payment"}: Rs.${Number(p.amount || 0).toLocaleString("en-IN")} (${p.paymentMode || "Paid"})`).join(" | ")}</td></tr>`
+          : "";
+
+        return `<tr>
+          <td style="text-align:center;color:#64748b;">${idx + 1}</td>
+          <td style="white-space:nowrap;">${d}</td>
+          <td style="font-family:monospace;font-weight:600;color:#0284c7;">${ref}</td>
+          <td>${particulars}</td>
+          <td style="text-align:right;color:#b91c1c;font-weight:600;">${debit}</td>
+          <td style="text-align:right;color:#15803d;font-weight:600;">${credit}</td>
+          <td style="text-align:right;font-weight:700;">${bal}</td>
+        </tr>${paymentsRow}`;
+      }).join("");
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ledger - ${customerName}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:11px;color:#1e293b;padding:24px;}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0284c7;padding-bottom:12px;margin-bottom:16px;}
+  .title{font-size:18px;font-weight:800;color:#0f172a;}
+  .sub{color:#64748b;font-size:11px;margin-top:2px;}
+  .badge{display:inline-block;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+  .ib{border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;font-size:11px;line-height:1.7;}
+  .ib h4{font-size:10px;font-weight:700;color:#0284c7;text-transform:uppercase;margin-bottom:4px;}
+  .kr{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
+  .kc{border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;font-size:11px;}
+  .kc .lbl{color:#64748b;font-size:10px;}.kc .val{font-weight:700;font-size:13px;margin-top:2px;}
+  table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;}
+  th{background:#f1f5f9;text-align:left;padding:7px 8px;border-bottom:1px solid #cbd5e1;font-weight:700;color:#475569;font-size:10px;text-transform:uppercase;}
+  td{padding:7px 8px;border-bottom:1px solid #f1f5f9;}
+  .ftr{margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between;}
+</style></head><body>
+<div class="hdr"><div><div class="title">${customerName}</div><div class="sub">Customer Ledger Statement &amp; Account History</div><div class="sub" style="margin-top:4px;">Wholesaler: <strong>${wholesalerName||"—"}</strong></div></div>
+<div style="text-align:right;"><div class="badge">${isGST?`GST: ${gstin}`:"Non-GST"}</div><div style="font-size:10px;color:#64748b;margin-top:6px;">Generated: ${generatedOn}</div><div style="font-size:10px;color:#64748b;">Ledger: <strong>${ledgerCode}</strong></div></div></div>
+<div class="g2"><div class="ib"><h4>Customer Details</h4><div><strong>${customerName}</strong> (Owner: ${ownerName||"—"})</div><div>Mobile: ${mobile||"—"} | Email: ${email||"—"}</div><div>Address: ${addr||"—"}</div><div>Tax: <strong>${isGST?`GST (${gstin})`:"Non-GST"}</strong></div></div>
+<div class="ib"><h4>Credit Terms</h4><div>Ledger: <strong>${ledgerCode}</strong></div><div>Limit: <strong>Rs.${Number(creditLimit).toLocaleString("en-IN")}</strong> (${creditDays||30} days)</div><div>Utilized: <strong>${creditPercentage}%</strong> | Available: Rs.${Number(availableCredit).toLocaleString("en-IN")}</div><div>Current: <strong>${creditUsed>0?`Rs.${Number(creditUsed).toLocaleString("en-IN")} (Due)`:`Rs.${Number(advanceAmount).toLocaleString("en-IN")} (Advance)`}</strong></div></div></div>
+<div class="kr">
+  <div class="kc"><div class="lbl">Total Invoiced</div><div class="val" style="color:#b91c1c;">Rs.${Number(totalDebit).toLocaleString("en-IN")}</div></div>
+  <div class="kc"><div class="lbl">Total Collected</div><div class="val" style="color:#15803d;">Rs.${Number(totalCredit).toLocaleString("en-IN")}</div></div>
+  <div class="kc"><div class="lbl">Advance Available</div><div class="val" style="color:#0284c7;">Rs.${Number(advanceAmount).toLocaleString("en-IN")}</div></div>
+  <div class="kc"><div class="lbl">Closing Balance</div><div class="val" style="color:${creditUsed>0?"#b91c1c":"#15803d"};">Rs.${Number(creditUsed).toLocaleString("en-IN")}</div></div>
+</div>
+<table><thead><tr><th style="width:30px;text-align:center;">#</th><th style="width:80px;">Date</th><th style="width:130px;">Ref / Invoice No.</th><th>Particulars</th><th style="text-align:right;width:100px;">Debit</th><th style="text-align:right;width:100px;">Credit</th><th style="text-align:right;width:110px;">Balance</th></tr></thead>
+<tbody>${rowsHtml}</tbody></table>
+<div class="ftr"><div>System-generated statement. No signature required.</div><div>${generatedOn} | ${wholesalerName||"Digi-Optics Wholesale"}</div></div>
+</body></html>`;
+};
+
+/**
+ * Download Customer Ledger Statement as PDF (GCS cached).
+ * GET /api/v1/ledgers/customer/:customerId/statement-pdf
+ * ?regenerate=true  → force fresh generation
+ */
+export const downloadCustomerLedgerStatementPDF = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    const forceRegenerate = req.query.regenerate === "true" || req.query.refresh === "true";
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return sendErrorResponse(res, 400, "INVALID_CUSTOMER_ID", "Invalid customer ID.");
+    }
+
+    const customer = await Customer.findById(customerId).lean();
+    if (!customer) return sendErrorResponse(res, 404, "CUSTOMER_NOT_FOUND", "Customer not found.");
+
+    const tenantId = req.user?.tenantId || customer.tenantId;
+    let ledger = await CustomerLedger.findOne({ customerId });
+    if (!ledger) {
+      ledger = await CustomerLedger.create({
+        ledgerCode: `CUST-LED-${customerId.toString().slice(-6).toUpperCase()}`,
+        customerId,
+        customerType: customer.customerType || "Wholesale",
+        creditLimit: Number(customer.creditLimit || 0),
+        creditDays: parseCreditDays(customer.creditDays),
+        creditUsed: Number(customer.creditUsed || 0),
+        advanceAmount: Number(customer.customerBalance || 0),
+        openingBalance: 0,
+        currentBalance: Number(customer.creditUsed || 0) > 0 ? Number(customer.creditUsed || 0) : -Number(customer.customerBalance || 0),
+        tenantId,
+      });
+    }
+
+    const tenant = tenantId ? await Tenant.findOne({ tenantId }).lean() : null;
+    const wholesalerName = tenant?.storeInformation?.storeName || tenant?.companyName || "Digi-Optics Wholesale";
+    const creditLimit    = Number(ledger.creditLimit || customer.creditLimit || 0);
+    const creditDays     = parseCreditDays(ledger.creditDays || customer.creditDays);
+    const creditUsed     = Number(ledger.creditUsed || customer.creditUsed || 0);
+    const advanceAmount  = Number(ledger.advanceAmount || customer.customerBalance || 0);
+    const creditAlerts   = calculateCreditStatus(creditLimit, creditUsed);
+
+    const safeName = (customer.shopName || customer.ownerName || "Customer").replace(/[^a-z0-9]/gi, "-").toLowerCase();
+    const fileName = `ledger-stmt-${safeName}-${customerId.toString().slice(-6)}.pdf`;
+
+    // 1. Fetch raw ledger transactions with correct entity criteria
+    const query = {
+      $or: [
+        { ledgerId: ledger._id },
+        { partyId: customer._id, entityType: "Customer" },
+      ],
+    };
+
+    let rawTransactions = await LedgerTransaction.find(query).sort({ transactionDate: -1, createdAt: -1 }).lean();
+
+    // 2. Fetch customer bulk orders
+    const bulkOrders = await BulkOrder.find({ "customer.customerId": customer._id }).sort({ createdAt: -1 }).lean();
+
+    // 3. Fetch customer payments
+    const customerPayments = await Payment.find({ partyId: customer._id }).sort({ createdAt: 1 }).lean();
+
+    // Auto-sync missing orders to transactions
+    const existingTxnVoucherKeys = new Set(
+      rawTransactions.flatMap((t) => [
+        t.voucherId ? String(t.voucherId) : "",
+        t.referenceNumber || "",
+      ]).filter(Boolean)
+    );
+
+    for (const bo of bulkOrders) {
+      const firstOrder = bo.orders?.[0] || {};
+      if (firstOrder.status === "Draft" || bo.isDraft) continue;
+
+      const orderRef = firstOrder.orderNumber || bo._id.toString();
+      const hasTxn = existingTxnVoucherKeys.has(String(bo._id)) || existingTxnVoucherKeys.has(orderRef);
+
+      if (!hasTxn) {
+        const totals = calculateBulkOrderTotals(bo);
+        const advancePaid = Number(bo.advanceAmount || 0);
+        try {
+          const [newTxn] = await LedgerTransaction.create([{
+            entityType: "Customer",
+            ledgerId: ledger._id,
+            partyId: customer._id,
+            transactionDate: bo.createdAt || new Date(),
+            voucherType: "Sales Invoice",
+            voucherId: bo._id,
+            referenceNumber: orderRef,
+            debit: totals.grandTotal,
+            credit: advancePaid,
+            runningBalance: totals.balanceDue,
+            narration: `Sales Invoice for Order #${orderRef}. Total: Rs.${totals.grandTotal.toLocaleString("en-IN")}, Advance Paid: Rs.${advancePaid.toLocaleString("en-IN")}`,
+            branchId: ledger.branchId || null,
+            tenantId,
+            createdBy: null,
+          }]);
+          if (newTxn) {
+            rawTransactions.push(newTxn.toObject ? newTxn.toObject() : newTxn);
+            existingTxnVoucherKeys.add(String(bo._id));
+            existingTxnVoucherKeys.add(orderRef);
+          }
+        } catch (syncErr) {
+          console.warn("[Ledger PDF] Auto-sync error:", syncErr.message);
+        }
+      }
+    }
+
+    // Map orders
+    const ordersMap = new Map();
+    const customerOrdersList = bulkOrders.map((bo) => {
+      const totals = calculateBulkOrderTotals(bo);
+      const firstOrder = bo.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || bo._id.toString().slice(-6).toUpperCase();
+
+      const matchedPayments = customerPayments.filter((p) =>
+        (p.allocations || []).some(
+          (a) => String(a.invoiceId) === String(bo._id) || a.invoiceNumber === orderNumber
+        )
+      );
+
+      let allocatedSum = 0;
+      const orderPayments = [];
+      matchedPayments.forEach((p) => {
+        const alloc = (p.allocations || []).find(
+          (a) => String(a.invoiceId) === String(bo._id) || a.invoiceNumber === orderNumber
+        );
+        const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
+        allocatedSum += amt;
+        orderPayments.push({
+          paymentId: p._id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.createdAt,
+          paymentMode: p.paymentMode || "BANK_TRANSFER",
+          referenceNumber: p.paymentDetails?.referenceNumber || p.paymentNumber,
+          amount: amt,
+          remarks: p.paymentDetails?.remarks || "Part Payment",
+          status: "CLEARED",
+        });
+      });
+
+      const initialAdvance = Math.max(0, Number((Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)));
+      if (initialAdvance > 0) {
+        orderPayments.unshift({
+          paymentId: `ADV-${orderNumber}`,
+          paymentNumber: `ADV-${orderNumber}`,
+          paymentDate: bo.createdAt,
+          paymentMode: "ADVANCE_ADJUSTMENT",
+          referenceNumber: `ADV-${orderNumber}`,
+          amount: initialAdvance,
+          remarks: "Booking Advance Payment",
+          status: "CLEARED",
+        });
+      }
+
+      const orderEntry = {
+        _id: bo._id,
+        orderId: bo._id,
+        orderNumber,
+        createdAt: bo.createdAt,
+        orderDate: bo.createdAt,
+        orderStatus: firstOrder.status || "Submitted",
+        grandTotal: totals.grandTotal,
+        paidAmount: totals.paidAmount,
+        advanceAmount: totals.paidAmount,
+        balanceDue: totals.balanceDue,
+        itemsCount: totals.itemsCount,
+        orderPayments,
+      };
+      ordersMap.set(bo._id.toString(), orderEntry);
+      ordersMap.set(orderNumber, orderEntry);
+      return orderEntry;
+    });
+
+    // Enrich transactions
+    const enrichedTransactions = rawTransactions.map((t) => {
+      let matchedOrder = null;
+      if (t.voucherId && ordersMap.has(t.voucherId.toString())) {
+        matchedOrder = ordersMap.get(t.voucherId.toString());
+      } else if (t.referenceNumber && ordersMap.has(t.referenceNumber)) {
+        matchedOrder = ordersMap.get(t.referenceNumber);
+      }
+
+      const orderTotal = matchedOrder ? matchedOrder.grandTotal : Number(t.debit || 0);
+      const paidAmount = matchedOrder ? matchedOrder.paidAmount : Number(t.credit || 0);
+      const dueAmount  = matchedOrder ? matchedOrder.balanceDue : Number(t.runningBalance || 0);
+
+      return {
+        ...t,
+        orderId: matchedOrder?.orderId || t.voucherId,
+        orderNumber: matchedOrder?.orderNumber || t.referenceNumber,
+        orderGrandTotal: orderTotal,
+        orderPaidAmount: paidAmount,
+        orderBalanceDue: dueAmount,
+        orderPayments: matchedOrder ? matchedOrder.orderPayments : [],
+      };
+    });
+
+    // Build unified transactions exactly matching UI
+    const allocatedPaymentRefs = new Set();
+    customerOrdersList.forEach((ord) => {
+      (ord.orderPayments || []).forEach((p) => {
+        if (p.paymentNumber) allocatedPaymentRefs.add(String(p.paymentNumber));
+        if (p.referenceNumber) allocatedPaymentRefs.add(String(p.referenceNumber));
+        if (p.paymentId) allocatedPaymentRefs.add(String(p.paymentId));
+      });
+    });
+
+    const standaloneTransactions = enrichedTransactions.filter((t) => {
+      const isPayment = Boolean(
+        (t.referenceNumber && t.referenceNumber.startsWith("CPAY")) ||
+        t.voucherType === "Receipt" ||
+        t.voucherType === "Advance" ||
+        (!t.voucherType?.toLowerCase().includes("invoice") && Number(t.credit) > 0 && !t.referenceNumber?.startsWith("BO-"))
+      );
+      if (!isPayment) return true;
+      const isAllocated =
+        t.isOrderAllocatedPayment ||
+        allocatedPaymentRefs.has(String(t.referenceNumber || "")) ||
+        allocatedPaymentRefs.has(String(t.voucherId || "")) ||
+        allocatedPaymentRefs.has(String(t._id || ""));
+      return !isAllocated;
+    });
+
+    const txnOrderIds = new Set(enrichedTransactions.map((t) => t.orderId ? String(t.orderId) : "").filter(Boolean));
+    const txnOrderNumbers = new Set(enrichedTransactions.map((t) => t.orderNumber || "").filter(Boolean));
+
+    const unrecordedOrderTxns = customerOrdersList
+      .filter((ord) => !txnOrderIds.has(String(ord.orderId)) && !txnOrderNumbers.has(String(ord.orderNumber)))
+      .map((ord) => ({
+        _id: ord.orderId,
+        voucherId: ord.orderId,
+        referenceNumber: ord.orderNumber,
+        transactionDate: ord.orderDate || ord.createdAt,
+        voucherType: "Sales Invoice",
+        narration: `Wholesale Order #${ord.orderNumber}`,
+        debit: Number(ord.grandTotal || 0),
+        credit: Number(ord.paidAmount || 0),
+        runningBalance: Number(ord.balanceDue || 0),
+        orderId: ord.orderId,
+        orderNumber: ord.orderNumber,
+        orderStatus: ord.orderStatus,
+        orderGrandTotal: Number(ord.grandTotal || 0),
+        orderPaidAmount: Number(ord.paidAmount || 0),
+        orderBalanceDue: Number(ord.balanceDue || 0),
+        orderPayments: ord.orderPayments || [],
+      }));
+
+    const unifiedTransactions = [...standaloneTransactions, ...unrecordedOrderTxns].sort(
+      (a, b) => new Date(b.transactionDate || b.createdAt) - new Date(a.transactionDate || a.createdAt)
+    );
+
+    const totalDebit  = unifiedTransactions.reduce((s, t) => s + Number(t.orderGrandTotal != null ? t.orderGrandTotal : t.debit || 0), 0);
+    const totalCredit = unifiedTransactions.reduce((s, t) => s + Number(t.orderPaidAmount != null ? t.orderPaidAmount : t.credit || 0), 0);
+
+    const rawAddr = customer.billToAddress || customer.address || {};
+    const addr = typeof rawAddr === "string" ? rawAddr
+      : [rawAddr.address, rawAddr.city, rawAddr.state, rawAddr.zipCode, rawAddr.country].filter(Boolean).join(", ") || rawAddr.branchName || "";
+
+    // Serve cached version ONLY if valid, not forced to regenerate, and not previously blank
+    if (!forceRegenerate && ledger?.statementPdfUrl) {
+      try {
+        const { default: axios } = await import("axios");
+        const cached = await axios.get(ledger.statementPdfUrl, { responseType: "arraybuffer", timeout: 5000 });
+        const buf = Buffer.from(cached.data);
+        if (buf && buf.length > 500) {
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+          res.setHeader("Content-Length", buf.length);
+          return res.end(buf);
+        }
+      } catch {
+        console.warn("[PDF] Cached ledger statement unavailable, generating fresh.");
+      }
+    }
+
+    const htmlData = {
+      customerName: customer.shopName || customer.ownerName || "Customer",
+      ownerName: customer.ownerName || "",
+      mobile: customer.mobileNo1 || customer.mobile || "",
+      email: customer.businessEmail || customer.emailId || "",
+      gstin: customer.gstNumber || customer.gstin || customer.GSTNo || "Unregistered",
+      isGST: Boolean(customer.isGSTRegistered),
+      addr,
+      ledgerCode: ledger.ledgerCode || `CUST-LED-${customerId.toString().slice(-6).toUpperCase()}`,
+      creditLimit,
+      creditDays,
+      creditUsed,
+      advanceAmount,
+      creditPercentage: creditAlerts.creditPercentage,
+      availableCredit: creditAlerts.availableCredit,
+      totalDebit,
+      totalCredit,
+      wholesalerName,
+      generatedOn: new Date().toLocaleDateString("en-IN"),
+      transactions: unifiedTransactions,
+    };
+
+    const html = buildLedgerStatementHTML(htmlData);
+    const buffer = await generatePDF(html);
+
+    // Upload to GCS in background
+    uploadLedgerPDFToGCS(buffer, fileName).then(async (url) => {
+      if (url) {
+        await CustomerLedger.updateOne({ customerId }, { statementPdfUrl: url, statementPdfGenAt: new Date() });
+        console.log(`[PDF] Ledger statement stored: ${url}`);
+      }
+    }).catch((e) => console.warn("[PDF] GCS statement upload error:", e.message));
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", buffer.length);
+    return res.end(buffer);
+  } catch (error) {
+    console.error("downloadCustomerLedgerStatementPDF error:", error);
+    return sendErrorResponse(res, 500, "LEDGER_STATEMENT_PDF_FAILED", error.message);
+  }
+};

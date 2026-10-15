@@ -93,6 +93,14 @@ const CustomerLedgerSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  statementPdfUrl: {
+    type: String,
+    default: null,
+  },
+  statementPdfGenAt: {
+    type: Date,
+    default: null,
+  },
   createdBy: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'employee' 

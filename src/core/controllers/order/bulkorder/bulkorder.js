@@ -8,6 +8,7 @@ import ProductBatch from "../../../../models/Product/ProductBatch.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
 import VendorPurchase from "../../../../models/Purchase/VendorPurchase.model.js";
 import Employee from "../../../../models/Auth/Employee.js";
+import Payment from "../../../../models/Accounting/Payment.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
@@ -17,6 +18,7 @@ import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockE
 import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
 import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
 import { applyPurchaseToVendorLedger } from "../../Purchase/purchase.controller.js";
+import { bucket } from "../../../config/bucket/gcs.js";
 
 const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumber }) => {
     try {
@@ -1164,7 +1166,7 @@ export const getBulkOrderChallan = async (req, res) => {
             return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
         }
 
-        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("challanUrl orders customer").lean();
+        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("challanUrl challanGenAt orders customer").lean();
         if (!bulkOrder) {
             return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
         }
@@ -1172,8 +1174,31 @@ export const getBulkOrderChallan = async (req, res) => {
         const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
         const forceRegenerate = req.query.regenerate === 'true' || req.query.refresh === 'true';
 
-        if (bulkOrder.challanUrl && !forceRegenerate) {
+        // Check if any payment was recorded after challan was generated
+        let hasNewPayments = false;
+        if (bulkOrder.challanGenAt) {
+            const count = await Payment.countDocuments({
+                $or: [
+                    { "allocations.invoiceId": bulkOrder._id },
+                    { "allocations.invoiceNumber": bulkOrder.orders[0]?.orderNumber }
+                ],
+                createdAt: { $gt: bulkOrder.challanGenAt }
+            });
+            if (count > 0) hasNewPayments = true;
+        }
+
+        if (bulkOrder.challanUrl && !forceRegenerate && !hasNewPayments) {
             try {
+                if (bucket && bucket.name) {
+                    const fileNameFromUrl = bulkOrder.challanUrl.split("/").pop();
+                    const file = bucket.file(`pdfs/${fileNameFromUrl}`);
+                    const [exists] = await file.exists();
+                    if (exists) {
+                        res.setHeader("Content-Type", "application/pdf");
+                        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+                        return file.createReadStream().pipe(res);
+                    }
+                }
                 const { default: axios } = await import("axios");
                 const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer", timeout: 4000 });
                 const buffer   = Buffer.from(response.data);
@@ -1215,6 +1240,16 @@ export const getBulkOrderInvoice = async (req, res) => {
 
         if (bulkOrder.invoiceUrl && !forceRegenerate) {
             try {
+                if (bucket && bucket.name) {
+                    const fileNameFromUrl = bulkOrder.invoiceUrl.split("/").pop();
+                    const file = bucket.file(`pdfs/${fileNameFromUrl}`);
+                    const [exists] = await file.exists();
+                    if (exists) {
+                        res.setHeader("Content-Type", "application/pdf");
+                        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+                        return file.createReadStream().pipe(res);
+                    }
+                }
                 const { default: axios } = await import("axios");
                 const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer", timeout: 4000 });
                 const buffer   = Buffer.from(response.data);

@@ -6,7 +6,8 @@ import {
   getVendorLedgersList, 
   upsertCustomerLedger, 
   upsertVendorLedger,
-  getCustomerOrdersForLedger 
+  getCustomerOrdersForLedger,
+  downloadCustomerLedgerStatementPDF
 } from '../../core/controllers/Accounting/ledger.controller.js';
 import { sendPaymentDueReminder } from '../../core/controllers/Accounting/payment.controller.js';
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
@@ -17,6 +18,7 @@ router.use(ProtectUser);
 
 // Customer Ledgers & Khata Statements
 router.get('/customers', getCustomerLedgersList);
+router.get('/customer/:customerId/statement-pdf', downloadCustomerLedgerStatementPDF);
 router.get('/customer/:customerId', getCustomerLedgerStatement);
 router.get('/customer/:customerId/orders', getCustomerOrdersForLedger);
 router.post('/customer/upsert', upsertCustomerLedger);
