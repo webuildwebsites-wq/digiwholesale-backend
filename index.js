@@ -244,4 +244,4 @@ connectDB()
     console.log("MongoDB TTL indexes active - Automatic deletion enabled for records older than 30 days");
     startBillingCron();
   })
-  .catch(err => console.error("DB Failed:", err));
+  .catch(err => console.error("DB Failed:", err));

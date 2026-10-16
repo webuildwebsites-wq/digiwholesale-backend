@@ -1,123 +1,117 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import QRCode from "qrcode";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-let logoDataUrl = "";
+
+let staticLogoDataUrl = "";
 try {
   const logoBase64 = readFileSync(
     join(__dirname, "../../../public/DigiOptics.png"),
   ).toString("base64");
-  logoDataUrl = `data:image/png;base64,${logoBase64}`;
+  staticLogoDataUrl = `data:image/png;base64,${logoBase64}`;
 } catch {
-  logoDataUrl = "";
+  staticLogoDataUrl = "";
+}
+
+// Synchronous QR Code SVG Generator for offline and fast PDF compilation
+export function generateQRCodeSVG(text, sizePx = 80) {
+  try {
+    const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
+    const modSize = qr.modules.size;
+    const data = qr.modules.data;
+    let d = "";
+    for (let r = 0; r < modSize; r++) {
+      for (let c = 0; c < modSize; c++) {
+        if (data[r * modSize + c]) {
+          d += `M${c + 2} ${r + 2}h1v1h-1z `;
+        }
+      }
+    }
+    const total = modSize + 4;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${sizePx}" height="${sizePx}"><rect width="100%" height="100%" fill="#ffffff"/><path d="${d}" fill="#000000"/></svg>`;
+  } catch {
+    return "";
+  }
 }
 
 // Number to Words Converter for INR
-function numberToWordsINR(num) {
-  if (!num || isNaN(num)) return "Zero Rupees Only";
+export function numberToWordsINR(num) {
+  const n = Math.round(Number(num || 0));
+  if (!n || isNaN(n)) return "Zero Rupees Only";
 
   const a = [
-    "",
-    "One ",
-    "Two ",
-    "Three ",
-    "Four ",
-    "Five ",
-    "Six ",
-    "Seven ",
-    "Eight ",
-    "Nine ",
-    "Ten ",
-    "Eleven ",
-    "Twelve ",
-    "Thirteen ",
-    "Fourteen ",
-    "Fifteen ",
-    "Sixteen ",
-    "Seventeen ",
-    "Eighteen ",
-    "Nineteen ",
+    "", "One ", "Two ", "Three ", "Four ", "Five ", "Six ", "Seven ", "Eight ", "Nine ",
+    "Ten ", "Eleven ", "Twelve ", "Thirteen ", "Fourteen ", "Fifteen ", "Sixteen ",
+    "Seventeen ", "Eighteen ", "Nineteen ",
   ];
-  const b = [
-    "",
-    "",
-    "Twenty",
-    "Thirty",
-    "Forty",
-    "Fifty",
-    "Sixty",
-    "Seventy",
-    "Eighty",
-    "Ninety",
-  ];
+  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
 
-  const numToWordsLessThanThousand = (n) => {
+  function inWords(val) {
     let str = "";
-    if (n > 99) {
-      str += a[Math.floor(n / 100)] + "Hundred ";
-      n %= 100;
+    if (val > 99) {
+      str += a[Math.floor(val / 100)] + "Hundred ";
+      val %= 100;
     }
-    if (n > 19) {
-      str += b[Math.floor(n / 10)] + " " + a[n % 10];
-    } else if (n > 0) {
-      str += a[n];
+    if (val > 19) {
+      str += b[Math.floor(val / 10)] + (val % 10 !== 0 ? " " + a[val % 10] : " ");
+    } else if (val > 0) {
+      str += a[val];
     }
     return str;
-  };
-
-  const parts = Number(num).toFixed(2).split(".");
-  let rupees = parseInt(parts[0], 10);
-  const paise = parseInt(parts[1], 10);
-
-  if (rupees === 0 && paise === 0) return "Zero Rupees Only";
-
-  let result = "";
-  const crore = Math.floor(rupees / 10000000);
-  rupees %= 10000000;
-  const lakh = Math.floor(rupees / 100000);
-  rupees %= 100000;
-  const thousand = Math.floor(rupees / 1000);
-  rupees %= 1000;
-
-  if (crore > 0) result += numToWordsLessThanThousand(crore) + "Crore ";
-  if (lakh > 0) result += numToWordsLessThanThousand(lakh) + "Lakh ";
-  if (thousand > 0)
-    result += numToWordsLessThanThousand(thousand) + "Thousand ";
-  if (rupees > 0) result += numToWordsLessThanThousand(rupees);
-
-  result = result.trim() + " Rupees";
-
-  if (paise > 0) {
-    result += " and " + numToWordsLessThanThousand(paise).trim() + " Paise";
   }
 
-  return result + " Only";
+  let crore = Math.floor(n / 10000000);
+  let remainder = n % 10000000;
+  let lakh = Math.floor(remainder / 100000);
+  remainder %= 100000;
+  let thousand = Math.floor(remainder / 1000);
+  remainder %= 1000;
+  let hundreds = remainder;
+
+  let words = "";
+  if (crore > 0) words += inWords(crore) + "Crore ";
+  if (lakh > 0) words += inWords(lakh) + "Lakh ";
+  if (thousand > 0) words += inWords(thousand) + "Thousand ";
+  if (hundreds > 0) words += inWords(hundreds);
+
+  return (words.trim() ? words.trim() : "Zero") + " Rupees Only";
 }
+
+const fmtNum = (n) =>
+  Number(n || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const fmtDate = (d) =>
+  d
+    ? new Date(d)
+      .toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      })
+      .replace(/\//g, "-")
+    : "-";
 
 /**
  * 1. PAYMENT RECEIPT HTML TEMPLATE (PDF Generation)
- * Supports both Customer Payment Receipts (Inflow) and Vendor Payout Advice (Outflow)
+ * Clean, classic optical ERP payment receipt matching standard optical billing layout.
+ * Supports both Customer Payment Receipts (Inflow) and Vendor Payout Advice (Outflow).
  */
 export const generatePaymentReceiptHTML = (data) => {
   const {
     receiptNo,
     receiptDate,
-    company = {
-      name: "DigiOptics Wholesale",
-      addressLine1: "WeWork Eldeco Centre, Block A, Shivalik Colony",
-      addressLine2: "Malviya Nagar, New Delhi, Delhi 110017",
-      phone: "+91 9650560526",
-      email: "support@digioptics.com",
-      gstin: "GST9876543210",
-    },
+    company = {},
     customer = {},
     paymentMode = "CASH",
     grossAmount = 0,
     paymentDetails = {},
     allocations = [],
     narration = "",
-    accountSummary = {},
     isVendorPayout = false,
     partyType = "Customer",
     vendor = {},
@@ -126,24 +120,42 @@ export const generatePaymentReceiptHTML = (data) => {
     orderPayments = [],
   } = data;
 
-  const isVendor = isVendorPayout || partyType === "Vendor" || Boolean(vendor && (vendor.name || vendor.firm) && !customer?.shopName);
+  const isVendor =
+    isVendorPayout ||
+    partyType === "Vendor" ||
+    Boolean(vendor && (vendor.name || vendor.firm) && !customer?.shopName);
 
-  const fmtNum = (n) =>
-    Number(n || 0).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  const formattedDate = receiptDate
-    ? new Date(receiptDate).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    : new Date().toLocaleDateString("en-IN");
-  const amountInWords = numberToWordsINR(grossAmount);
+  // Logo resolution: use uploaded logo if present, else fallback to static DigiOptics logo
+  const uploadedLogo =
+    (data.companyLogo && String(data.companyLogo).trim()) ||
+    (company?.logo && String(company.logo).trim()) ||
+    "";
+  const finalLogo = uploadedLogo || staticLogoDataUrl;
+
+  const companyName =
+    data.companyName || company?.name || "SAANCHI & CO.";
+  const companyAddress =
+    data.companyAddress ||
+    company?.addressLine1 ||
+    "3RD FLOOR, PEOPLES TV BUILDING, RAJA RAMMOHAN ROY ROAD,\nHAKIMPARA, SILIGURI";
+  const companyPhone = data.companyPhone || company?.phone || "0353-4075631";
+  const companyGstin =
+    data.companyGstin || company?.gstin || "19AFWFS3883G1Z2";
+
+  // Party Details
+  const partyTitle = isVendor ? "Vendor Details" : "Customer / Party Details";
+  const partyName = isVendor
+    ? vendor?.name || vendor?.firm || "Vendor Partner"
+    : customer?.shopName || customer?.customerName || customer?.ownerName || "Customer";
+  const partyContact = isVendor
+    ? vendor?.mobile || vendor?.phone || "-"
+    : customer?.mobileNo1 || customer?.mobile || customer?.phone || "-";
+  const partyGstin = isVendor
+    ? vendor?.gstNumber || vendor?.gstin || "URP"
+    : customer?.gstNumber || customer?.gstin || customer?.GSTNo || "URP";
+  const partyAddress = isVendor
+    ? vendor?.address || "-"
+    : customer?.address || customer?.billToAddress?.address || "-";
 
   const modeLabels = {
     CASH: "Cash Voucher",
@@ -155,526 +167,289 @@ export const generatePaymentReceiptHTML = (data) => {
     ONLINE: "Online Payment Gateway",
     ADVANCE_ADJUSTMENT: "Advance Balance Adjustment",
   };
-
   const modeName = modeLabels[paymentMode] || paymentMode;
 
-  let referenceDetails = [];
-  if (paymentMode === "CHEQUE") {
-    if (paymentDetails.chequeNumber)
-      referenceDetails.push(
-        `<strong>Cheque No:</strong> ${paymentDetails.chequeNumber}`,
-      );
-    if (paymentDetails.bankName)
-      referenceDetails.push(
-        `<strong>Bank:</strong> ${paymentDetails.bankName}`,
-      );
-    if (paymentDetails.chequeDate)
-      referenceDetails.push(
-        `<strong>Cheque Date:</strong> ${paymentDetails.chequeDate}`,
-      );
-  } else if (paymentMode === "UPI") {
-    if (paymentDetails.upiTransactionId || paymentDetails.transactionId)
-      referenceDetails.push(
-        `<strong>UPI Ref / UTR:</strong> ${paymentDetails.upiTransactionId || paymentDetails.transactionId}`,
-      );
-    if (paymentDetails.receiverUpiId)
-      referenceDetails.push(
-        `<strong>Receiver VPA:</strong> ${paymentDetails.receiverUpiId}`,
-      );
-  } else if (
-    paymentMode === "BANK_TRANSFER" ||
-    paymentMode === "NEFT" ||
-    paymentMode === "RTGS"
-  ) {
-    if (paymentDetails.referenceNumber || paymentDetails.utrNumber)
-      referenceDetails.push(
-        `<strong>UTR / Ref No:</strong> ${paymentDetails.referenceNumber || paymentDetails.utrNumber}`,
-      );
-    if (paymentDetails.bankName)
-      referenceDetails.push(
-        `<strong>Bank:</strong> ${paymentDetails.bankName}`,
-      );
-  } else if (paymentMode === "CASH") {
-    if (paymentDetails.cashVoucherNo)
-      referenceDetails.push(
-        `<strong>Voucher No:</strong> ${paymentDetails.cashVoucherNo}`,
-      );
+  const refNumber =
+    paymentDetails?.referenceNumber ||
+    paymentDetails?.transactionId ||
+    paymentDetails?.upiTransactionId ||
+    paymentDetails?.chequeNumber ||
+    receiptNo ||
+    "-";
+
+  const totalReceivedAmount = isOrderReceipt && orderSummary
+    ? Number(orderSummary.paidAmount || grossAmount)
+    : Number(grossAmount || 0);
+
+  const amountInWords = numberToWordsINR(totalReceivedAmount);
+
+  // Build Table Rows
+  let tableHeaderHtml = "";
+  let tableRowsHtml = "";
+
+  if (isOrderReceipt && Array.isArray(orderPayments) && orderPayments.length > 0) {
+    tableHeaderHtml = `
+      <tr style="background:#ffffff; border-bottom:1px solid #000000; font-size:9.5px; font-weight:700;">
+        <th style="width:28px; border-right:1px solid #000; padding:4px 2px; text-align:center;">#</th>
+        <th style="width:85px; border-right:1px solid #000; padding:4px 4px; text-align:left;">Payment Date</th>
+        <th style="border-right:1px solid #000; padding:4px 6px; text-align:left;">Voucher / Ref #</th>
+        <th style="width:110px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Payment Mode</th>
+        <th style="border-right:1px solid #000; padding:4px 6px; text-align:left;">Remarks / Payment Type</th>
+        <th style="width:110px; border-right:1px solid #000; padding:4px 6px; text-align:right;">Amount (₹)</th>
+        <th style="width:65px; padding:4px 4px; text-align:center;">Status</th>
+      </tr>
+    `;
+
+    tableRowsHtml = orderPayments
+      .map((p, idx) => `
+        <tr style="border-bottom:1px solid #000000;">
+          <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">${idx + 1}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; font-size:10px; font-family:monospace;">${fmtDate(p.paymentDate)}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-family:monospace; font-weight:700; color:#0284c7;">${p.referenceNumber || p.paymentNumber || "-"}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:9.5px;">${modeLabels[p.paymentMode] || p.paymentMode || "Advance / Bank"}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; color:#1e293b;">${p.remarks || (idx === 0 && p.paymentNumber?.startsWith("ADV") ? "Booking Advance" : "Part Payment Installment")}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-size:10px; font-weight:700; font-family:monospace;">${fmtNum(p.amount)}</td>
+          <td style="padding:3px 4px; text-align:center; font-size:9px; font-weight:700; color:#15803d;">CLEARED</td>
+        </tr>
+      `)
+      .join("");
+  } else if (Array.isArray(allocations) && allocations.length > 0) {
+    tableHeaderHtml = `
+      <tr style="background:#ffffff; border-bottom:1px solid #000000; font-size:9.5px; font-weight:700;">
+        <th style="width:28px; border-right:1px solid #000; padding:4px 2px; text-align:center;">#</th>
+        <th style="border-right:1px solid #000; padding:4px 6px; text-align:left;">Invoice / Order Ref</th>
+        <th style="width:90px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Doc Date</th>
+        <th style="width:110px; border-right:1px solid #000; padding:4px 6px; text-align:right;">Invoice Total (₹)</th>
+        <th style="width:110px; border-right:1px solid #000; padding:4px 6px; text-align:right;">Previously Paid (₹)</th>
+        <th style="width:120px; border-right:1px solid #000; padding:4px 6px; text-align:right;">Amount Allocated (₹)</th>
+        <th style="width:110px; padding:4px 6px; text-align:right;">Balance Remaining (₹)</th>
+      </tr>
+    `;
+
+    tableRowsHtml = allocations
+      .map((a, idx) => `
+        <tr style="border-bottom:1px solid #000000;">
+          <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">${idx + 1}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-family:monospace; font-weight:700; color:#0284c7;">${a.invoiceNumber || a.orderNumber || "-"}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:10px; font-family:monospace;">${fmtDate(a.invoiceDate || a.createdAt)}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-size:10px; font-family:monospace;">${fmtNum(a.invoiceAmount || a.grandTotal)}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-size:10px; font-family:monospace;">${fmtNum(a.previousPaid)}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-size:10px; font-weight:700; font-family:monospace; color:#15803d;">${fmtNum(a.allocatedAmount || a.amount)}</td>
+          <td style="padding:3px 6px; text-align:right; font-size:10px; font-family:monospace; font-weight:600;">${fmtNum(a.remainingBalance)}</td>
+        </tr>
+      `)
+      .join("");
+  } else {
+    tableHeaderHtml = `
+      <tr style="background:#ffffff; border-bottom:1px solid #000000; font-size:9.5px; font-weight:700;">
+        <th style="width:28px; border-right:1px solid #000; padding:4px 2px; text-align:center;">#</th>
+        <th style="border-right:1px solid #000; padding:4px 6px; text-align:left;">Transaction Description / Particulars</th>
+        <th style="width:130px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Payment Mode</th>
+        <th style="width:140px; border-right:1px solid #000; padding:4px 6px; text-align:left;">Reference # / UTR</th>
+        <th style="width:120px; border-right:1px solid #000; padding:4px 6px; text-align:right;">Amount Received (₹)</th>
+        <th style="width:75px; padding:4px 4px; text-align:center;">Status</th>
+      </tr>
+    `;
+
+    tableRowsHtml = `
+      <tr style="border-bottom:1px solid #000000;">
+        <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">1</td>
+        <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-weight:600;">Direct Customer Khata Account Collection</td>
+        <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:9.5px;">${modeName}</td>
+        <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-family:monospace; font-weight:600; color:#0284c7;">${refNumber}</td>
+        <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-size:10px; font-weight:700; font-family:monospace;">${fmtNum(grossAmount)}</td>
+        <td style="padding:3px 4px; text-align:center; font-size:9px; font-weight:700; color:#15803d;">CLEARED</td>
+      </tr>
+    `;
   }
 
-  if (paymentDetails.collectedByName) {
-    referenceDetails.push(
-      `<strong>Collected By:</strong> ${paymentDetails.collectedByName}`,
-    );
-  }
-  if (paymentDetails.paidByName) {
-    referenceDetails.push(
-      `<strong>Authorized By:</strong> ${paymentDetails.paidByName}`,
-    );
-  }
+  // UPI QR Code
+  const upiId = data.upiId || company?.upiId || "saanchi@upi";
+  const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(companyName)}&am=${totalReceivedAmount.toFixed(2)}&cu=INR`;
+  const qrCodeSvg = generateQRCodeSVG(upiString, 85);
 
-  const allocationRows =
-    allocations && allocations.length > 0
-      ? allocations
-          .map(
-            (alloc, idx) => `
-            <tr style="background:${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-                <td style="text-align:center;color:#64748b;font-weight:600;padding:8px 10px;">${idx + 1}</td>
-                <td style="font-weight:700;color:#2980B9;padding:8px 10px;">${alloc.invoiceNumber || alloc.invoiceId || "Bill Settlement"}</td>
-                <td style="text-align:right;padding:8px 10px;color:#475569;">₹${fmtNum(alloc.invoiceTotal || alloc.allocatedAmount)}</td>
-                <td style="text-align:right;font-weight:700;color:#059669;padding:8px 10px;">₹${fmtNum(alloc.allocatedAmount)}</td>
-            </tr>
-        `,
-          )
-          .join("")
-      : isVendor
-      ? `
-            <tr>
-                <td colspan="4" style="text-align:center;padding:12px;color:#64748b;font-style:italic;">
-                    Direct vendor payout disbursement / Adjusted against Supplier Ledger Outstanding
-                </td>
-            </tr>
-        `
-      : `
-            <tr>
-                <td colspan="4" style="text-align:center;padding:12px;color:#64748b;font-style:italic;">
-                    General payment received / Credited to Customer Account Balance
-                </td>
-            </tr>
-        `;
+  const orderDueBalance = orderSummary ? Number(orderSummary.balanceDue || 0) : 0;
+  const orderTotalAmount = orderSummary ? Number(orderSummary.grandTotal || 0) : 0;
 
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8"/>
-<title>${isVendor ? "Vendor Payment Advice" : "Payment Receipt"} - ${receiptNo}</title>
-<style>
+  <meta charset="UTF-8">
+  <title>Payment Receipt - ${receiptNo || "RCP"}</title>
+  <style>
     @page {
-        size: A4 portrait;
-        margin: 10mm;
+      size: A4 portrait;
+      margin: 6mm 8mm;
     }
     * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
     body {
-        background-color: #f1f5f9;
-        display: flex;
-        justify-content: center;
-        padding: 15px 0;
-        color: #1e293b;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif;
+      color: #000000;
+      background: #ffffff;
+      font-size: 10.5px;
+      line-height: 1.25;
     }
-    .receipt-container {
-        width: 190mm;
-        background: #ffffff;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+    .invoice-wrapper {
+      width: 100%;
+      border: 1.5px solid #000000;
+      background: #ffffff;
+      box-sizing: border-box;
     }
-    .header-bar {
-        background: linear-gradient(135deg, #1f618d 0%, #2980B9 100%);
-        color: #ffffff;
-        padding: 18px 22px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .receipt-title {
-        font-size: 20px;
-        font-weight: 800;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-    }
-    .receipt-badge {
-        background: rgba(255, 255, 255, 0.2);
-        border: 1px solid rgba(255, 255, 255, 0.4);
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    .meta-grid {
-        display: grid;
-        grid-template-columns: 1.2fr 1fr;
-        border-bottom: 1px solid #e2e8f0;
-    }
-    .company-cell {
-        padding: 16px 20px;
-        border-right: 1px solid #e2e8f0;
-    }
-    .meta-cell {
-        padding: 16px 20px;
-        background: #f8fafc;
-    }
-    .brand-logo {
-        height: 70px;
-        max-width: 280px;
-        object-fit: contain;
-        display: block;
-        margin-bottom: 8px;
-    }
-    .company-info {
-        font-size: 11px;
-        color: #475569;
-        line-height: 1.45;
-    }
-    .meta-table {
-        width: 100%;
-        font-size: 11.5px;
-    }
-    .meta-table td {
-        padding: 3px 0;
-        vertical-align: top;
-    }
-    .meta-label {
-        font-weight: 700;
-        color: #475569;
-        width: 42%;
-    }
-    .meta-val {
-        color: #0f172a;
-        font-weight: 600;
-    }
-    .customer-strip {
-        padding: 14px 20px;
-        background: #f8fafc;
-        border-bottom: 1px solid #e2e8f0;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
-    }
-    .section-heading {
-        font-size: 10.5px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        color: #2980B9;
-        margin-bottom: 6px;
-    }
-    .customer-name {
-        font-size: 14px;
-        font-weight: 800;
-        color: #0f172a;
-        margin-bottom: 2px;
-    }
-    .customer-info {
-        font-size: 11px;
-        color: #475569;
-        line-height: 1.4;
-    }
-    .amount-highlight-box {
-        margin: 18px 20px;
-        background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-        border: 1.5px solid #86efac;
-        border-radius: 8px;
-        padding: 14px 18px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .amount-label {
-        font-size: 11px;
-        font-weight: 800;
-        text-transform: uppercase;
-        color: #166534;
-        letter-spacing: 0.5px;
-    }
-    .amount-words {
-        font-size: 11.5px;
-        font-weight: 600;
-        color: #15803d;
-        margin-top: 3px;
-    }
-    .amount-value {
-        font-size: 24px;
-        font-weight: 900;
-        color: #166534;
-    }
-    .table-section {
-        padding: 0 20px 16px 20px;
-    }
-    .receipt-table {
-        width: 100%;
-        border-collapse: collapse;
-        border: 1px solid #e2e8f0;
-        font-size: 11px;
-        border-radius: 6px;
-        overflow: hidden;
-    }
-    .receipt-table th {
-        background: #f1f5f9;
-        color: #334155;
-        font-weight: 800;
-        text-transform: uppercase;
-        font-size: 10px;
-        letter-spacing: 0.5px;
-        padding: 8px 10px;
-        border-bottom: 1.5px solid #cbd5e1;
-    }
-    .receipt-table td {
-        border-bottom: 1px solid #e2e8f0;
-    }
-    .summary-grid {
-        padding: 0 20px 18px 20px;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
-    }
-    .info-card {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
-        padding: 12px 14px;
-        font-size: 11px;
-    }
-    .info-card p {
-        margin-bottom: 4px;
-        color: #475569;
-    }
-    .info-card p strong {
-        color: #0f172a;
-    }
-    .footer-bar {
-        border-top: 1px solid #e2e8f0;
-        padding: 14px 20px;
-        background: #f8fafc;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 10px;
-        color: #64748b;
-    }
-    .signature-box {
-        text-align: right;
-    }
-    .signature-line {
-        margin-top: 28px;
-        border-top: 1px solid #94a3b8;
-        padding-top: 4px;
-        font-weight: 700;
-        color: #334155;
-    }
-</style>
+  </style>
 </head>
 <body>
-<div class="receipt-container">
-
-    <!-- HEADER BAR -->
-    <div class="header-bar">
-        <div>
-            <div class="receipt-title">${isOrderReceipt ? "Order Payment Receipt" : isVendor ? "Vendor Payment Advice" : "Payment Receipt"}</div>
-            <div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">DigiOptics Wholesale Management System</div>
-        </div>
-        <div class="receipt-badge">${isOrderReceipt ? (orderSummary?.paymentStatus === "PAID" ? "Fully Paid" : orderSummary?.paymentStatus === "PARTIAL" ? "Part Payment Cleared" : "Payment Due") : isVendor ? "Payment Disbursed" : "Payment Received"}</div>
+  <div class="invoice-wrapper">
+    <!-- Header -->
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 12px; border-bottom:1.5px solid #000000;">
+      <div style="width:130px; min-height:50px; display:flex; align-items:center;">
+        ${finalLogo ? `<img src="${finalLogo}" alt="Logo" style="max-height:55px; max-width:130px; object-fit:contain;" />` : ""}
+      </div>
+      <div style="flex:1; text-align:center; padding:0 10px;">
+        <div style="font-size:13.5px; font-weight:700; margin-bottom:2px;">${isVendor ? "Vendor Payout Voucher" : "Payment Receipt / Voucher"}</div>
+        <div style="font-size:19px; font-weight:800; color:#0284c7; letter-spacing:0.5px; margin-bottom:2px;">${companyName.toUpperCase()}</div>
+        <div style="font-size:9.5px; font-weight:600; line-height:1.25; color:#1e293b; white-space:pre-line;">${companyAddress.toUpperCase()}</div>
+        <div style="font-size:10px; font-weight:600; color:#1e293b; margin-top:1px;">Contact No. ${companyPhone}</div>
+        <div style="font-size:10.5px; font-weight:700; margin-top:2px;">GST No : ${companyGstin}</div>
+      </div>
+      <div style="width:110px; text-align:right;">
+        <div style="font-size:11px; font-weight:700;">Original Copy</div>
+      </div>
     </div>
 
-    <!-- SUPPLIER & RECEIPT METADATA -->
-    <div class="meta-grid">
-        <div class="company-cell">
-            ${(company.logo || data.companyLogo || data.storeLogo) ? `<img src="${company.logo || data.companyLogo || data.storeLogo}" alt="${company.name || 'Company'}" class="brand-logo" />` : (logoDataUrl ? `<img src="${logoDataUrl}" alt="DigiOptics" class="brand-logo" />` : `<div style="font-size:18px;font-weight:800;color:#2980B9;margin-bottom:6px;">${company.name || 'DigiOptics Wholesale'}</div>`)}
-            ${company.name ? `<div style="font-weight:700;color:#0f172a;margin-top:2px;">${company.name}</div>` : ''}
-            <div class="company-info">${company.addressLine1 || "WeWork Eldeco Centre, Block A, Shivalik Colony"}</div>
-            <div class="company-info">${company.addressLine2 || "Malviya Nagar, New Delhi, Delhi 110017"}</div>
-            <div class="company-info" style="margin-top:4px;"><strong>GSTIN:</strong> ${company.gstin || "GST9876543210"} | <strong>Phone:</strong> ${company.phone || "+91 9650560526"}</div>
-        </div>
-        <div class="meta-cell">
-            <table class="meta-table">
-                <tr>
-                    <td class="meta-label">${isOrderReceipt ? "Order / Ref No" : "Voucher / Ref No"}</td>
-                    <td class="meta-val">: ${isOrderReceipt && orderSummary ? orderSummary.orderNumber : receiptNo}</td>
-                </tr>
-                <tr>
-                    <td class="meta-label">${isOrderReceipt ? "Order Date" : "Date & Time"}</td>
-                    <td class="meta-val">: ${isOrderReceipt && orderSummary?.orderDate ? new Date(orderSummary.orderDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : formattedDate}</td>
-                </tr>
-                <tr>
-                    <td class="meta-label">${isOrderReceipt ? "Order Status" : "Payment Mode"}</td>
-                    <td class="meta-val">: <span style="background:#e0f2fe;color:#1f618d;padding:1px 6px;border-radius:4px;font-weight:700;">${isOrderReceipt && orderSummary ? orderSummary.orderStatus : modeName}</span></td>
-                </tr>
-                <tr>
-                    <td class="meta-label">Payment Status</td>
-                    <td class="meta-val">: <span style="color:${isOrderReceipt && orderSummary?.balanceDue > 0 ? '#b91c1c' : '#15803d'};font-weight:700;">${isOrderReceipt && orderSummary ? (orderSummary.balanceDue <= 0 ? "FULLY PAID / SETTLED" : "PARTIAL / BALANCE DUE") : "COMPLETED / CLEARED"}</span></td>
-                </tr>
-            </table>
-        </div>
-    </div>
-
-    <!-- PARTY DETAILS STRIP -->
-    <div class="customer-strip">
-        ${isVendor ? `
-        <div>
-            <div class="section-heading">Paid To (Vendor / Supplier)</div>
-            <div class="customer-name">${vendor.firm || vendor.name || "Supplier"}</div>
-            <div class="customer-info"><strong>Contact Person:</strong> ${vendor.name || "—"}</div>
-            <div class="customer-info"><strong>GSTIN:</strong> ${vendor.gstin || vendor.gstNumber || "Unregistered"}</div>
-            <div class="customer-info"><strong>PAN:</strong> ${vendor.pan || "—"}</div>
-        </div>
-        <div>
-            <div class="section-heading">Contact & Address</div>
-            <div class="customer-info"><strong>Phone:</strong> ${vendor.mobile || "—"}</div>
-            <div class="customer-info"><strong>Email:</strong> ${vendor.email || "—"}</div>
-            <div class="customer-info"><strong>Address:</strong> ${typeof vendor.address === 'object' ? Object.values(vendor.address).filter(Boolean).join(', ') : (vendor.address || "—")}</div>
-        </div>
-        ` : `
-        <div>
-            <div class="section-heading">Received From (Customer)</div>
-            <div class="customer-name">${customer.shopName || customer.ownerName || "Valued Customer"}</div>
-            <div class="customer-info"><strong>Owner Name:</strong> ${customer.ownerName || "—"}</div>
-            <div class="customer-info"><strong>Customer Code:</strong> ${customer.customerCode || "—"}</div>
-            <div class="customer-info"><strong>GSTIN:</strong> ${customer.gstNumber || "—"}</div>
-        </div>
-        <div>
-            <div class="section-heading">Contact & Billing Address</div>
-            <div class="customer-info"><strong>Phone:</strong> ${customer.mobileNo1 || customer.mobile || "—"}</div>
-            <div class="customer-info"><strong>Email:</strong> ${customer.businessEmail || customer.email || "—"}</div>
-            <div class="customer-info"><strong>Address:</strong> ${typeof customer.billToAddress === 'object' ? Object.values(customer.billToAddress).filter(Boolean).join(', ') : (customer.billToAddress || customer.address || "—")}</div>
-        </div>
-        `}
-    </div>
-
-    <!-- AMOUNT HIGHLIGHT BOX -->
-    <div class="amount-highlight-box">
-        <div>
-            <div class="amount-label">${isOrderReceipt ? "Total Order Value in Words" : isVendor ? "Amount Disbursed in Words" : "Amount Received in Words"}</div>
-            <div class="amount-words">${numberToWordsINR(isOrderReceipt && orderSummary ? orderSummary.grandTotal : grossAmount)}</div>
-        </div>
-        <div style="text-align: right;">
-            <div class="amount-label" style="text-align: right;">${isOrderReceipt ? "Total Payments Received" : isVendor ? "Total Amount Paid" : "Total Received"}</div>
-            <div class="amount-value">₹ ${fmtNum(isOrderReceipt && orderSummary ? orderSummary.paidAmount : grossAmount)}</div>
-        </div>
-    </div>
-
-    <!-- PAYMENT / REFERENCE DETAILS & ACCOUNT IMPACT -->
-    <div class="summary-grid">
-        ${isOrderReceipt && orderSummary ? `
-        <div class="info-card">
-            <div class="section-heading">Order Financial Overview</div>
-            <p><strong>Taxable Value:</strong> ₹${fmtNum(orderSummary.taxableAmount)}</p>
-            <p><strong>GST Total:</strong> ₹${fmtNum(orderSummary.gstAmount)}</p>
-            <p><strong>Shipping & Extra:</strong> ₹${fmtNum((orderSummary.shippingCharges || 0) + (orderSummary.otherCharges || 0))}</p>
-            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
-                <p><strong>Total Order Value:</strong> <span style="font-weight:800;color:#0f172a;">₹${fmtNum(orderSummary.grandTotal)}</span></p>
-            </div>
-        </div>
-
-        <div class="info-card">
-            <div class="section-heading">Order Settlement Status</div>
-            <p><strong>Total Order Value:</strong> ₹${fmtNum(orderSummary.grandTotal)}</p>
-            <p><strong>Total Payments Received:</strong> <span style="font-weight:700;color:#15803d;">₹${fmtNum(orderSummary.paidAmount)}</span></p>
-            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
-                <p><strong>Remaining Order Balance Due:</strong> <span style="font-weight:800;color:${orderSummary.balanceDue > 0 ? '#b91c1c' : '#15803d'};">₹${fmtNum(orderSummary.balanceDue)}</span></p>
-                <p style="margin-top:3px;font-size:10.5px;color:#64748b;"><strong>Status:</strong> ${orderSummary.balanceDue <= 0 ? '<span style="color:#15803d;font-weight:700;">Fully Paid / Settled</span>' : '<span style="color:#b91c1c;font-weight:700;">Partially Paid (Pending Balance)</span>'}</p>
-            </div>
-        </div>
-        ` : `
-        <div class="info-card">
-            <div class="section-heading">Transaction & Reference Info</div>
-            <p><strong>Payment Mode:</strong> ${modeName}</p>
-            ${referenceDetails.length > 0 ? referenceDetails.map((d) => `<p>${d}</p>`).join("") : `<p>${isVendor ? "Direct Vendor Payout / Outflow" : "Direct Cash / Account Inflow"}</p>`}
-            ${narration ? `<p style="margin-top:6px;font-style:italic;"><strong>Note:</strong> ${narration}</p>` : ""}
-        </div>
-
-        <div class="info-card">
-            <div class="section-heading">${isVendor ? "Vendor Ledger Position" : "Customer Ledger Position"}</div>
-            ${isVendor ? `
-            <p><strong>Payment Terms:</strong> ${vendor.paymentTerms || 30} Days</p>
-            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
-                <p><strong>Remaining Net Payable:</strong> <span style="font-weight:800;color:${(accountSummary.currentOutstanding || 0) > 0 ? "#b91c1c" : "#15803d"}">₹${fmtNum(accountSummary.currentOutstanding || 0)}</span></p>
-            </div>
-            ` : `
-            <p><strong>Amount Adjusted against Due:</strong> ₹${fmtNum(paymentDetails.adjustedFromCreditUsed || 0)}</p>
-            <p><strong>Added to Advance Deposit (Jama):</strong> ₹${fmtNum(paymentDetails.advanceCredited || (paymentDetails.adjustedFromCreditUsed ? 0 : grossAmount))}</p>
-            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed #cbd5e1;">
-                <p><strong>Current Outstanding Due (Udhaar):</strong> <span style="font-weight:800;color:${(accountSummary.remainingCreditUsed || 0) > 0 ? "#b91c1c" : "#15803d"}">₹${fmtNum(accountSummary.remainingCreditUsed || 0)}</span></p>
-                <p><strong>Available Advance Deposit (Jama):</strong> <span style="font-weight:800;color:#2980B9">₹${fmtNum(accountSummary.customerBalance || 0)}</span></p>
-            </div>
-            `}
-        </div>
-        `}
-    </div>
-
-    <!-- INVOICE / ORDER ALLOCATIONS TABLE -->
-    <div class="table-section">
-        <div class="section-heading" style="margin-bottom:6px;">${isOrderReceipt ? `Payments Received Against Order #${orderSummary?.orderNumber || receiptNo}` : isVendor ? "Purchase Bill & Voucher Settlement Details" : "Invoice Settlement & Order Allocation Details"}</div>
-        <table class="receipt-table">
-            <thead>
-                ${isOrderReceipt ? `
-                <tr>
-                    <th style="width: 6%; text-align:center;">#</th>
-                    <th style="width: 18%; text-align:left;">Payment Date</th>
-                    <th style="width: 26%; text-align:left;">Voucher / Ref No.</th>
-                    <th style="width: 22%; text-align:left;">Payment Mode</th>
-                    <th style="width: 14%; text-align:right;">Amount (₹)</th>
-                    <th style="width: 14%; text-align:center;">Status</th>
-                </tr>
-                ` : `
-                <tr>
-                    <th style="width: 8%; text-align:center;">#</th>
-                    <th style="width: 44%; text-align:left;">${isVendor ? "Purchase / Bill Ref No." : "Invoice / Order Ref No."}</th>
-                    <th style="width: 24%; text-align:right;">${isVendor ? "Bill Amount" : "Invoice Total"}</th>
-                    <th style="width: 24%; text-align:right;">Amount Settled</th>
-                </tr>
-                `}
-            </thead>
-            <tbody>
-                ${isOrderReceipt ? (
-                  orderPayments && orderPayments.length > 0 ? orderPayments.map((p, idx) => `
-                    <tr style="background:${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-                        <td style="text-align:center;color:#64748b;font-weight:600;padding:8px 10px;">${idx + 1}</td>
-                        <td style="padding:8px 10px;color:#334155;">${new Date(p.paymentDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                        <td style="font-weight:700;color:#2980B9;padding:8px 10px;">${p.referenceNumber || p.paymentNumber}</td>
-                        <td style="padding:8px 10px;color:#475569;">${modeLabels[p.paymentMode] || p.paymentMode}</td>
-                        <td style="text-align:right;font-weight:700;color:#059669;padding:8px 10px;">₹${fmtNum(p.amount)}</td>
-                        <td style="text-align:center;padding:8px 10px;"><span style="color:#15803d;font-weight:700;background:#dcfce7;padding:1px 6px;border-radius:4px;font-size:10px;">CLEARED</span></td>
-                    </tr>
-                  `).join("") + `
-                    <tr style="background:#f1f5f9;font-weight:700;border-top:1.5px solid #cbd5e1;">
-                        <td colspan="4" style="text-align:right;padding:8px 10px;color:#1e293b;">Total Payments Received:</td>
-                        <td style="text-align:right;padding:8px 10px;color:#059669;font-size:12px;">₹${fmtNum(orderSummary?.paidAmount || 0)}</td>
-                        <td></td>
-                    </tr>
-                    <tr style="background:#fff1f2;font-weight:700;">
-                        <td colspan="4" style="text-align:right;padding:8px 10px;color:#9f1239;">Remaining Order Balance Due:</td>
-                        <td style="text-align:right;padding:8px 10px;color:#be123c;font-size:12px;">₹${fmtNum(orderSummary?.balanceDue || 0)}</td>
-                        <td></td>
-                    </tr>
-                  ` : `
-                    <tr>
-                        <td colspan="6" style="text-align:center;padding:14px;color:#64748b;font-style:italic;">
-                            No payments recorded yet for this order. Remaining balance of ₹${fmtNum(orderSummary?.grandTotal || 0)} is due.
-                        </td>
-                    </tr>
-                  `
-                ) : allocationRows}
-            </tbody>
+    <!-- Party Details & Receipt Meta 2 Columns -->
+    <div style="display:flex; border-bottom:1.5px solid #000000;">
+      <!-- Left Column: Party Details -->
+      <div style="flex:1.2; padding:6px 10px; border-right:1px solid #000000; font-size:10.5px; line-height:1.35;">
+        <table style="width:100%; border-collapse:collapse;">
+          <tr>
+            <td style="width:85px; font-weight:700; vertical-align:top;">${partyTitle} :</td>
+            <td style="font-weight:800; font-size:11.5px; color:#000;">${partyName.toUpperCase()}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700; vertical-align:top;">Mobile :</td>
+            <td style="font-family:monospace; font-weight:600;">${partyContact}</td>
+          </tr>
+          ${partyGstin && partyGstin !== "URP" ? `
+          <tr>
+            <td style="font-weight:700; vertical-align:top;">GST No :</td>
+            <td style="font-weight:600; font-family:monospace;">${partyGstin}</td>
+          </tr>` : ""}
+          <tr>
+            <td style="font-weight:700; vertical-align:top;">Address :</td>
+            <td style="color:#1e293b;">${partyAddress}</td>
+          </tr>
         </table>
+      </div>
+
+      <!-- Right Column: Receipt Meta Details -->
+      <div style="flex:0.8; padding:6px 10px; font-size:10.5px; line-height:1.35;">
+        <table style="width:100%; border-collapse:collapse;">
+          <tr>
+            <td style="width:95px; font-weight:700;">Receipt No :</td>
+            <td style="font-weight:800; font-family:monospace; font-size:11.5px; color:#0284c7;">${receiptNo || "-"}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700;">Receipt Date :</td>
+            <td style="font-weight:700; font-family:monospace;">${fmtDate(receiptDate)}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700;">Payment Mode :</td>
+            <td style="font-weight:600;">${modeName}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700;">Ref # / UTR :</td>
+            <td style="font-family:monospace; font-weight:600;">${refNumber}</td>
+          </tr>
+        </table>
+      </div>
     </div>
 
-    <!-- FOOTER & SIGNATURE -->
-    <div class="footer-bar">
+    <!-- If Order Receipt, Order Summary Bar -->
+    ${isOrderReceipt && orderSummary ? `
+    <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:6px 12px; border-bottom:1px solid #000000; font-size:10px;">
+      <div>
+        <span style="font-weight:700;">Order Number:</span> <span style="font-family:monospace; font-weight:700; color:#0284c7;">${orderSummary.orderNumber || "-"}</span>
+        &nbsp;|&nbsp; <span style="font-weight:700;">Order Status:</span> <span style="font-weight:700; color:#059669;">${orderSummary.orderStatus || "Submitted"}</span>
+      </div>
+      <div>
+        <span style="font-weight:700;">Order Total:</span> <span style="font-family:monospace; font-weight:700;">₹${fmtNum(orderTotalAmount)}</span>
+        &nbsp;|&nbsp; <span style="font-weight:700;">Remaining Balance Due:</span> <span style="font-family:monospace; font-weight:800; color:${orderDueBalance > 0 ? '#b91c1c' : '#15803d'};">₹${fmtNum(orderDueBalance)}</span>
+      </div>
+    </div>` : ""}
+
+    <!-- Items / Payments Table -->
+    <table style="width:100%; border-collapse:collapse; border-bottom:1.5px solid #000000;">
+      <thead>
+        ${tableHeaderHtml}
+      </thead>
+      <tbody>
+        ${tableRowsHtml}
+        <!-- Integrated Total Row -->
+        <tr style="font-weight:800; font-size:10.5px; border-top:1px solid #000;">
+          <td colspan="5" style="border-right:1px solid #000; padding:4px 6px; text-align:right;">Total Amount Received</td>
+          <td style="border-right:1px solid #000; padding:4px 6px; text-align:right; font-family:monospace; color:#15803d;">₹${fmtNum(totalReceivedAmount)}</td>
+          <td style="padding:4px 4px; text-align:center; font-size:9px; color:#15803d;">PAID</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Bottom Section: Words, Terms, QR Code, Signature -->
+    <div style="display:flex; padding:8px 10px; font-size:9.5px;">
+      <!-- Left Column -->
+      <div style="flex:1.2; padding-right:15px; border-right:1px solid #000000;">
+        <div style="margin-bottom:6px;">
+          <span style="font-weight:700;">Total Amount ( In Words ) :</span><br>
+          <span style="font-weight:800; font-size:10.5px;">${amountInWords}</span>
+        </div>
+        ${narration ? `
+        <div style="margin-bottom:6px;">
+          <span style="font-weight:700;">Payment Remarks / Narration :</span>
+          <div style="font-size:9.5px; color:#1e293b; margin-top:1px;">${narration}</div>
+        </div>` : ""}
         <div>
-            <div>${isVendor ? "Thank you for your partnership!" : "Thank you for your business!"}</div>
-            <div style="margin-top:2px;">This is a system-generated official payment disbursement voucher. No physical signature required.</div>
+          <span style="font-weight:700; text-decoration:underline;">Declaration</span>
+          <div style="font-size:8.5px; color:#1e293b; line-height:1.3; margin-top:2px;">
+            This is an authenticated computer-generated payment voucher and official acknowledgment of money received and credited to the respective customer ledger account.
+          </div>
         </div>
-        <div class="signature-box">
-            <div class="signature-line">For DigiOptics Wholesale</div>
-        </div>
-    </div>
+      </div>
 
-</div>
+      <!-- Right Column -->
+      <div style="flex:0.8; padding-left:15px; display:flex; flex-direction:column; justify-content:space-between;">
+        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px;">
+          <span style="font-weight:700;">Amount Cleared :</span>
+          <span style="font-weight:800; font-family:monospace; color:#15803d;">₹${fmtNum(totalReceivedAmount)}</span>
+        </div>
+        ${isOrderReceipt && orderSummary ? `
+        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px;">
+          <span style="font-weight:700;">Remaining Due :</span>
+          <span style="font-weight:800; font-family:monospace; color:${orderDueBalance > 0 ? '#b91c1c' : '#15803d'};">₹${fmtNum(orderDueBalance)}</span>
+        </div>` : ""}
+
+        <div style="text-align:center; margin:3px 0;">
+          ${qrCodeSvg}
+          <div style="font-size:9px; font-weight:700; margin-top:1px;">Scan To Pay / Verify</div>
+        </div>
+
+        <div style="text-align:right; margin-top:6px;">
+          <div style="font-size:11px; font-weight:800; color:#0284c7;">${companyName.toUpperCase()}</div>
+          <div style="font-size:9.5px; font-weight:700; margin-top:20px;">Authorised Signatory</div>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>`;
 };
 
 /**
- * 2. PAYMENT CONFIRMATION EMAIL HTML TEMPLATE (CUSTOMER)
- * Sent to customer's business email with attached PDF receipt
+ * 2. CUSTOMER PAYMENT CONFIRMATION EMAIL HTML TEMPLATE
  */
 export const generatePaymentEmailHTML = (data) => {
   const {
@@ -684,128 +459,17 @@ export const generatePaymentEmailHTML = (data) => {
     amount,
     receiptDate,
     paymentMode = "CASH",
-    remainingDue = 0,
+    paymentDetails = {},
+    remainingOutstanding = 0,
     availableAdvance = 0,
   } = data;
 
-  const fmtNum = (n) =>
-    Number(n || 0).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
   const formattedDate = receiptDate
     ? new Date(receiptDate).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    : new Date().toLocaleDateString("en-IN");
-
-  return `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-        
-        <!-- Header -->
-        <div style="background: linear-gradient(135deg, #1f618d 0%, #2980B9 100%); padding: 24px 30px; text-align: center; color: #ffffff;">
-            <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.5px;">DigiOptics Wholesale</h1>
-            <p style="margin: 4px 0 0 0; font-size: 13px; opacity: 0.9;">Payment Confirmation & Receipt</p>
-        </div>
-
-        <!-- Body -->
-        <div style="padding: 30px 25px; color: #334155;">
-            
-            <p style="font-size: 15px; margin-top: 0; color: #0f172a;">Dear <strong>${shopName || customerName || "Valued Customer"}</strong>,</p>
-            
-            <p style="font-size: 14px; line-height: 1.6;">
-                We are pleased to inform you that your payment of <strong style="color: #166534; font-size: 16px;">₹${fmtNum(amount)}</strong> has been successfully received and credited to your account.
-            </p>
-
-            <!-- Highlight Card -->
-            <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 8px; padding: 18px 20px; margin: 20px 0; text-align: center;">
-                <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #166534; letter-spacing: 0.5px;">Payment Received</div>
-                <div style="font-size: 28px; font-weight: 900; color: #15803d; margin: 6px 0;">₹ ${fmtNum(amount)}</div>
-                <div style="font-size: 12px; color: #166534;">Receipt No: <strong>${receiptNo}</strong></div>
-            </div>
-
-            <!-- Transaction Summary Table -->
-            <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px;">
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Receipt Number</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #0f172a; text-align: right;">${receiptNo}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Date & Time</td>
-                    <td style="padding: 10px 0; font-weight: 600; color: #0f172a; text-align: right;">${formattedDate}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Payment Mode</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #2980B9; text-align: right;">${paymentMode}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Outstanding Due (Udhaar)</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: ${remainingDue > 0 ? "#b91c1c" : "#15803d"}; text-align: right;">₹${fmtNum(remainingDue)}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Advance Balance (Jama)</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #2980B9; text-align: right;">₹${fmtNum(availableAdvance)}</td>
-                </tr>
-            </table>
-
-            <div style="background: #f8fafc; border-left: 4px solid #2980B9; padding: 12px 16px; border-radius: 4px; margin-top: 25px; font-size: 13px; line-height: 1.5;">
-                📎 <strong>Receipt Attached:</strong> Your official payment receipt PDF is attached to this email for your accounting records.
-            </div>
-
-            <p style="font-size: 13px; color: #64748b; margin-top: 25px; line-height: 1.5;">
-                If you have any questions or require statement clarification, please reach out to our accounts team at <a href="mailto:support@digioptics.com" style="color: #2980B9; text-decoration: none; font-weight: 600;">support@digioptics.com</a> or call <strong>+91 9650560526</strong>.
-            </p>
-
-            <p style="font-size: 14px; margin-bottom: 0; color: #0f172a;">
-                Warm regards,<br/>
-                <strong>DigiOptics Wholesale Accounts Team</strong>
-            </p>
-        </div>
-
-        <!-- Footer -->
-        <div style="background: #f1f5f9; padding: 16px 25px; text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0;">
-            DigiOptics Wholesale • WeWork Eldeco Centre, Malviya Nagar, New Delhi 110017<br/>
-            GSTIN: GST9876543210
-        </div>
-    </div>
-  `;
-};
-
-/**
- * 3. VENDOR PAYMENT DISBURSEMENT EMAIL HTML TEMPLATE
- * Sent to vendor's email address with attached PDF payment advice voucher
- */
-export const generateVendorPaymentEmailHTML = (data) => {
-  const {
-    vendorName,
-    firmName,
-    receiptNo,
-    amount,
-    receiptDate,
-    paymentMode = "BANK_TRANSFER",
-    paymentDetails = {},
-    remainingOutstanding = 0,
-  } = data;
-
-  const fmtNum = (n) =>
-    Number(n || 0).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  const formattedDate = receiptDate
-    ? new Date(receiptDate).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    })
     : new Date().toLocaleDateString("en-IN");
 
   const modeLabels = {
@@ -818,82 +482,74 @@ export const generateVendorPaymentEmailHTML = (data) => {
   };
   const modeText = modeLabels[paymentMode] || paymentMode;
 
-  let refText = "";
-  if (paymentDetails.utrNumber) refText = `UTR: ${paymentDetails.utrNumber}`;
-  else if (paymentDetails.chequeNumber)
-    refText = `Cheque No: ${paymentDetails.chequeNumber}${paymentDetails.bankName ? ` (${paymentDetails.bankName})` : ""}`;
-  else if (paymentDetails.receiverUpiId)
-    refText = `UPI VPA: ${paymentDetails.receiverUpiId}`;
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1.5px solid #000000; padding: 20px;">
+      <h2 style="color: #0284c7; margin-top: 0;">SAANCHI & CO. - Payment Receipt</h2>
+      <p>Dear <strong>${shopName || customerName || "Customer"}</strong>,</p>
+      <p>We gratefully acknowledge receipt of your payment of <strong>₹${fmtNum(amount)}</strong> on <strong>${formattedDate}</strong> via <strong>${modeText}</strong>.</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 15px 0; border: 1px solid #000;">
+        <tr style="border-bottom: 1px solid #000;">
+          <td style="padding: 6px; font-weight: 700; border-right: 1px solid #000;">Receipt / Voucher #</td>
+          <td style="padding: 6px; font-family: monospace;">${receiptNo}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #000;">
+          <td style="padding: 6px; font-weight: 700; border-right: 1px solid #000;">Amount Received</td>
+          <td style="padding: 6px; font-weight: 700; color: #15803d;">₹${fmtNum(amount)}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #000;">
+          <td style="padding: 6px; font-weight: 700; border-right: 1px solid #000;">Remaining Balance Due</td>
+          <td style="padding: 6px; font-weight: 700; color: ${remainingOutstanding > 0 ? "#b91c1c" : "#15803d"};">₹${fmtNum(remainingOutstanding)}</td>
+        </tr>
+      </table>
+      <p style="font-size: 11px; color: #475569;">Your official payment receipt PDF is attached for your accounting records.</p>
+      <p style="margin-bottom: 0;">Warm regards,<br/><strong>SAANCHI & CO. Accounts Team</strong></p>
+    </div>
+  `;
+};
+
+/**
+ * 3. VENDOR PAYMENT DISBURSEMENT EMAIL HTML TEMPLATE
+ */
+export const generateVendorPaymentEmailHTML = (data) => {
+  const {
+    vendorName,
+    firmName,
+    receiptNo,
+    amount,
+    receiptDate,
+    paymentMode = "BANK_TRANSFER",
+    remainingOutstanding = 0,
+  } = data;
+
+  const formattedDate = receiptDate
+    ? new Date(receiptDate).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    })
+    : new Date().toLocaleDateString("en-IN");
 
   return `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-        
-        <!-- Header -->
-        <div style="background: linear-gradient(135deg, #1f618d 0%, #2980B9 100%); padding: 24px 30px; text-align: center; color: #ffffff;">
-            <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.5px;">DigiOptics Wholesale</h1>
-            <p style="margin: 4px 0 0 0; font-size: 13px; opacity: 0.9;">Vendor Payment Advice & Disbursement Notice</p>
-        </div>
-
-        <!-- Body -->
-        <div style="padding: 30px 25px; color: #334155;">
-            
-            <p style="font-size: 15px; margin-top: 0; color: #0f172a;">Dear <strong>${firmName || vendorName || "Valued Supplier"}</strong>,</p>
-            
-            <p style="font-size: 14px; line-height: 1.6;">
-                We are pleased to inform you that a payment of <strong style="color: #2980B9; font-size: 16px;">₹${fmtNum(amount)}</strong> has been successfully processed and disbursed to your account by <strong>DigiOptics Wholesale</strong>.
-            </p>
-
-            <!-- Highlight Card -->
-            <div style="background: #f0f9ff; border: 1.5px solid #7dd3fc; border-radius: 8px; padding: 18px 20px; margin: 20px 0; text-align: center;">
-                <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #1f618d; letter-spacing: 0.5px;">Payment Disbursed</div>
-                <div style="font-size: 28px; font-weight: 900; color: #2980B9; margin: 6px 0;">₹ ${fmtNum(amount)}</div>
-                <div style="font-size: 12px; color: #1f618d;">Voucher Ref: <strong>${receiptNo}</strong></div>
-            </div>
-
-            <!-- Transaction Summary Table -->
-            <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px;">
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Voucher / Ref Number</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #0f172a; text-align: right;">${receiptNo}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Disbursement Date</td>
-                    <td style="padding: 10px 0; font-weight: 600; color: #0f172a; text-align: right;">${formattedDate}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Payment Mode</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: #2980B9; text-align: right;">${modeText}</td>
-                </tr>
-                ${refText ? `
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Bank / Ref Info</td>
-                    <td style="padding: 10px 0; font-weight: 600; color: #0f172a; text-align: right;">${refText}</td>
-                </tr>` : ""}
-                <tr>
-                    <td style="padding: 10px 0; color: #64748b; font-weight: 600;">Remaining Balance Payable</td>
-                    <td style="padding: 10px 0; font-weight: 700; color: ${remainingOutstanding > 0 ? "#b91c1c" : "#15803d"}; text-align: right;">₹${fmtNum(remainingOutstanding)}</td>
-                </tr>
-            </table>
-
-            <div style="background: #f8fafc; border-left: 4px solid #2980B9; padding: 12px 16px; border-radius: 4px; margin-top: 25px; font-size: 13px; line-height: 1.5;">
-                📎 <strong>Payment Advice Attached:</strong> Your official payment voucher / disbursement receipt PDF is attached with this email for your accounting & GST records.
-            </div>
-
-            <p style="font-size: 13px; color: #64748b; margin-top: 25px; line-height: 1.5;">
-                If you have any questions or require account reconciliation, please contact our finance desk at <a href="mailto:support@digioptics.com" style="color: #2980B9; text-decoration: none; font-weight: 600;">support@digioptics.com</a> or call <strong>+91 9650560526</strong>.
-            </p>
-
-            <p style="font-size: 14px; margin-bottom: 0; color: #0f172a;">
-                Warm regards,<br/>
-                <strong>DigiOptics Wholesale Accounts Team</strong>
-            </p>
-        </div>
-
-        <!-- Footer -->
-        <div style="background: #f1f5f9; padding: 16px 25px; text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0;">
-            DigiOptics Wholesale • WeWork Eldeco Centre, Malviya Nagar, New Delhi 110017<br/>
-            GSTIN: GST9876543210
-        </div>
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff; border: 1.5px solid #000000; padding: 20px;">
+      <h2 style="color: #0284c7; margin-top: 0;">SAANCHI & CO. - Payment Disbursement Advice</h2>
+      <p>Dear <strong>${firmName || vendorName || "Valued Supplier"}</strong>,</p>
+      <p>A payment of <strong>₹${fmtNum(amount)}</strong> has been disbursed to your account on <strong>${formattedDate}</strong>.</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 15px 0; border: 1px solid #000;">
+        <tr style="border-bottom: 1px solid #000;">
+          <td style="padding: 6px; font-weight: 700; border-right: 1px solid #000;">Voucher Ref #</td>
+          <td style="padding: 6px; font-family: monospace;">${receiptNo}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #000;">
+          <td style="padding: 6px; font-weight: 700; border-right: 1px solid #000;">Disbursed Amount</td>
+          <td style="padding: 6px; font-weight: 700; color: #15803d;">₹${fmtNum(amount)}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #000;">
+          <td style="padding: 6px; font-weight: 700; border-right: 1px solid #000;">Remaining Balance Payable</td>
+          <td style="padding: 6px; font-weight: 700;">₹${fmtNum(remainingOutstanding)}</td>
+        </tr>
+      </table>
+      <p style="font-size: 11px; color: #475569;">Your official payment advice voucher PDF is attached.</p>
+      <p style="margin-bottom: 0;">Warm regards,<br/><strong>SAANCHI & CO. Finance Desk</strong></p>
     </div>
   `;
 };

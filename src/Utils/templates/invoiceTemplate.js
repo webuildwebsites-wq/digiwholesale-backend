@@ -3,339 +3,277 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-let logoDataUrl = '';
+let staticLogoDataUrl = '';
 try {
     const logoBase64 = readFileSync(
         join(__dirname, '../../../public/DigiOptics.png'),
     ).toString('base64');
-    logoDataUrl = `data:image/png;base64,${logoBase64}`;
+    staticLogoDataUrl = `data:image/png;base64,${logoBase64}`;
 } catch {
-    logoDataUrl = '';
+    staticLogoDataUrl = '';
 }
+
+function numberToWordsINR(num) {
+    const n = Math.round(Number(num || 0));
+    if (!n || isNaN(n)) return 'Zero Rupees Only';
+
+    const a = [
+        '', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ',
+        'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ',
+        'Seventeen ', 'Eighteen ', 'Nineteen ',
+    ];
+    const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+    function inWords(val) {
+        let str = '';
+        if (val > 99) {
+            str += a[Math.floor(val / 100)] + 'Hundred ';
+            val %= 100;
+        }
+        if (val > 19) {
+            str += b[Math.floor(val / 10)] + (val % 10 !== 0 ? ' ' + a[val % 10] : ' ');
+        } else if (val > 0) {
+            str += a[val];
+        }
+        return str;
+    }
+
+    let crore = Math.floor(n / 10000000);
+    let remainder = n % 10000000;
+    let lakh = Math.floor(remainder / 100000);
+    remainder %= 100000;
+    let thousand = Math.floor(remainder / 1000);
+    remainder %= 1000;
+    let hundreds = remainder;
+
+    let words = '';
+    if (crore > 0) words += inWords(crore) + 'Crore ';
+    if (lakh > 0) words += inWords(lakh) + 'Lakh ';
+    if (thousand > 0) words += inWords(thousand) + 'Thousand ';
+    if (hundreds > 0) words += inWords(hundreds);
+
+    return (words.trim() ? words.trim() : 'Zero') + ' Rupees Only';
+}
+
+const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : '-');
 
 export const generateVendorOrderInvoiceHTML = (data) => {
     const {
         invoiceNo,
         orderDate,
         receivedDate,
-        vendorName,
-        vendorAddress,
-        vendorPhone,
-        vendorEmail,
-        vendorGstin,
+        vendorName = 'Vendor Partner',
+        vendorAddress = '-',
+        vendorPhone = '-',
+        vendorEmail = '-',
+        vendorGstin = 'URP',
         companyName = 'DigiOptics Wholesale',
         companyAddress = 'WeWork Eldeco Centre, Block A, Shivalik Colony, Malviya Nagar, New Delhi 110017',
         companyPhone = '+91 9650560526',
         companyEmail = 'support@digioptics.com',
         companyGstin = 'GST9876543210',
+        companyLogo = '',
         items = [],
         subTotal = 0,
         gstTotal = 0,
         total = 0,
     } = data;
 
-    const orderObj = orderDate ? new Date(orderDate) : new Date();
-    const receivedObj = receivedDate ? new Date(receivedDate) : new Date();
+    const finalLogo = (companyLogo && String(companyLogo).trim()) || staticLogoDataUrl;
+    const amountInWords = numberToWordsINR(total);
 
-    const formattedOrderDate = orderObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-    const formattedReceivedDate = receivedObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-    const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
+    let totalQty = 0;
     const itemsRows = items
-        .map(
-            (item, i) => `
-    <tr style="background:${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
-      <td style="text-align:center;color:#64748b;font-weight:600;">${i + 1}</td>
-      <td style="text-align:center;font-family:monospace;font-weight:700;color:#0284c7;">${item.productCode || '—'}</td>
-      <td style="text-align:center;">
-        <span class="cat-pill">${item.category || '—'}</span>
-      </td>
-      <td style="text-align:left;font-weight:700;color:#0f172a;">${item.name || '—'}</td>
-      <td style="text-align:center;font-weight:700;color:#0f172a;">${item.quantity || 0}</td>
-      <td style="text-align:right;color:#334155;">₹ ${fmtNum(item.price)}</td>
-      <td style="text-align:center;color:#64748b;">${item.gst || 0}%</td>
-      <td style="text-align:right;font-weight:700;color:#0f172a;">₹ ${fmtNum(item.total)}</td>
-    </tr>
-  `,
-        )
+        .map((item, i) => {
+            const qty = Number(item.quantity || item.qty || 1);
+            totalQty += qty;
+            const rate = Number(item.buyingPrice || item.price || 0);
+            const amt = Number(item.totalAmount || (rate * qty));
+            const tax = Number(item.taxAmount || 0);
+
+            return `
+        <tr style="border-bottom:1px solid #000000;">
+          <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">${i + 1}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; text-align:left;">
+            <div style="font-weight:700; font-size:10px; color:#000; text-transform:uppercase;">${item.itemName || 'Optical Item'}</div>
+            ${item.productCode ? `<div style="font-size:9px; color:#334155; font-family:monospace;">Code: ${item.productCode}</div>` : ''}
+          </td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:9.5px;">${item.category || '-'}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-family:monospace; font-size:9.5px;">${item.hsnSac || '90015000'}</td>
+          <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px; font-weight:600;">${qty}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:right; font-family:monospace; font-size:10px;">${fmtNum(rate)}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:right; font-family:monospace; font-size:10px;">${fmtNum(tax)}</td>
+          <td style="padding:3px 6px; text-align:right; font-weight:700; font-family:monospace; font-size:10px;">${fmtNum(amt)}</td>
+        </tr>
+      `;
+        })
         .join('');
 
     return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Vendor Purchase Invoice - ${invoiceNo || 'DigiOptics'}</title>
-<style>
-@page {
-    size: A4 portrait;
-    margin: 12mm 10mm;
-}
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    font-size: 11.5px;
-    color: #1e293b;
-    background: #ffffff;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-}
-.invoice {
-    width: 100%;
-    max-width: 800px;
-    margin: 0 auto;
-    border: 1px solid #cbd5e1;
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-/* HEADER */
-.header-bar {
-    background: linear-gradient(135deg, #1b6496, #0284c7);
-    color: #ffffff;
-    padding: 12px 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.brand-group {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.brand-logo {
-    height: 75px;
-    max-width: 320px;
-    object-fit: contain;
-    display: block;
-}
-.header-title h1 {
-    font-size: 16px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-}
-.header-title p {
-    font-size: 10px;
-    opacity: 0.9;
-}
-.invoice-badge {
-    text-align: right;
-}
-.invoice-badge .pill {
-    background: #ffffff;
-    color: #0369a1;
-    font-size: 12px;
-    font-weight: 800;
-    padding: 4px 12px;
-    border-radius: 20px;
-    display: inline-block;
-}
-.invoice-badge .num {
-    margin-top: 4px;
-    font-size: 10.5px;
-    opacity: 0.95;
-}
-
-/* DATES & METADATA */
-.meta-strip {
-    display: flex;
-    justify-content: space-between;
-    background: #f8fafc;
-    border-bottom: 1px solid #e2e8f0;
-    padding: 8px 16px;
-    font-size: 11px;
-}
-
-/* GRID */
-.grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    border-bottom: 1px solid #e2e8f0;
-}
-.grid-cell {
-    padding: 12px 16px;
-}
-.grid-cell:first-child {
-    border-right: 1px solid #e2e8f0;
-}
-.cell-heading {
-    font-size: 10px;
-    font-weight: 800;
-    text-transform: uppercase;
-    color: #0284c7;
-    margin-bottom: 6px;
-}
-.cell-name {
-    font-size: 13px;
-    font-weight: 800;
-    color: #0f172a;
-    margin-bottom: 4px;
-}
-.cell-text {
-    font-size: 10.5px;
-    color: #475569;
-    line-height: 1.4;
-}
-
-/* TABLE */
-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-th {
-    background: #1b6496;
-    color: #ffffff;
-    font-weight: 700;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    padding: 7px 6px;
-    border: none;
-    border-right: 1px solid rgba(255, 255, 255, 0.15);
-}
-th:last-child { border-right: none; }
-td {
-    padding: 6px 6px;
-    border-bottom: 1px solid #e2e8f0;
-    border-right: 1px solid #f1f5f9;
-    font-size: 10.5px;
-    vertical-align: middle;
-}
-td:last-child { border-right: none; }
-.cat-pill {
-    background: #e0f2fe;
-    color: #0369a1;
-    font-size: 9px;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 4px;
-    text-transform: uppercase;
-}
-
-/* SUMMARY */
-.summary-container {
-    display: flex;
-    justify-content: flex-end;
-    background: #ffffff;
-    border-bottom: 1px solid #e2e8f0;
-}
-.summary-table {
-    width: 45%;
-}
-.summary-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 6px 16px;
-    font-size: 11px;
-    color: #334155;
-    border-bottom: 1px solid #f1f5f9;
-}
-.summary-row.total {
-    background: linear-gradient(135deg, #1b6496, #0284c7);
-    color: #ffffff;
-    font-weight: 800;
-    font-size: 13px;
-    padding: 8px 16px;
-    border-bottom: none;
-}
-
-/* FOOTER */
-.footer {
-    padding: 8px 16px;
-    background: #f8fafc;
-    text-align: center;
-    font-size: 9.5px;
-    color: #64748b;
-}
-</style>
+  <meta charset="UTF-8">
+  <title>Vendor Purchase Invoice - ${invoiceNo || 'DigiOptics'}</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 6mm 8mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif;
+      color: #000000;
+      background: #ffffff;
+      font-size: 10.5px;
+      line-height: 1.25;
+    }
+    .invoice-wrapper {
+      width: 100%;
+      border: 1.5px solid #000000;
+      background: #ffffff;
+      box-sizing: border-box;
+    }
+  </style>
 </head>
 <body>
-
-<div class="invoice">
-
-    <!-- HEADER -->
-    <div class="header-bar">
-        <div class="brand-group">
-            ${(data.companyLogo || data.storeLogo || data.logoUrl || logoDataUrl) ? `<img src="${data.companyLogo || data.storeLogo || data.logoUrl || logoDataUrl}" alt="${companyName || 'Company'}" class="brand-logo" />` : `<div style="font-size:18px;font-weight:800;color:#0284c7;">${companyName}</div>`}
-        </div>
-        <div class="invoice-badge">
-            <div class="pill">Purchase Invoice</div>
-            <div class="num">Invoice #: <strong>${invoiceNo || '—'}</strong></div>
-        </div>
+  <div class="invoice-wrapper">
+    <!-- Header -->
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 12px; border-bottom:1.5px solid #000000;">
+      <div style="width:130px; min-height:50px; display:flex; align-items:center;">
+        ${finalLogo ? `<img src="${finalLogo}" alt="Logo" style="max-height:55px; max-width:130px; object-fit:contain;" />` : ''}
+      </div>
+      <div style="flex:1; text-align:center; padding:0 10px;">
+        <div style="font-size:13.5px; font-weight:700; margin-bottom:2px;">Purchase Tax Invoice</div>
+        <div style="font-size:19px; font-weight:800; color:#0284c7; letter-spacing:0.5px; margin-bottom:2px;">${companyName.toUpperCase()}</div>
+        <div style="font-size:9.5px; font-weight:600; line-height:1.25; color:#1e293b; white-space:pre-line;">${companyAddress.toUpperCase()}</div>
+        <div style="font-size:10px; font-weight:600; color:#1e293b; margin-top:1px;">Contact No. ${companyPhone} | ${companyEmail}</div>
+        <div style="font-size:10.5px; font-weight:700; margin-top:2px;">GST No : ${companyGstin}</div>
+      </div>
+      <div style="width:110px; text-align:right;">
+        <div style="font-size:11px; font-weight:700;">Original Copy</div>
+      </div>
     </div>
 
-    <!-- DATES -->
-    <div class="meta-strip">
-        <div>📅 Order Date: <strong>${formattedOrderDate}</strong></div>
-        <div>📥 Inward / Received Date: <strong>${formattedReceivedDate}</strong></div>
-        <div>📦 Total Line Items: <strong>${items.length}</strong></div>
+    <!-- Vendor & Purchase Info 2 Columns -->
+    <div style="display:flex; border-bottom:1.5px solid #000000;">
+      <!-- Left Column: Vendor Details -->
+      <div style="flex:1.2; padding:6px 10px; border-right:1px solid #000000; font-size:10.5px; line-height:1.35;">
+        <table style="width:100%; border-collapse:collapse;">
+          <tr>
+            <td style="width:90px; font-weight:700; vertical-align:top;">Vendor Name :</td>
+            <td style="font-weight:800; font-size:11.5px; color:#000;">${vendorName.toUpperCase()}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700; vertical-align:top;">Mobile / Tel :</td>
+            <td style="font-family:monospace; font-weight:600;">${vendorPhone}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700; vertical-align:top;">GST No :</td>
+            <td style="font-weight:600; font-family:monospace;">${vendorGstin}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700; vertical-align:top;">Address :</td>
+            <td style="color:#1e293b;">${vendorAddress}</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Right Column: Invoice Details -->
+      <div style="flex:0.8; padding:6px 10px; font-size:10.5px; line-height:1.35;">
+        <table style="width:100%; border-collapse:collapse;">
+          <tr>
+            <td style="width:95px; font-weight:700;">Invoice No :</td>
+            <td style="font-weight:800; font-family:monospace; font-size:11.5px;">${invoiceNo || 'PUR-001'}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700;">Order Date :</td>
+            <td style="font-weight:700; font-family:monospace;">${fmtDate(orderDate)}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700;">Received Date :</td>
+            <td style="font-family:monospace;">${fmtDate(receivedDate || orderDate)}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:700;">Status :</td>
+            <td style="font-weight:700; color:#15803d;">COMPLETED & RECEIVED</td>
+          </tr>
+        </table>
+      </div>
     </div>
 
-    <!-- GRID -->
-    <div class="grid">
-        <div class="grid-cell">
-            <div class="cell-heading">Vendor Details (Supplier)</div>
-            <div class="cell-name">${vendorName || '—'}</div>
-            <div class="cell-text">${vendorAddress || '—'}</div>
-            <div class="cell-text">📞 ${vendorPhone || '—'} | ✉️ ${vendorEmail || '—'}</div>
-            ${vendorGstin ? `<div class="cell-text" style="margin-top:3px;"><strong>GSTIN:</strong> ${vendorGstin}</div>` : ''}
-        </div>
-        <div class="grid-cell">
-            <div class="cell-heading">Billed & Shipped To (Buyer)</div>
-            <div class="cell-name">${companyName}</div>
-            <div class="cell-text">${companyAddress}</div>
-            <div class="cell-text">📞 ${companyPhone} | ✉️ ${companyEmail}</div>
-            ${companyGstin ? `<div class="cell-text" style="margin-top:3px;"><strong>GSTIN:</strong> ${companyGstin}</div>` : ''}
-        </div>
-    </div>
-
-    <!-- ITEMS TABLE -->
-    <table>
-        <thead>
-            <tr>
-                <th style="width:4%;">#</th>
-                <th style="width:14%;">Product Code</th>
-                <th style="width:14%;">Category</th>
-                <th style="width:30%;text-align:left;">Item Name</th>
-                <th style="width:8%;">Qty</th>
-                <th style="width:10%;text-align:right;">Price</th>
-                <th style="width:8%;">GST %</th>
-                <th style="width:12%;text-align:right;">Total Amount</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${itemsRows}
-        </tbody>
+    <!-- Items Table -->
+    <table style="width:100%; border-collapse:collapse; border-bottom:1.5px solid #000000;">
+      <thead>
+        <tr style="background:#ffffff; border-bottom:1px solid #000000; font-size:9.5px; font-weight:700;">
+          <th style="width:26px; border-right:1px solid #000; padding:4px 2px; text-align:center;">Sn.</th>
+          <th style="border-right:1px solid #000; padding:4px 6px; text-align:left;">Material / Product Description</th>
+          <th style="width:80px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Category</th>
+          <th style="width:65px; border-right:1px solid #000; padding:4px 4px; text-align:center;">HSN/SAC</th>
+          <th style="width:34px; border-right:1px solid #000; padding:4px 2px; text-align:center;">Qty</th>
+          <th style="width:75px; border-right:1px solid #000; padding:4px 4px; text-align:right;">Rate (₹)</th>
+          <th style="width:75px; border-right:1px solid #000; padding:4px 4px; text-align:right;">Tax (₹)</th>
+          <th style="width:85px; padding:4px 6px; text-align:right;">Total (₹)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsRows}
+        <!-- Integrated Totals -->
+        <tr style="border-top:1px solid #000;">
+          <td colspan="4" style="border-right:1px solid #000; border-bottom:1px solid #000;"></td>
+          <td colspan="3" style="border-right:1px solid #000; border-bottom:1px solid #000; padding:3px 6px; font-weight:700; text-align:right;">Subtotal (Taxable)</td>
+          <td style="border-bottom:1px solid #000; padding:3px 6px; text-align:right; font-family:monospace; font-weight:600;">${fmtNum(subTotal)}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #000;">
+          <td colspan="4" style="border-right:1px solid #000; border-bottom:1px solid #000;"></td>
+          <td colspan="3" style="border-right:1px solid #000; border-bottom:1px solid #000; padding:3px 6px; font-weight:700; text-align:right;">GST Total</td>
+          <td style="border-bottom:1px solid #000; padding:3px 6px; text-align:right; font-family:monospace; font-weight:600;">${fmtNum(gstTotal)}</td>
+        </tr>
+        <tr style="font-weight:800; font-size:10.5px; border-bottom:1.5px solid #000000;">
+          <td colspan="4" style="border-right:1px solid #000; padding:4px 6px; text-align:center;">Total</td>
+          <td style="border-right:1px solid #000; padding:4px 2px; text-align:center;">${totalQty}</td>
+          <td colspan="2" style="border-right:1px solid #000;"></td>
+          <td style="padding:4px 6px; text-align:right; font-family:monospace;">${fmtNum(total)}</td>
+        </tr>
+      </tbody>
     </table>
 
-    <!-- SUMMARY -->
-    <div class="summary-container">
-        <div class="summary-table">
-            <div class="summary-row">
-                <span>Sub-Total</span>
-                <span>₹ ${fmtNum(subTotal)}</span>
-            </div>
-            <div class="summary-row">
-                <span>Total GST</span>
-                <span>₹ ${fmtNum(gstTotal)}</span>
-            </div>
-            <div class="summary-row total">
-                <span>Grand Total</span>
-                <span>₹ ${fmtNum(total)}</span>
-            </div>
+    <!-- Bottom Section: Words, Terms, Signatures -->
+    <div style="display:flex; padding:6px 10px; font-size:9.5px;">
+      <!-- Left Column -->
+      <div style="flex:1.2; padding-right:15px; border-right:1px solid #000000;">
+        <div style="margin-bottom:6px;">
+          <span style="font-weight:700;">Total Purchase Value ( In Words ) :</span><br>
+          <span style="font-weight:800; font-size:10px;">${amountInWords}</span>
         </div>
+        <div>
+          <span style="font-weight:700; text-decoration:underline;">Declaration</span>
+          <div style="font-size:8.5px; color:#1e293b; line-height:1.3; margin-top:2px;">
+            This is an authenticated computer-generated purchase order and tax document reflecting optical supplies procured and verified under GST regulations.
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column -->
+      <div style="flex:0.8; padding-left:15px; display:flex; flex-direction:column; justify-content:space-between;">
+        <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:10px;">
+          <span style="font-weight:700;">Grand Total :</span>
+          <span style="font-weight:800; font-family:monospace; color:#0284c7;">₹${fmtNum(total)}</span>
+        </div>
+
+        <div style="text-align:right; margin-top:20px;">
+          <div style="font-size:11px; font-weight:800; color:#0284c7;">${companyName.toUpperCase()}</div>
+          <div style="font-size:9.5px; font-weight:700; margin-top:25px;">Authorised Signatory</div>
+        </div>
+      </div>
     </div>
-
-    <!-- FOOTER -->
-    <div class="footer">
-        This is an authenticated computer-generated vendor purchase document.
-    </div>
-
-</div>
-
+  </div>
 </body>
 </html>`;
 };

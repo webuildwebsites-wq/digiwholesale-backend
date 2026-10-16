@@ -16,6 +16,7 @@ import {
 } from "../../../Utils/response/responseHandler.js";
 import generatePDF from "../../services/pdfService.js";
 import { bucket } from "../../config/bucket/gcs.js";
+import { generateCustomerStatementHTML } from "../../../Utils/templates/customerStatementTemplate.js";
 
 export const parseCreditDays = (cd) => {
   if (!cd) return 0;
@@ -249,11 +250,13 @@ export const getCustomerLedgerStatement = async (req, res) => {
     }
     const wholesalerProfile = {
       tenantId: tenantInfo?.tenantId || activeTenantId || "DEFAULT",
-      companyName: tenantInfo?.companyName || tenantInfo?.name || "Digi-Optics Wholesaler",
-      email: tenantInfo?.email || "",
-      phone: tenantInfo?.phone || tenantInfo?.mobile || "",
-      gstin: tenantInfo?.gstNumber || tenantInfo?.gstin || "",
-      address: tenantInfo?.address || "",
+      companyName: tenantInfo?.storeInformation?.storeName || tenantInfo?.companyName || tenantInfo?.name || "Digi-Optics Wholesaler",
+      email: tenantInfo?.storeInformation?.email || tenantInfo?.email || "",
+      phone: tenantInfo?.storeInformation?.phone || tenantInfo?.owner?.mobile || tenantInfo?.phone || tenantInfo?.mobile || "",
+      gstin: tenantInfo?.storeInformation?.gstin || tenantInfo?.gstNumber || tenantInfo?.gstin || "",
+      address: tenantInfo?.storeInformation?.address || tenantInfo?.address || "",
+      logo: tenantInfo?.storeInformation?.storeLogo || tenantInfo?.logo || "",
+      bankDetails: tenantInfo?.bankDetails || null,
     };
 
     // 1. Fetch all customer bulk orders for Part-Payment & Order Status tracking
@@ -1515,75 +1518,7 @@ const uploadLedgerPDFToGCS = async (buffer, fileName) => {
 };
 
 const buildLedgerStatementHTML = (data) => {
-  const {
-    customerName, ownerName, mobile, email, gstin, addr,
-    isGST, ledgerCode, creditLimit, creditDays, creditUsed,
-    advanceAmount, creditPercentage, availableCredit,
-    totalDebit, totalCredit, generatedOn, wholesalerName,
-    transactions,
-  } = data;
-
-  const rowsHtml = (!transactions || transactions.length === 0)
-    ? `<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748B;font-size:12px;">No transactions recorded for this customer account.</td></tr>`
-    : transactions.map((t, idx) => {
-        const d = t.transactionDate ? new Date(t.transactionDate).toLocaleDateString("en-IN") : "—";
-        const orderTotal = Number(t.orderGrandTotal != null ? t.orderGrandTotal : t.debit || 0);
-        const paidAmount = Number(t.orderPaidAmount != null ? t.orderPaidAmount : t.credit || 0);
-        const dueAmount  = Number(t.orderBalanceDue != null ? t.orderBalanceDue : Math.max(0, orderTotal - paidAmount));
-        const debit  = orderTotal > 0 ? `Rs.${orderTotal.toLocaleString("en-IN")}` : (t.debit > 0 ? `Rs.${Number(t.debit).toLocaleString("en-IN")}` : "—");
-        const credit = paidAmount > 0 ? `Rs.${paidAmount.toLocaleString("en-IN")}` : (t.credit > 0 ? `Rs.${Number(t.credit).toLocaleString("en-IN")}` : "—");
-        const bal = dueAmount > 0 ? `Rs.${dueAmount.toLocaleString("en-IN")} (Due)` : orderTotal > 0 ? "Paid (Rs.0)" : t.runningBalance > 0 ? `Rs.${Number(t.runningBalance).toLocaleString("en-IN")} (Due)` : "Rs.0";
-        const ref = t.orderNumber || t.referenceNumber || t.voucherId || "—";
-        const particulars = t.narration || t.description || t.voucherType || (t.orderNumber ? `Wholesale Order #${t.orderNumber}` : "Sales Invoice");
-
-        const paymentsRow = (t.orderPayments && t.orderPayments.length > 0)
-          ? `<tr style="background:#f8fafc;"><td colspan="7" style="padding:4px 12px;font-size:10px;color:#64748B;"><strong>Grouped Payment History:</strong> ${t.orderPayments.map(p => `${p.referenceNumber || p.paymentNumber || "Payment"}: Rs.${Number(p.amount || 0).toLocaleString("en-IN")} (${p.paymentMode || "Paid"})`).join(" | ")}</td></tr>`
-          : "";
-
-        return `<tr>
-          <td style="text-align:center;color:#64748b;">${idx + 1}</td>
-          <td style="white-space:nowrap;">${d}</td>
-          <td style="font-family:monospace;font-weight:600;color:#0284c7;">${ref}</td>
-          <td>${particulars}</td>
-          <td style="text-align:right;color:#b91c1c;font-weight:600;">${debit}</td>
-          <td style="text-align:right;color:#15803d;font-weight:600;">${credit}</td>
-          <td style="text-align:right;font-weight:700;">${bal}</td>
-        </tr>${paymentsRow}`;
-      }).join("");
-
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ledger - ${customerName}</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:11px;color:#1e293b;padding:24px;}
-  .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0284c7;padding-bottom:12px;margin-bottom:16px;}
-  .title{font-size:18px;font-weight:800;color:#0f172a;}
-  .sub{color:#64748b;font-size:11px;margin-top:2px;}
-  .badge{display:inline-block;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;}
-  .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
-  .ib{border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;font-size:11px;line-height:1.7;}
-  .ib h4{font-size:10px;font-weight:700;color:#0284c7;text-transform:uppercase;margin-bottom:4px;}
-  .kr{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
-  .kc{border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;font-size:11px;}
-  .kc .lbl{color:#64748b;font-size:10px;}.kc .val{font-weight:700;font-size:13px;margin-top:2px;}
-  table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;}
-  th{background:#f1f5f9;text-align:left;padding:7px 8px;border-bottom:1px solid #cbd5e1;font-weight:700;color:#475569;font-size:10px;text-transform:uppercase;}
-  td{padding:7px 8px;border-bottom:1px solid #f1f5f9;}
-  .ftr{margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between;}
-</style></head><body>
-<div class="hdr"><div><div class="title">${customerName}</div><div class="sub">Customer Ledger Statement &amp; Account History</div><div class="sub" style="margin-top:4px;">Wholesaler: <strong>${wholesalerName||"—"}</strong></div></div>
-<div style="text-align:right;"><div class="badge">${isGST?`GST: ${gstin}`:"Non-GST"}</div><div style="font-size:10px;color:#64748b;margin-top:6px;">Generated: ${generatedOn}</div><div style="font-size:10px;color:#64748b;">Ledger: <strong>${ledgerCode}</strong></div></div></div>
-<div class="g2"><div class="ib"><h4>Customer Details</h4><div><strong>${customerName}</strong> (Owner: ${ownerName||"—"})</div><div>Mobile: ${mobile||"—"} | Email: ${email||"—"}</div><div>Address: ${addr||"—"}</div><div>Tax: <strong>${isGST?`GST (${gstin})`:"Non-GST"}</strong></div></div>
-<div class="ib"><h4>Credit Terms</h4><div>Ledger: <strong>${ledgerCode}</strong></div><div>Limit: <strong>Rs.${Number(creditLimit).toLocaleString("en-IN")}</strong> (${creditDays||30} days)</div><div>Utilized: <strong>${creditPercentage}%</strong> | Available: Rs.${Number(availableCredit).toLocaleString("en-IN")}</div><div>Current: <strong>${creditUsed>0?`Rs.${Number(creditUsed).toLocaleString("en-IN")} (Due)`:`Rs.${Number(advanceAmount).toLocaleString("en-IN")} (Advance)`}</strong></div></div></div>
-<div class="kr">
-  <div class="kc"><div class="lbl">Total Invoiced</div><div class="val" style="color:#b91c1c;">Rs.${Number(totalDebit).toLocaleString("en-IN")}</div></div>
-  <div class="kc"><div class="lbl">Total Collected</div><div class="val" style="color:#15803d;">Rs.${Number(totalCredit).toLocaleString("en-IN")}</div></div>
-  <div class="kc"><div class="lbl">Advance Available</div><div class="val" style="color:#0284c7;">Rs.${Number(advanceAmount).toLocaleString("en-IN")}</div></div>
-  <div class="kc"><div class="lbl">Closing Balance</div><div class="val" style="color:${creditUsed>0?"#b91c1c":"#15803d"};">Rs.${Number(creditUsed).toLocaleString("en-IN")}</div></div>
-</div>
-<table><thead><tr><th style="width:30px;text-align:center;">#</th><th style="width:80px;">Date</th><th style="width:130px;">Ref / Invoice No.</th><th>Particulars</th><th style="text-align:right;width:100px;">Debit</th><th style="text-align:right;width:100px;">Credit</th><th style="text-align:right;width:110px;">Balance</th></tr></thead>
-<tbody>${rowsHtml}</tbody></table>
-<div class="ftr"><div>System-generated statement. No signature required.</div><div>${generatedOn} | ${wholesalerName||"Digi-Optics Wholesale"}</div></div>
-</body></html>`;
+  return generateCustomerStatementHTML(data);
 };
 
 /**
@@ -1844,8 +1779,8 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
     const addr = typeof rawAddr === "string" ? rawAddr
       : [rawAddr.address, rawAddr.city, rawAddr.state, rawAddr.zipCode, rawAddr.country].filter(Boolean).join(", ") || rawAddr.branchName || "";
 
-    // Serve cached version ONLY if valid, not forced to regenerate, and not previously blank
-    if (!forceRegenerate && ledger?.statementPdfUrl) {
+    // Serve cached version ONLY if valid, not forced to regenerate, and matching current layout version
+    if (!forceRegenerate && ledger?.statementPdfUrl && ledger?.statementPdfVersion === "v3_optical") {
       try {
         const { default: axios } = await import("axios");
         const cached = await axios.get(ledger.statementPdfUrl, { responseType: "arraybuffer", timeout: 5000 });
@@ -1860,6 +1795,23 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
         console.warn("[PDF] Cached ledger statement unavailable, generating fresh.");
       }
     }
+
+    const store = tenant?.storeInformation || {};
+    const owner = tenant?.owner || {};
+    const storeWholesalerName = store.storeName || tenant?.companyName || wholesalerName || "SAANCHI & CO.";
+    const companyAddress = store.address || "New Delhi, India";
+    const companyPhone = owner.mobile || store.phone || "9650560526";
+    const companyEmail = owner.email || store.email || "support@digioptics.com";
+    const companyGstin = store.gstin || tenant?.documents?.gstCertificate || "19AFWFS3883G1Z2";
+    const companyLogo = store.storeLogo || tenant?.logo || "";
+    const bankDetails = tenant?.bankDetails || {
+      bankName: "HDFC BANK",
+      accountNo: "50200084729104",
+      ifscCode: "HDFC0000247",
+      branch: "SILIGURI BRANCH",
+      holderName: storeWholesalerName,
+      upiId: `${companyPhone}@upi`,
+    };
 
     const htmlData = {
       customerName: customer.shopName || customer.ownerName || "Customer",
@@ -1878,7 +1830,13 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
       availableCredit: creditAlerts.availableCredit,
       totalDebit,
       totalCredit,
-      wholesalerName,
+      wholesalerName: storeWholesalerName,
+      companyAddress,
+      companyPhone,
+      companyEmail,
+      companyGstin,
+      companyLogo,
+      bankDetails,
       generatedOn: new Date().toLocaleDateString("en-IN"),
       transactions: unifiedTransactions,
     };
@@ -1889,7 +1847,7 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
     // Upload to GCS in background
     uploadLedgerPDFToGCS(buffer, fileName).then(async (url) => {
       if (url) {
-        await CustomerLedger.updateOne({ customerId }, { statementPdfUrl: url, statementPdfGenAt: new Date() });
+        await CustomerLedger.updateOne({ customerId }, { statementPdfUrl: url, statementPdfVersion: "v3_optical", statementPdfGenAt: new Date() });
         console.log(`[PDF] Ledger statement stored: ${url}`);
       }
     }).catch((e) => console.warn("[PDF] GCS statement upload error:", e.message));

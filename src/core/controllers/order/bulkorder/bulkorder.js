@@ -1225,31 +1225,11 @@ export const getBulkOrderChallan = async (req, res) => {
             if (count > 0) hasNewPayments = true;
         }
 
-        if (bulkOrder.challanUrl && !forceRegenerate && !hasNewPayments) {
-            try {
-                if (bucket && bucket.name) {
-                    const fileNameFromUrl = bulkOrder.challanUrl.split("/").pop();
-                    const file = bucket.file(`pdfs/${fileNameFromUrl}`);
-                    const [exists] = await file.exists();
-                    if (exists) {
-                        res.setHeader("Content-Type", "application/pdf");
-                        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-                        return file.createReadStream().pipe(res);
-                    }
-                }
-                const { default: axios } = await import("axios");
-                const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer", timeout: 4000 });
-                const buffer   = Buffer.from(response.data);
-                res.setHeader("Content-Type", "application/pdf");
-                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-                res.setHeader("Content-Length", buffer.length);
-                return res.end(buffer);
-            } catch (fetchErr) {
-                console.warn("[PDF] Failed to fetch stored challan from GCS, regenerating on the fly:", fetchErr.message);
-            }
-        }
-
         const { url, buffer } = await generateAndStoreChallan(orderId, req.user.tenantId);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        res.setHeader("Content-Length", buffer.length);
+        return res.end(buffer);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Length", buffer.length);
@@ -1276,31 +1256,11 @@ export const getBulkOrderInvoice = async (req, res) => {
         const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
         const forceRegenerate = req.query.regenerate === 'true' || req.query.refresh === 'true';
 
-        if (bulkOrder.invoiceUrl && !forceRegenerate) {
-            try {
-                if (bucket && bucket.name) {
-                    const fileNameFromUrl = bulkOrder.invoiceUrl.split("/").pop();
-                    const file = bucket.file(`pdfs/${fileNameFromUrl}`);
-                    const [exists] = await file.exists();
-                    if (exists) {
-                        res.setHeader("Content-Type", "application/pdf");
-                        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-                        return file.createReadStream().pipe(res);
-                    }
-                }
-                const { default: axios } = await import("axios");
-                const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer", timeout: 4000 });
-                const buffer   = Buffer.from(response.data);
-                res.setHeader("Content-Type", "application/pdf");
-                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-                res.setHeader("Content-Length", buffer.length);
-                return res.end(buffer);
-            } catch (fetchErr) {
-                console.warn("[PDF] Failed to fetch stored invoice from GCS, regenerating on the fly:", fetchErr.message);
-            }
-        }
-
         const { url, buffer } = await generateAndStoreInvoice(orderId, req.user.tenantId);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        res.setHeader("Content-Length", buffer.length);
+        return res.end(buffer);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Length", buffer.length);

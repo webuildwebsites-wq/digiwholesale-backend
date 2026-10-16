@@ -28,15 +28,19 @@ import {
  */
 export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
   try {
-    const isObjectId = mongoose.Types.ObjectId.isValid(paymentId);
+    const cleanId = String(paymentId || "").trim();
+    const cleanOrderNum = cleanId.replace(/^ADV-(ADJ-)?/, "").trim();
+    const isObjectId = mongoose.Types.ObjectId.isValid(cleanId);
     let bulkOrder = null;
 
     // 1. Check if paymentId directly matches a BulkOrder
     const boQuery = {
       $or: [
-        ...(isObjectId ? [{ _id: paymentId }] : []),
-        { "orders.orderNumber": paymentId },
-        { invoiceNumber: paymentId },
+        ...(isObjectId ? [{ _id: cleanId }] : []),
+        { "orders.orderNumber": cleanId },
+        { "orders.orderNumber": cleanOrderNum },
+        { invoiceNumber: cleanId },
+        { invoiceNumber: cleanOrderNum },
       ],
     };
     if (tenantId) boQuery.tenantId = tenantId;
@@ -140,12 +144,19 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
       const pQuery = isObjectId
         ? {
             $or: [
-              { _id: paymentId },
-              { paymentNumber: paymentId },
-              { "paymentDetails.referenceNumber": paymentId },
+              { _id: cleanId },
+              { paymentNumber: cleanId },
+              { "paymentDetails.referenceNumber": cleanId },
+              { "paymentDetails.transactionRef": cleanId },
             ],
           }
-        : { paymentNumber: paymentId };
+        : {
+            $or: [
+              { paymentNumber: cleanId },
+              { "paymentDetails.referenceNumber": cleanId },
+              { "paymentDetails.transactionRef": cleanId },
+            ],
+          };
 
       if (tenantId) pQuery.tenantId = tenantId;
 
@@ -183,6 +194,85 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
                 vendorId: payment.partyId,
               }).lean();
               isVendor = true;
+            }
+          }
+
+          // If this customer payment is allocated to an order, link and display order breakdown
+          if (allocations.length > 0) {
+            const alloc = allocations[0];
+            const allocOrderId = alloc.invoiceId;
+            const allocOrderNum = alloc.invoiceNumber;
+            if (allocOrderId || allocOrderNum) {
+              const boAllocQuery = {
+                $or: [
+                  ...(allocOrderId && mongoose.Types.ObjectId.isValid(allocOrderId) ? [{ _id: allocOrderId }] : []),
+                  ...(allocOrderNum ? [{ "orders.orderNumber": allocOrderNum }, { invoiceNumber: allocOrderNum }] : []),
+                ],
+              };
+              if (tenantId) boAllocQuery.tenantId = tenantId;
+              const linkedBO = await BulkOrder.findOne(boAllocQuery).lean();
+              if (linkedBO) {
+                isOrderReceipt = true;
+                const totals = calculateBulkOrderTotals(linkedBO);
+                const firstOrder = linkedBO.orders?.[0] || {};
+                const orderNumber = firstOrder.orderNumber || linkedBO._id.toString().slice(-6).toUpperCase();
+
+                const customerPayments = await Payment.find({
+                  $or: [
+                    { "allocations.invoiceId": linkedBO._id },
+                    { "allocations.invoiceNumber": orderNumber },
+                  ],
+                }).sort({ createdAt: 1 }).lean();
+
+                let allocatedSum = 0;
+                orderPayments = [];
+
+                for (const cp of customerPayments) {
+                  const matchedAlloc = (cp.allocations || []).find(
+                    (a) => String(a.invoiceId) === String(linkedBO._id) || a.invoiceNumber === orderNumber,
+                  );
+                  const allocAmt = Number(matchedAlloc?.allocatedAmount || cp.grossAmount || 0);
+                  allocatedSum += allocAmt;
+                  orderPayments.push({
+                    paymentNumber: cp.paymentNumber || "PAYMENT",
+                    paymentDate: cp.createdAt,
+                    paymentMode: cp.paymentMode || "BANK_TRANSFER",
+                    referenceNumber: cp.paymentDetails?.referenceNumber || cp.paymentDetails?.transactionRef || cp.paymentNumber,
+                    amount: allocAmt,
+                    status: "CLEARED",
+                    remarks: cp.paymentDetails?.remarks || "Part Payment Received",
+                  });
+                }
+
+                const initialAdvance = Math.max(0, Number((Number(linkedBO.advanceAmount || 0) - allocatedSum).toFixed(2)));
+                if (initialAdvance > 0) {
+                  orderPayments.unshift({
+                    paymentNumber: "ORDER-ADVANCE",
+                    paymentDate: linkedBO.createdAt,
+                    paymentMode: "ADVANCE_ADJUSTMENT",
+                    referenceNumber: `ADV-${orderNumber}`,
+                    amount: initialAdvance,
+                    status: "CLEARED",
+                    remarks: "Initial Order Booking Advance",
+                  });
+                }
+
+                orderSummary = {
+                  orderNumber,
+                  orderDate: linkedBO.createdAt,
+                  orderStatus: firstOrder.status || "Submitted",
+                  itemsCount: totals.itemsCount,
+                  taxableAmount: totals.taxableAmount,
+                  gstAmount: totals.gstAmount,
+                  shippingCharges: Number(linkedBO.shippingCharges || 0),
+                  otherCharges: Number(linkedBO.otherCharges || 0),
+                  grandTotal: totals.grandTotal,
+                  paidAmount: totals.paidAmount,
+                  balanceDue: totals.balanceDue,
+                  paymentStatus: totals.paymentStatus,
+                  partPaymentPercentage: totals.partPaymentPercentage,
+                };
+              }
             }
           }
         }
