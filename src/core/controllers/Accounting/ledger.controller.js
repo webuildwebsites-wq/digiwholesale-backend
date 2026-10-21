@@ -248,12 +248,21 @@ export const getCustomerLedgerStatement = async (req, res) => {
     if (activeTenantId) {
       tenantInfo = await Tenant.findOne({ tenantId: activeTenantId }).lean();
     }
+    const rawWholesalerGstin =
+      tenantInfo?.storeInformation?.gstin ||
+      tenantInfo?.gstNumber ||
+      tenantInfo?.gstin ||
+      "";
+    const cleanWholesalerGstin = (rawWholesalerGstin && !String(rawWholesalerGstin).startsWith("http") && !String(rawWholesalerGstin).includes("/"))
+      ? String(rawWholesalerGstin).trim()
+      : "Unregistered";
+
     const wholesalerProfile = {
       tenantId: tenantInfo?.tenantId || activeTenantId || "DEFAULT",
       companyName: tenantInfo?.storeInformation?.storeName || tenantInfo?.companyName || tenantInfo?.name || "Digi-Optics Wholesaler",
       email: tenantInfo?.storeInformation?.email || tenantInfo?.email || "",
       phone: tenantInfo?.storeInformation?.phone || tenantInfo?.owner?.mobile || tenantInfo?.phone || tenantInfo?.mobile || "",
-      gstin: tenantInfo?.storeInformation?.gstin || tenantInfo?.gstNumber || tenantInfo?.gstin || "",
+      gstin: cleanWholesalerGstin,
       address: tenantInfo?.storeInformation?.address || tenantInfo?.address || "",
       logo: tenantInfo?.storeInformation?.storeLogo || tenantInfo?.logo || "",
       bankDetails: tenantInfo?.bankDetails || null,
@@ -362,12 +371,15 @@ export const getCustomerLedgerStatement = async (req, res) => {
         orderPayments.push({
           paymentId: p._id,
           paymentNumber: p.paymentNumber,
-          paymentDate: p.createdAt,
+          paymentDate: p.paymentDate || p.createdAt,
           paymentMode: p.paymentMode || "BANK_TRANSFER",
-          referenceNumber: p.paymentDetails?.referenceNumber || p.paymentNumber,
+          referenceNumber: p.paymentDetails?.referenceNumber || p.paymentDetails?.utrNumber || p.paymentNumber,
+          utrNumber: p.paymentDetails?.utrNumber || "",
+          bankName: p.paymentDetails?.bankName || "",
+          chequeNumber: p.paymentDetails?.chequeNumber || "",
           amount: amt,
           remarks: p.paymentDetails?.remarks || "Part Payment",
-          status: "CLEARED",
+          status: p.status || "CLEARED",
         });
       });
 
@@ -1652,12 +1664,15 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
         orderPayments.push({
           paymentId: p._id,
           paymentNumber: p.paymentNumber,
-          paymentDate: p.createdAt,
+          paymentDate: p.paymentDate || p.createdAt,
           paymentMode: p.paymentMode || "BANK_TRANSFER",
-          referenceNumber: p.paymentDetails?.referenceNumber || p.paymentNumber,
+          referenceNumber: p.paymentDetails?.referenceNumber || p.paymentDetails?.utrNumber || p.paymentNumber,
+          utrNumber: p.paymentDetails?.utrNumber || "",
+          bankName: p.paymentDetails?.bankName || "",
+          chequeNumber: p.paymentDetails?.chequeNumber || "",
           amount: amt,
           remarks: p.paymentDetails?.remarks || "Part Payment",
-          status: "CLEARED",
+          status: p.status || "CLEARED",
         });
       });
 
@@ -1671,6 +1686,30 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
           referenceNumber: `ADV-${orderNumber}`,
           amount: initialAdvance,
           remarks: "Booking Advance Payment",
+          status: "CLEARED",
+        });
+      }
+
+      // Check if matching LedgerTransaction recorded any advance absorbed from previous customer balance
+      const matchingTxn = rawTransactions.find(
+        (t) =>
+          (t.voucherId && String(t.voucherId) === String(bo._id)) ||
+          (t.referenceNumber && t.referenceNumber === orderNumber),
+      );
+      const ledgerCredit = matchingTxn ? Number(matchingTxn.credit || 0) : 0;
+      const absorbedAdvance = Math.max(
+        0,
+        Number((ledgerCredit - Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)),
+      );
+      if (absorbedAdvance > 0) {
+        orderPayments.push({
+          paymentId: `ADV-ADJ-${orderNumber}`,
+          paymentNumber: `ADV-ADJ-${orderNumber}`,
+          paymentDate: bo.createdAt,
+          paymentMode: "ADVANCE_ADJUSTMENT",
+          referenceNumber: `ADV-ADJ-${orderNumber}`,
+          amount: absorbedAdvance,
+          remarks: "Adjusted from Customer Advance Balance",
           status: "CLEARED",
         });
       }
@@ -1780,7 +1819,7 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
       : [rawAddr.address, rawAddr.city, rawAddr.state, rawAddr.zipCode, rawAddr.country].filter(Boolean).join(", ") || rawAddr.branchName || "";
 
     // Serve cached version ONLY if valid, not forced to regenerate, and matching current layout version
-    if (!forceRegenerate && ledger?.statementPdfUrl && ledger?.statementPdfVersion === "v3_optical") {
+    if (!forceRegenerate && ledger?.statementPdfUrl && ledger?.statementPdfVersion === "v5_clean_ledger") {
       try {
         const { default: axios } = await import("axios");
         const cached = await axios.get(ledger.statementPdfUrl, { responseType: "arraybuffer", timeout: 5000 });
@@ -1802,7 +1841,14 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
     const companyAddress = store.address || "New Delhi, India";
     const companyPhone = owner.mobile || store.phone || "9650560526";
     const companyEmail = owner.email || store.email || "support@digioptics.com";
-    const companyGstin = store.gstin || tenant?.documents?.gstCertificate || "19AFWFS3883G1Z2";
+    const rawCompanyGstin =
+      (store.gstin && typeof store.gstin === "string" ? store.gstin.trim() : "") ||
+      (tenant?.gstNumber && typeof tenant.gstNumber === "string" ? tenant.gstNumber.trim() : "") ||
+      (tenant?.gstin && typeof tenant.gstin === "string" ? tenant.gstin.trim() : "") ||
+      "";
+    const companyGstin = (rawCompanyGstin && !rawCompanyGstin.startsWith("http") && !rawCompanyGstin.includes("/"))
+      ? rawCompanyGstin
+      : "Unregistered";
     const companyLogo = store.storeLogo || tenant?.logo || "";
     const bankDetails = tenant?.bankDetails || {
       bankName: "HDFC BANK",
@@ -1838,6 +1884,7 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
       companyLogo,
       bankDetails,
       generatedOn: new Date().toLocaleDateString("en-IN"),
+      statementPeriod: "All Time (Complete Ledger)",
       transactions: unifiedTransactions,
     };
 
@@ -1847,7 +1894,7 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
     // Upload to GCS in background
     uploadLedgerPDFToGCS(buffer, fileName).then(async (url) => {
       if (url) {
-        await CustomerLedger.updateOne({ customerId }, { statementPdfUrl: url, statementPdfVersion: "v3_optical", statementPdfGenAt: new Date() });
+        await CustomerLedger.updateOne({ customerId }, { statementPdfUrl: url, statementPdfVersion: "v5_clean_ledger", statementPdfGenAt: new Date() });
         console.log(`[PDF] Ledger statement stored: ${url}`);
       }
     }).catch((e) => console.warn("[PDF] GCS statement upload error:", e.message));

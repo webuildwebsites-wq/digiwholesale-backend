@@ -88,12 +88,12 @@ const fmtNum = (n) =>
 const fmtDate = (d) =>
   d
     ? new Date(d)
-        .toLocaleDateString("en-IN", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-        })
-        .replace(/\//g, "-")
+      .toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      })
+      .replace(/\//g, "-")
     : "0";
 
 /**
@@ -124,11 +124,15 @@ export function generateCustomerStatementHTML(data) {
     companyGstin = "19AFWFS3883G1Z2",
     companyLogo = "",
     generatedOn = new Date().toLocaleDateString("en-IN").replace(/\//g, "-"),
+    statementPeriod = "All Time (Complete Ledger)",
     bankDetails = {},
     transactions = [],
   } = data;
 
   const finalLogo = (companyLogo && String(companyLogo).trim()) || staticLogoDataUrl;
+  const cleanCompanyGstin = (companyGstin && !String(companyGstin).startsWith("http") && !String(companyGstin).includes("/"))
+    ? String(companyGstin).trim()
+    : "Unregistered";
 
   const bank = {
     bankName: bankDetails.bankName || "HDFC BANK",
@@ -143,64 +147,166 @@ export function generateCustomerStatementHTML(data) {
   const upiQrString = `upi://pay?pa=${bank.upiId}&pn=${encodeURIComponent(wholesalerName)}&am=${dueAmountClosing > 0 ? dueAmountClosing.toFixed(2) : "0"}&cu=INR`;
   const qrSvg = generateQRCodeSVG(upiQrString, 72);
 
+  const formatModeLabel = (mode) => {
+    if (!mode) return "Direct Payment";
+    const m = String(mode).toUpperCase();
+    if (m === "ADVANCE_ADJUSTMENT") return "Advance Adjustment";
+    if (m === "UPI") return "UPI / QR Code";
+    if (m === "CASH") return "Cash Payment";
+    if (m === "BANK_TRANSFER") return "Bank Transfer / NEFT";
+    if (m === "CHEQUE") return "Cheque / DD";
+    return String(mode).replace(/_/g, " ");
+  };
+
+  let effectivePeriod = statementPeriod;
+  if (!effectivePeriod || effectivePeriod.includes("All Time") || effectivePeriod.includes("Complete Ledger")) {
+    if (transactions && transactions.length > 0) {
+      const validDates = transactions
+        .map((t) => new Date(t.transactionDate || t.createdAt || t.orderDate).getTime())
+        .filter((time) => !isNaN(time) && time > 0)
+        .sort((a, b) => a - b);
+      if (validDates.length > 0) {
+        const fromStr = fmtDate(new Date(validDates[0]));
+        const toStr = fmtDate(new Date(validDates[validDates.length - 1]));
+        effectivePeriod = fromStr === toStr ? fromStr : `${fromStr} to ${toStr}`;
+      }
+    }
+    if (!effectivePeriod || effectivePeriod.includes("All Time") || effectivePeriod.includes("Complete Ledger")) {
+      effectivePeriod = `${generatedOn}`;
+    }
+  }
+
   // Build Transaction Rows
   const rowsHtml = (!transactions || transactions.length === 0)
     ? `<tr><td colspan="7" style="text-align:center; padding:15px; color:#64748B; font-size:10px;">No transactions recorded for this customer account.</td></tr>`
     : transactions
-        .map((t, idx) => {
-          const d = fmtDate(t.transactionDate || t.createdAt);
-          const orderTotal = Number(t.orderGrandTotal != null ? t.orderGrandTotal : t.debit || 0);
-          const paidAmount = Number(t.orderPaidAmount != null ? t.orderPaidAmount : t.credit || 0);
-          const dueAmount = Number(
-            t.orderBalanceDue != null ? t.orderBalanceDue : Math.max(0, orderTotal - paidAmount),
-          );
+      .map((t, idx) => {
+        const d = fmtDate(t.transactionDate || t.createdAt);
+        const orderTotal = Number(t.orderGrandTotal != null ? t.orderGrandTotal : t.debit || 0);
+        const paidAmount = Number(t.orderPaidAmount != null ? t.orderPaidAmount : t.credit || 0);
+        const dueAmount = Number(
+          t.orderBalanceDue != null ? t.orderBalanceDue : Math.max(0, orderTotal - paidAmount),
+        );
 
-          const debitStr = orderTotal > 0
-            ? fmtNum(orderTotal)
-            : Number(t.debit || 0) > 0
-              ? fmtNum(t.debit)
-              : "0.00";
+        const debitStr = orderTotal > 0
+          ? fmtNum(orderTotal)
+          : Number(t.debit || 0) > 0
+            ? fmtNum(t.debit)
+            : "0.00";
 
-          const creditStr = paidAmount > 0
-            ? fmtNum(paidAmount)
-            : Number(t.credit || 0) > 0
-              ? fmtNum(t.credit)
-              : "0.00";
+        const creditStr = paidAmount > 0
+          ? fmtNum(paidAmount)
+          : Number(t.credit || 0) > 0
+            ? fmtNum(t.credit)
+            : "0.00";
 
-          const balStr = dueAmount > 0
-            ? `₹${fmtNum(dueAmount)} (Due)`
-            : orderTotal > 0
-              ? "₹0.00 (Paid)"
-              : Number(t.runningBalance || 0) > 0
-                ? `₹${fmtNum(t.runningBalance)} (Due)`
-                : "₹0.00";
+        const balStr = dueAmount > 0
+          ? `₹${fmtNum(dueAmount)} (Due)`
+          : orderTotal > 0
+            ? "₹0.00 (Paid)"
+            : Number(t.runningBalance || 0) > 0
+              ? `₹${fmtNum(t.runningBalance)} (Due)`
+              : "₹0.00";
 
-          const ref = t.orderNumber || t.referenceNumber || t.voucherId || "0";
-          const particulars =
-            t.narration ||
-            t.description ||
-            t.voucherType ||
-            (t.orderNumber ? `Wholesale Order #${t.orderNumber}` : "Sales Invoice");
+        const ref = t.orderNumber || t.referenceNumber || t.voucherId || "0";
+        const isDirectPayment = Boolean(
+          (t.referenceNumber && String(t.referenceNumber).startsWith("CPAY")) ||
+          t.voucherType === "Receipt" ||
+          t.voucherType === "Advance" ||
+          (!t.voucherType?.toLowerCase().includes("invoice") && Number(t.credit) > 0 && !t.referenceNumber?.startsWith("BO-"))
+        );
 
-          const paymentsRow =
-            t.orderPayments && Array.isArray(t.orderPayments) && t.orderPayments.length > 0
-              ? `
-              <tr style="background:#f8fafc; border-bottom:1px solid #000000;">
-                <td colspan="7" style="padding:3px 8px; font-size:9px; color:#475569; line-height:1.35;">
-                  <span style="font-weight:700; color:#0284c7; text-transform:uppercase;">Payment Installments:</span>
-                  ${t.orderPayments
-                    .map(
-                      (p) =>
-                        `<span style="display:inline-block; margin-left:6px; font-family:monospace;">${p.referenceNumber || p.paymentNumber || "Payment"}: <strong>₹${fmtNum(p.amount)}</strong> (${p.paymentMode || "Paid"})</span>`,
-                    )
-                    .join(" &bull; ")}
+        const isOrder = !isDirectPayment && Boolean(
+          (t.referenceNumber && (String(t.referenceNumber).startsWith("BO-") || String(t.referenceNumber).startsWith("ORD-"))) ||
+          t.orderNumber ||
+          t.voucherType === "Sales Invoice" ||
+          t.voucherType === "Invoice" ||
+          (t.orderGrandTotal != null && Number(t.orderGrandTotal) > 0)
+        );
+
+        let particulars = "";
+        if (isDirectPayment) {
+          const detectedMode = t.paymentMode || (t.narration?.toLowerCase().includes("upi") ? "UPI" : t.narration?.toLowerCase().includes("cash") ? "CASH" : "BANK_TRANSFER");
+          particulars = `<span style="display:inline-block; font-weight:700; color:#059669; background:#dcfce7; padding:1px 4px; border-radius:2px; font-size:8px; margin-right:4px;">[${formatModeLabel(detectedMode)}]</span> Payment Received`;
+          if (t.narration && !t.narration.toLowerCase().includes("sales invoice for order") && !t.narration.toLowerCase().includes("payment received via")) {
+            particulars += ` &bull; ${t.narration}`;
+          }
+        } else if (isOrder) {
+          const isDC = Boolean(t.billingMode === "DC" || t.voucherType === "Delivery Challan" || (t.hasChallan && !t.hasInvoice));
+          particulars = isDC ? "Delivery Challan" : "Sales Invoice";
+          const rawNarration = t.narration || t.description || "";
+          const isAutoGenerated = /Sales Invoice for Order|Total:|Advance Paid:|Added to Credit|Wholesale Order/i.test(rawNarration);
+          if (rawNarration && !isAutoGenerated) {
+            particulars += ` &bull; ${rawNarration}`;
+          }
+        } else {
+          particulars = t.voucherType || t.description || "General Ledger Entry";
+        }
+
+        const paymentsRow =
+          t.orderPayments && Array.isArray(t.orderPayments) && t.orderPayments.length > 0
+            ? `
+              <tr style="background:#f8fafc; border-bottom:1.5px solid #000000;">
+                <td colspan="7" style="padding:4px 6px 6px 6px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; padding-bottom:2px; border-bottom:1px dashed #cbd5e1; font-size:8.5px;">
+                    <span style="font-weight:800; color:#0369a1; text-transform:uppercase; letter-spacing:0.3px;">
+                      Payment Breakdown &amp; Installments (${t.orderPayments.length} Record${t.orderPayments.length > 1 ? "s" : ""})
+                    </span>
+                    <span style="color:#475569; font-weight:600;">
+                      Order Total: <strong>₹${debitStr}</strong> &bull; Total Paid: <strong style="color:#15803d;">₹${creditStr}</strong> &bull; Balance Due: <strong style="color:${dueAmount > 0 ? "#b91c1c" : "#15803d"};">₹${fmtNum(dueAmount)}</strong>
+                    </span>
+                  </div>
+                  <table style="width:100%; border-collapse:collapse; background:#ffffff; border:1px solid #94a3b8; font-size:8px;">
+                    <thead>
+                      <tr style="background:#e2e8f0; border-bottom:1px solid #94a3b8; font-weight:700; color:#334155;">
+                        <th style="width:44px; border-right:1px solid #cbd5e1; padding:2.5px 3px; text-align:center;">Inst. #</th>
+                        <th style="width:74px; border-right:1px solid #cbd5e1; padding:2.5px 4px; text-align:center;">Payment Date</th>
+                        <th style="width:115px; border-right:1px solid #cbd5e1; padding:2.5px 5px; text-align:left;">Payment Method</th>
+                        <th style="width:145px; border-right:1px solid #cbd5e1; padding:2.5px 5px; text-align:left;">Ref / Voucher / UTR</th>
+                        <th style="border-right:1px solid #cbd5e1; padding:2.5px 5px; text-align:left;">Narration / Payment Details</th>
+                        <th style="width:85px; border-right:1px solid #cbd5e1; padding:2.5px 5px; text-align:right;">Amount (₹)</th>
+                        <th style="width:62px; padding:2.5px 3px; text-align:center;">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${t.orderPayments
+              .map((p, pIdx) => {
+                const pDate = fmtDate(p.paymentDate || p.createdAt || t.transactionDate);
+                const pMode = formatModeLabel(p.paymentMode);
+                const pRef = p.referenceNumber || p.paymentNumber || p.paymentId || "-";
+                let pRemarks = p.remarks || (p.paymentMode === "ADVANCE_ADJUSTMENT" ? "Adjusted from Customer Advance Balance" : "Part-Payment Received");
+                if (p.utrNumber && p.utrNumber !== pRef) {
+                  pRemarks += ` (UTR: ${p.utrNumber})`;
+                }
+                if (p.bankName) {
+                  pRemarks += ` [${p.bankName}]`;
+                }
+                const pStatus = p.status || "CLEARED";
+                const isCleared = pStatus === "CLEARED" || pStatus === "PAID" || pStatus === "COMPLETED";
+                return `
+                            <tr style="border-bottom:1px solid #e2e8f0;">
+                              <td style="border-right:1px solid #cbd5e1; padding:2.5px 3px; text-align:center; font-weight:700; color:#475569;">#${pIdx + 1}</td>
+                              <td style="border-right:1px solid #cbd5e1; padding:2.5px 4px; text-align:center; font-family:monospace; color:#1e293b;">${pDate}</td>
+                              <td style="border-right:1px solid #cbd5e1; padding:2.5px 5px; font-weight:600; color:#0f172a;">${pMode}</td>
+                              <td style="border-right:1px solid #cbd5e1; padding:2.5px 5px; font-family:monospace; font-weight:700; color:#0284c7;">${pRef}</td>
+                              <td style="border-right:1px solid #cbd5e1; padding:2.5px 5px; color:#475569;">${pRemarks}</td>
+                              <td style="border-right:1px solid #cbd5e1; padding:2.5px 5px; text-align:right; font-family:monospace; font-weight:700; color:#15803d;">₹${fmtNum(p.amount)}</td>
+                              <td style="padding:2.5px 3px; text-align:center;">
+                                <span style="font-weight:700; font-size:7.5px; padding:1px 3px; border-radius:2px; ${isCleared ? 'background:#dcfce7; color:#15803d; border:0.5px solid #86efac;' : 'background:#fef3c7; color:#b45309; border:0.5px solid #fde68a;'}">${pStatus}</span>
+                              </td>
+                            </tr>
+                          `;
+              })
+              .join("")}
+                    </tbody>
+                  </table>
                 </td>
               </tr>
             `
-              : "";
+            : "";
 
-          return `
-            <tr style="border-bottom:1px solid #000000;">
+        return `
+            <tr style="border-bottom: 1px solid #000000;">
               <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">${idx + 1}</td>
               <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-family:monospace; font-size:9.5px;">${d}</td>
               <td style="border-right:1px solid #000; padding:3px 6px; font-family:monospace; font-weight:700; font-size:10px; color:#0284c7;">${ref}</td>
@@ -211,8 +317,8 @@ export function generateCustomerStatementHTML(data) {
             </tr>
             ${paymentsRow}
           `;
-        })
-        .join("");
+      })
+      .join("");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -257,19 +363,23 @@ export function generateCustomerStatementHTML(data) {
           <div style="font-size: 9.5px; color: #1e293b; margin-top: 2px; line-height: 1.35;">${companyAddress}</div>
           <div style="font-size: 9.5px; color: #1e293b; margin-top: 2px;">Phone: <strong>${companyPhone}</strong> | Email: <strong>${companyEmail}</strong></div>
         </td>
-        <td style="width: 185px; padding: 6px 10px; vertical-align: middle; border-left: 1px solid #000000; font-size: 9.5px; line-height: 1.4;">
+        <td style="width: 210px; padding: 6px 10px; vertical-align: middle; border-left: 1px solid #000000; font-size: 9px; line-height: 1.4;">
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
-              <td style="font-weight: 700; width: 70px;">GST No :</td>
-              <td style="font-weight: 800; font-family: monospace; font-size: 10.5px;">${companyGstin}</td>
-            </tr>
-            <tr>
-              <td style="font-weight: 700;">Date :</td>
+              <td style="font-weight: 700; width: 85px;">Statement Date:</td>
               <td style="font-weight: 600; font-family: monospace;">${generatedOn}</td>
             </tr>
             <tr>
-              <td style="font-weight: 700;">Ledger :</td>
+              <td style="font-weight: 700;">Period :</td>
+              <td style="font-weight: 700; color: #0f172a; font-size: 8.5px;">${effectivePeriod}</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 700;">Ledger Code :</td>
               <td style="font-weight: 800; font-family: monospace; color: #0284c7;">${ledgerCode}</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 700;">Credit Terms :</td>
+              <td style="font-weight: 600;">${creditDays} Days Credit</td>
             </tr>
           </table>
         </td>
@@ -278,7 +388,7 @@ export function generateCustomerStatementHTML(data) {
 
     <!-- 2. Document Title Banner -->
     <div style="text-align: center; font-weight: 800; font-size: 11px; padding: 4px 0; letter-spacing: 1px; background: #f8fafc; border-bottom: 1.5px solid #000000; text-transform: uppercase; color: #0f172a;">
-      CUSTOMER STATEMENT / KHATA LEDGER
+      CUSTOMER STATEMENT 
     </div>
 
     <!-- 3. Customer & Credit Information -->
@@ -360,30 +470,16 @@ export function generateCustomerStatementHTML(data) {
       </tbody>
     </table>
 
-    <!-- 6. Bottom Summary: Bank Details, UPI QR, In Words & Authorised Signatory -->
+    <!-- 6. Bottom Summary: Declaration & Authorised Signatory -->
     <table style="width: 100%; border-collapse: collapse; border-top: 1.5px solid #000000;">
       <tr>
-        <!-- Left: Bank Details & UPI QR -->
-        <td style="width: 62%; padding: 6px 10px; vertical-align: top; border-right: 1px solid #000000; font-size: 9.5px; line-height: 1.35;">
-          <div style="font-weight: 700; color: #0f172a; margin-bottom: 2px;">Net Outstanding in Words:</div>
-          <div style="font-weight: 800; color: #0284c7; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">
-            ${numberToWordsINR(dueAmountClosing)}
-          </div>
-          <div style="display: flex; gap: 10px; align-items: center; margin-top: 4px;">
-            <div style="border: 1px solid #000000; padding: 2px; background: #ffffff; text-align: center;">
-              ${qrSvg}
-              <div style="font-size: 7px; font-weight: 700; color: #000;">SCAN TO PAY</div>
-            </div>
-            <div>
-              <div style="font-weight: 800; text-transform: uppercase; font-size: 9.5px; color: #0f172a;">BANK DETAILS FOR PAYMENT</div>
-              <table style="border-collapse: collapse; font-size: 9px; margin-top: 2px;">
-                <tr><td style="font-weight: 700; width: 75px;">Bank Name:</td><td>${bank.bankName}</td></tr>
-                <tr><td style="font-weight: 700;">Account No:</td><td style="font-family: monospace; font-weight: 700;">${bank.accountNo}</td></tr>
-                <tr><td style="font-weight: 700;">IFSC Code:</td><td style="font-family: monospace; font-weight: 700;">${bank.ifscCode}</td></tr>
-                <tr><td style="font-weight: 700;">Branch:</td><td>${bank.branch}</td></tr>
-                <tr><td style="font-weight: 700;">UPI ID:</td><td style="font-family: monospace;">${bank.upiId}</td></tr>
-              </table>
-            </div>
+        <!-- Left: Declaration & Terms -->
+        <td style="width: 58%; padding: 8px 12px; vertical-align: top; border-right: 1px solid #000000; font-size: 9px; line-height: 1.45;">
+          <div style="font-weight: 800; text-transform: uppercase; font-size: 9px; color: #0f172a; margin-bottom: 3px;">Declaration &amp; Notes:</div>
+          <div style="color: #475569; font-size: 8.5px; line-height: 1.45;">
+            &bull; This is an authentic computer-generated Customer Khata Statement.<br/>
+            &bull; All transactions, invoices, and payment receipts are recorded subject to realization.<br/>
+            &bull; For any discrepancies or reconciliation requests, please contact our accounts department within 7 days.
           </div>
         </td>
 
