@@ -47,6 +47,27 @@ export const employeeLogin = async (req, res) => {
       if (!tenant || tenant.status === 'SUSPENDED') {
         return sendErrorResponse(res, 403, 'TENANT_SUSPENDED', 'Your workspace has been suspended. Please contact support.');
       }
+
+      // Block login if workspace subscription has expired (except PLATFORM_OWNER)
+      if (user.EmployeeType !== 'PLATFORM_OWNER') {
+        const rawExpiry = tenant.storeInformation?.expiryDate || tenant.subscription?.expiresAt;
+        if (rawExpiry) {
+          const expDate = new Date(rawExpiry);
+          if (!isNaN(expDate.getTime()) && new Date() > expDate) {
+            const formattedDate = expDate.toLocaleDateString('en-IN', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric'
+            });
+            return sendErrorResponse(
+              res,
+              403,
+              'SUBSCRIPTION_EXPIRED',
+              `Your workspace subscription expired on ${formattedDate}. Panel access has been disabled. Please contact DigiBySR support to renew your subscription.`
+            );
+          }
+        }
+      }
     }
 
     if (user.isLocked) {
