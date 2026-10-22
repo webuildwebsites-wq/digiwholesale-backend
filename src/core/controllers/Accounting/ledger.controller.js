@@ -8,8 +8,6 @@ import Vendor from "../../../models/Vendor.model.js";
 import BulkOrder from "../../../models/order/BulkOrder.js";
 import Employee from "../../../models/Auth/Employee.js";
 import Tenant from "../../../models/Tenant/Tenant.model.js";
-import Location from "../../../models/Location/Location.js";
-import Account from "../../../models/Accounting/Account.model.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
@@ -33,9 +31,6 @@ export const parseCreditDays = (cd) => {
   return 0;
 };
 
-/**
- * Helper to calculate order totals, tax amounts, paid advances, and part-payment status
- */
 export const calculateBulkOrderTotals = (bulkOrder) => {
   let taxableAmount = 0;
   let gstAmount = 0;
@@ -87,11 +82,22 @@ export const calculateBulkOrderTotals = (bulkOrder) => {
   };
 };
 
-/**
- * Helper to calculate credit limit utilization and alert flags:
- * - 20% Threshold Alert: utilization >= 80% and < 100%
- * - Color indicators: Healthy (<80% - Green), Warning (80%-99% - Amber), Exceeded (>=100% - Red)
- */
+
+export const getActualTransactionCredit = (txn) => {
+  let cred = Number(txn.credit || 0);
+  if (txn.voucherType === "Sales Invoice" && txn.narration) {
+    const match = txn.narration.match(/Absorbed from Advance:\s*₹?([0-9,.]+)/i);
+    if (match) {
+      const absorbed = parseFloat(match[1].replace(/,/g, ""));
+      if (absorbed > 0 && cred >= absorbed) {
+        cred = Math.max(0, cred - absorbed);
+      }
+    }
+  }
+  return cred;
+};
+
+
 export const calculateCreditStatus = (creditLimit, creditUsed) => {
   const limit = Number(creditLimit || 0);
   const used = Number(creditUsed || 0);
@@ -118,9 +124,7 @@ export const calculateCreditStatus = (creditLimit, creditUsed) => {
   };
 };
 
-/**
- * 1. Customer Ledger Statement (Khata View)
- */
+
 export const getCustomerLedgerStatement = async (req, res) => {
   try {
     const { customerId } = req.params;
@@ -270,14 +274,10 @@ export const getCustomerLedgerStatement = async (req, res) => {
       bankDetails: tenantInfo?.bankDetails || null,
     };
 
-    // 1. Fetch all customer bulk orders for Part-Payment & Order Status tracking
     const bulkOrders = await BulkOrder.find({ "customer.customerId": customer._id })
       .sort({ createdAt: -1 })
       .lean();
 
-    // Auto-sync: Check if any confirmed bulkOrder is missing from LedgerTransactions
-    // IMPORTANT: Use ALL transactions (not date-filtered) for dedup check to avoid creating
-    // duplicate LedgerTransaction records when date filters are active
     const baseQuery = {
       $or: [
         { ledgerId: ledgerObj._id },
@@ -342,7 +342,6 @@ export const getCustomerLedgerStatement = async (req, res) => {
       }
     }
 
-    // Deduplicate rawTransactions by voucherId and referenceNumber to guarantee no duplicate rows
     const seenVoucherKeys = new Set();
     rawTransactions = rawTransactions.filter(t => {
       const vKey = t.voucherId ? String(t.voucherId) : null;
@@ -364,7 +363,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
     allTxnsForSummary = await LedgerTransaction.find(query).lean();
     allTxnsForSummary.forEach((txn) => {
       totalDebit += Number(txn.debit || 0);
-      totalCredit += Number(txn.credit || 0);
+      totalCredit += getActualTransactionCredit(txn);
     });
     const totalTransactions = allTxnsForSummary.length;
 
@@ -604,7 +603,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
       }
       const entry = monthlyMap.get(key);
       entry.totalDebit += Number(t.debit || 0);
-      entry.totalCredit += Number(t.credit || 0);
+      entry.totalCredit += getActualTransactionCredit(t);
       entry.transactionsCount += 1;
     });
 
@@ -708,9 +707,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
   }
 };
 
-/**
- * 2. Vendor Ledger Statement
- */
+
 export const getVendorLedgerStatement = async (req, res) => {
   try {
     const { vendorId } = req.params;
@@ -886,9 +883,7 @@ export const getVendorLedgerStatement = async (req, res) => {
   }
 };
 
-/**
- * 3. Get All Customer Ledgers (Khata List - Syncs directly with Customer object)
- */
+
 export const getCustomerLedgersList = async (req, res) => {
   try {
     const { search, status, creditFilter, gstFilter, month, branchId, page = 1, limit = 50 } = req.query;
@@ -1182,9 +1177,7 @@ export const getCustomerLedgersList = async (req, res) => {
   }
 };
 
-/**
- * 4. Get All Vendor Ledgers (Syncs with Vendors)
- */
+
 export const getVendorLedgersList = async (req, res) => {
   try {
     const { search, status, page = 1, limit = 50 } = req.query;
@@ -1287,9 +1280,7 @@ export const getVendorLedgersList = async (req, res) => {
   }
 };
 
-/**
- * 5. Upsert Customer Ledger Master Settings
- */
+
 export const upsertCustomerLedger = async (req, res) => {
   try {
     const {
@@ -1472,9 +1463,7 @@ export const upsertVendorLedger = async (req, res) => {
   }
 };
 
-/**
- * 7. Get Customer Orders for Ledger & Part-Payment Tracking
- */
+
 export const getCustomerOrdersForLedger = async (req, res) => {
   try {
     const { customerId } = req.params;
@@ -1585,10 +1574,6 @@ export const getCustomerOrdersForLedger = async (req, res) => {
 
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Customer Ledger Statement PDF (GCS-cached)
-// ─────────────────────────────────────────────────────────────────────────────
-
 const uploadLedgerPDFToGCS = async (buffer, fileName) => {
   try {
     if (!bucket || !process.env.GOOGLE_CLOUD_BUCKET_NAME) return null;
@@ -1609,11 +1594,6 @@ const buildLedgerStatementHTML = (data) => {
   return generateCustomerStatementHTML(data);
 };
 
-/**
- * Download Customer Ledger Statement as PDF (GCS cached).
- * GET /api/v1/ledgers/customer/:customerId/statement-pdf
- * ?regenerate=true  → force fresh generation
- */
 export const downloadCustomerLedgerStatementPDF = async (req, res) => {
   try {
     const { customerId } = req.params;

@@ -690,7 +690,7 @@ export const applyOrderToCustomerCreditAndLedger = async ({ bulkOrder, customerI
             voucherId: bulkOrder._id,
             referenceNumber: orderRef,
             debit: grandTotal,
-            credit: advancePaid + absorbedFromAdvance,
+            credit: advancePaid,
             runningBalance: finalBalance,
             narration: `Sales Invoice for Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}, Advance Paid: ₹${advancePaid.toLocaleString()}${absorbedFromAdvance > 0 ? (', Absorbed from Advance: ₹' + absorbedFromAdvance.toLocaleString()) : ''}, Added to Credit Used: ₹${newCreditUsedToAdd.toLocaleString()}`,
             branchId: ledger.branchId || null,
