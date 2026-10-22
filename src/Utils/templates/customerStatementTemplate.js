@@ -443,7 +443,7 @@ export function generateCustomerStatementHTML(data) {
         <tr style="background: #ffffff; border-bottom: 1px solid #000000; font-weight: 700;">
           <th style="width: 28px; border-right: 1px solid #000; padding: 4px 2px; text-align: center;">#</th>
           <th style="width: 75px; border-right: 1px solid #000; padding: 4px 4px; text-align: center;">Date</th>
-          <th style="width: 130px; border-right: 1px solid #000; padding: 4px 6px; text-align: left;">Ref / Doc No.</th>
+          <th style="width: 130px; border-right: 1px solid #000; padding: 4px 6px; text-align: left;">Ref No.</th>
           <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: left;">Particulars &amp; Narration</th>
           <th style="width: 95px; border-right: 1px solid #000; padding: 4px 6px; text-align: right;">Debit (₹)</th>
           <th style="width: 95px; border-right: 1px solid #000; padding: 4px 6px; text-align: right;">Credit (₹)</th>
