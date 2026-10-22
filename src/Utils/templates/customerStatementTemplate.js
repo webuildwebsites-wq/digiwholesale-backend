@@ -1,7 +1,6 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import QRCode from "qrcode";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -13,27 +12,6 @@ try {
   staticLogoDataUrl = `data:image/png;base64,${logoBase64}`;
 } catch {
   staticLogoDataUrl = "";
-}
-
-// Synchronous QR Code SVG Generator for offline and fast PDF compilation
-export function generateQRCodeSVG(text, sizePx = 75) {
-  try {
-    const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
-    const modSize = qr.modules.size;
-    const data = qr.modules.data;
-    let d = "";
-    for (let r = 0; r < modSize; r++) {
-      for (let c = 0; c < modSize; c++) {
-        if (data[r * modSize + c]) {
-          d += `M${c + 2} ${r + 2}h1v1h-1z `;
-        }
-      }
-    }
-    const total = modSize + 4;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${sizePx}" height="${sizePx}"><rect width="100%" height="100%" fill="#ffffff"/><path d="${d}" fill="#000000"/></svg>`;
-  } catch {
-    return "";
-  }
 }
 
 // Number to Words Converter for INR
@@ -144,8 +122,6 @@ export function generateCustomerStatementHTML(data) {
   };
 
   const dueAmountClosing = Number(creditUsed || 0);
-  const upiQrString = `upi://pay?pa=${bank.upiId}&pn=${encodeURIComponent(wholesalerName)}&am=${dueAmountClosing > 0 ? dueAmountClosing.toFixed(2) : "0"}&cu=INR`;
-  const qrSvg = generateQRCodeSVG(upiQrString, 72);
 
   const formatModeLabel = (mode) => {
     if (!mode) return "Direct Payment";

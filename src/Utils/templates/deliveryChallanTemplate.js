@@ -1,7 +1,6 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import QRCode from 'qrcode';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -13,27 +12,6 @@ try {
     staticLogoDataUrl = `data:image/png;base64,${logoBase64}`;
 } catch {
     staticLogoDataUrl = '';
-}
-
-// Synchronous QR Code SVG Generator for offline and fast PDF compilation
-export function generateQRCodeSVG(text, sizePx = 80) {
-    try {
-        const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
-        const modSize = qr.modules.size;
-        const data = qr.modules.data;
-        let d = '';
-        for (let r = 0; r < modSize; r++) {
-            for (let c = 0; c < modSize; c++) {
-                if (data[r * modSize + c]) {
-                    d += `M${c + 2} ${r + 2}h1v1h-1z `;
-                }
-            }
-        }
-        const total = modSize + 4;
-        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${sizePx}" height="${sizePx}"><rect width="100%" height="100%" fill="#ffffff"/><path d="${d}" fill="#000000"/></svg>`;
-    } catch {
-        return '';
-    }
 }
 
 export function numberToWordsINR(num) {
@@ -333,10 +311,6 @@ export function renderOpticalDocumentHTML(data, docType = 'INVOICE') {
     const bankName = data.bankName || data.bankDetails?.bankName || 'South Indian Bank Ltd.';
     const bankBranch = data.bankBranch || data.bankDetails?.bankBranch || 'Siliguri Branch.';
 
-    const upiId = data.upiId || data.bankDetails?.upiId || 'saanchi@upi';
-    const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(wholesalerName)}&am=${dueAmount > 0 ? dueAmount.toFixed(2) : grandTotal.toFixed(2)}&cu=INR`;
-    const qrCodeSvg = generateQRCodeSVG(upiString, 85);
-
     const renderedItemRows = parsedItems.map((item) => `
     <tr style="border-bottom:1px solid #000000;">
       <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; vertical-align:top; font-size:10px;">${item.sn}</td>
@@ -592,23 +566,20 @@ export function renderOpticalDocumentHTML(data, docType = 'INVOICE') {
 
       <!-- Right Column -->
       <div style="flex:0.8; padding-left:15px; display:flex; flex-direction:column; justify-content:space-between;">
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; margin-bottom:2px;">
-          <span style="font-weight:700;">Paid Amount :</span>
-          <span style="font-weight:700; font-family:monospace;">${fmtNum(paidAmount)}</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-size:10.5px; margin-bottom:4px;">
-          <span style="font-weight:700;">Due Amount :</span>
-          <span style="font-weight:800; font-family:monospace; color:${dueAmount > 0 ? '#b91c1c' : '#15803d'};">${fmtNum(dueAmount)}</span>
-        </div>
-
-        <div style="text-align:center; margin:2px 0;">
-          ${qrCodeSvg}
-          <div style="font-size:9px; font-weight:700; margin-top:1px;">Scan To Pay</div>
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; margin-bottom:2px;">
+            <span style="font-weight:700;">Paid Amount :</span>
+            <span style="font-weight:700; font-family:monospace;">${fmtNum(paidAmount)}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; margin-bottom:4px;">
+            <span style="font-weight:700;">Due Amount :</span>
+            <span style="font-weight:800; font-family:monospace; color:${dueAmount > 0 ? '#b91c1c' : '#15803d'};">${fmtNum(dueAmount)}</span>
+          </div>
         </div>
 
-        <div style="text-align:right; margin-top:4px;">
+        <div style="text-align:right; margin-top:15px;">
           <div style="font-size:11px; font-weight:800; color:#0284c7;">${wholesalerName.toUpperCase()}</div>
-          <div style="font-size:9.5px; font-weight:700; margin-top:20px;">Authorised Signatory</div>
+          <div style="font-size:9.5px; font-weight:700; margin-top:28px;">Authorised Signatory</div>
         </div>
       </div>
     </div>
