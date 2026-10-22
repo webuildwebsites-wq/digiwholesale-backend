@@ -281,15 +281,24 @@ export function generateCustomerStatementHTML(data) {
             `
             : "";
 
+        const separatorRow = idx > 0
+          ? `
+            <tr style="height: 14px;">
+              <td colspan="7" style="height: 14px; padding: 0; background: #f1f5f9; border-top: 2px solid #000000; border-bottom: 1.5px solid #000000;"></td>
+            </tr>
+          `
+          : "";
+
         return `
+            ${separatorRow}
             <tr style="border-bottom: 1px solid #000000;">
-              <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">${idx + 1}</td>
-              <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-family:monospace; font-size:9.5px;">${d}</td>
-              <td style="border-right:1px solid #000; padding:3px 6px; font-family:monospace; font-weight:700; font-size:10px; color:#0284c7;">${ref}</td>
-              <td style="border-right:1px solid #000; padding:3px 6px; font-size:9.5px; color:#1e293b;">${particulars}</td>
-              <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:600; color:#0f172a;">${debitStr}</td>
-              <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:#15803d;">${creditStr}</td>
-              <td style="padding:3px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:${dueAmount > 0 ? "#b91c1c" : "#15803d"};">${balStr}</td>
+              <td style="border-right:1px solid #000; padding:6px 4px; text-align:center; font-size:10px; font-weight:700;">${idx + 1}</td>
+              <td style="border-right:1px solid #000; padding:6px 4px; text-align:center; font-family:monospace; font-size:9.5px;">${d}</td>
+              <td style="border-right:1px solid #000; padding:6px 6px; font-family:monospace; font-weight:700; font-size:10px; color:#0284c7;">${ref}</td>
+              <td style="border-right:1px solid #000; padding:6px 6px; font-size:9.5px; color:#1e293b;">${particulars}</td>
+              <td style="border-right:1px solid #000; padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:600; color:#0f172a;">${debitStr}</td>
+              <td style="border-right:1px solid #000; padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:#15803d;">${creditStr}</td>
+              <td style="padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:${dueAmount > 0 ? "#b91c1c" : "#15803d"};">${balStr}</td>
             </tr>
             ${paymentsRow}
           `;
