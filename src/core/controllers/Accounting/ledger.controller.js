@@ -77,6 +77,8 @@ export const calculateBulkOrderTotals = (bulkOrder) => {
     itemsCount,
     taxableAmount: Number(taxableAmount.toFixed(2)),
     gstAmount: Number(gstAmount.toFixed(2)),
+    shippingCharges,
+    otherCharges,
     grandTotal,
     paidAmount,
     balanceDue,
@@ -488,6 +490,8 @@ export const getCustomerLedgerStatement = async (req, res) => {
         itemsCount: totals.itemsCount,
         taxableAmount: totals.taxableAmount,
         gstAmount: totals.gstAmount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
         grandTotal: totals.grandTotal,
         totalOrderPrice: totals.grandTotal,
         paidAmount: totalOrderPaid,
@@ -578,6 +582,8 @@ export const getCustomerLedgerStatement = async (req, res) => {
         isGSTInvoice: Boolean(customer.isGSTRegistered),
         taxableAmount: matchedOrder ? matchedOrder.taxableAmount : null,
         gstAmount: matchedOrder ? matchedOrder.gstAmount : null,
+        shippingCharges: matchedOrder ? (matchedOrder.shippingCharges || 0) : 0,
+        otherCharges: matchedOrder ? (matchedOrder.otherCharges || 0) : 0,
       };
     });
 
@@ -1545,6 +1551,8 @@ export const getCustomerOrdersForLedger = async (req, res) => {
         itemsCount: totals.itemsCount,
         taxableAmount: totals.taxableAmount,
         gstAmount: totals.gstAmount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
         grandTotal: totals.grandTotal,
         totalOrderPrice: totals.grandTotal,
         paidAmount: totalOrderPaid,
@@ -1855,6 +1863,8 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
         balanceDue: effectiveBalanceDue,
         paymentStatus: effectivePaymentStatus,
         itemsCount: totals.itemsCount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
         orderPayments,
       };
       ordersMap.set(bo._id.toString(), orderEntry);

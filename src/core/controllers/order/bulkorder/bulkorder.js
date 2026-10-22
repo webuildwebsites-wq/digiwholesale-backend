@@ -1261,10 +1261,6 @@ export const getBulkOrderInvoice = async (req, res) => {
         res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
         res.setHeader("Content-Length", buffer.length);
         return res.end(buffer);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Length", buffer.length);
-        return res.end(buffer);
     } catch (error) {
         console.error("Get Bulk Order Invoice Error:", error);
         return sendErrorResponse(res, 500, "INVOICE_ERROR", error.message || "Something went wrong");

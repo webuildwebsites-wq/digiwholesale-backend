@@ -480,6 +480,12 @@ export function renderOpticalDocumentHTML(data, docType = 'INVOICE') {
           <td colspan="4" style="border-right:1px solid #000; border-bottom:1px solid #000; padding:3px 6px; font-weight:700; text-align:right;">Freight Charges</td>
           <td style="border-bottom:1px solid #000; padding:3px 6px; text-align:right; font-family:monospace; font-weight:600;">${fmtNum(shippingCharges)}</td>
         </tr>
+        ${otherCharges !== 0 ? `
+        <tr style="border-bottom:1px solid #000;">
+          <td colspan="7" style="border-right:1px solid #000; border-bottom:1px solid #000;"></td>
+          <td colspan="4" style="border-right:1px solid #000; border-bottom:1px solid #000; padding:3px 6px; font-weight:700; text-align:right;">Other Charges</td>
+          <td style="border-bottom:1px solid #000; padding:3px 6px; text-align:right; font-family:monospace; font-weight:600;">${fmtNum(otherCharges)}</td>
+        </tr>` : ''}
         ${finalCgst > 0 ? `
         <tr style="border-bottom:1px solid #000;">
           <td colspan="7" style="border-right:1px solid #000; border-bottom:1px solid #000;"></td>
