@@ -6,11 +6,12 @@ import LedgerTransaction from "../../../models/Accounting/LedgerTransaction.mode
 import Customer from "../../../models/Auth/Customer.js";
 import Vendor from "../../../models/Vendor.model.js";
 import BulkOrder from "../../../models/order/BulkOrder.js";
+import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
 } from "../../../Utils/response/responseHandler.js";
-import { calculateBulkOrderTotals } from "./ledger.controller.js";
+import { calculateBulkOrderTotals, calculateVendorPurchaseTotals } from "./ledger.controller.js";
 import {
   generatePaymentReceiptPDF,
   sendPaymentReceiptEmail,
@@ -535,6 +536,7 @@ export const executeVendorPayment = async (req, res) => {
       grossAmount,
       amount,
       paymentMode,
+      allocations = [],
       paymentDetails = {},
     } = req.body;
 
@@ -570,6 +572,7 @@ export const executeVendorPayment = async (req, res) => {
           ledgerCode: `VEND-LED-${vendorId.toString().slice(-6).toUpperCase()}`,
           vendorId,
           vendorCategory: "Manufacturer",
+          creditLimit: Number(vendor.creditLimit || 0),
           openingBalance: 0,
           currentOutstanding: 0,
           branchId: branchId || null,
@@ -579,7 +582,65 @@ export const executeVendorPayment = async (req, res) => {
         await ledger.save({ session });
       }
 
+      if (
+        ledger.ledgerStatus === "Blocked" ||
+        ledger.ledgerStatus === "Closed"
+      ) {
+        throw new Error(
+          `Vendor Ledger is currently ${ledger.ledgerStatus}. Transactions not permitted.`,
+        );
+      }
+
+      let totalAllocated = 0;
+      const processedAllocations = [];
+
+      for (const alloc of allocations) {
+        if (alloc.allocatedAmount && Number(alloc.allocatedAmount) > 0) {
+          const reqAlloc = Number(alloc.allocatedAmount);
+          let safeAlloc = reqAlloc;
+
+          if (alloc.invoiceId && mongoose.Types.ObjectId.isValid(alloc.invoiceId)) {
+            const vp = await VendorPurchase.findById(alloc.invoiceId).session(session);
+            if (vp) {
+              const vpTotals = calculateVendorPurchaseTotals(vp);
+              const payments = await Payment.find({
+                partyId: vendorId,
+                status: { $ne: "BOUNCED" },
+              }).session(session).lean();
+
+              let allocatedSum = 0;
+              payments.forEach((p) => {
+                (p.allocations || []).forEach((a) => {
+                  if (String(a.invoiceId) === String(vp._id)) {
+                    allocatedSum += Number(a.allocatedAmount || 0);
+                  }
+                });
+              });
+
+              const remainingDue = Math.max(0, Number((vpTotals.grandTotal - allocatedSum).toFixed(2)));
+
+              if (remainingDue <= 0) {
+                throw new Error(`Purchase #${alloc.invoiceNumber || vp._id} is already fully settled. Duplicate payment payout is not permitted.`);
+              }
+              safeAlloc = Math.min(reqAlloc, remainingDue);
+            }
+          }
+
+          totalAllocated += safeAlloc;
+          processedAllocations.push({
+            invoiceId: alloc.invoiceId,
+            invoiceNumber: alloc.invoiceNumber || "PUR-REF",
+            invoiceModel: "VendorPurchase",
+            invoiceTotal: alloc.invoiceTotal || safeAlloc,
+            allocatedAmount: safeAlloc,
+          });
+        }
+      }
+
       const paymentNumber = `VPAY-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const newOutstanding = Number(ledger.currentOutstanding) - payoutAmount;
+      const advanceAmount = newOutstanding < 0 ? Math.abs(newOutstanding) : 0;
 
       const payment = new Payment({
         paymentNumber,
@@ -594,8 +655,11 @@ export const executeVendorPayment = async (req, res) => {
         debitNoteDeducted: 0,
         debitNoteIds: [],
         netAmountPaid,
+        allocations: processedAllocations,
+        advanceAmount,
         paymentDetails: {
           ...paymentDetails,
+          totalAllocated,
           paidByName: req.user?.name || req.user?.username || "",
         },
         status: "COMPLETED",
@@ -606,9 +670,13 @@ export const executeVendorPayment = async (req, res) => {
 
       await payment.save({ session });
 
-      const newOutstanding = Number(ledger.currentOutstanding) - payoutAmount;
       ledger.currentOutstanding = newOutstanding;
       await ledger.save({ session });
+
+      let narration = `Payout issued via ${paymentMode}. Amount Paid: ₹${payoutAmount.toLocaleString()}`;
+      if (processedAllocations.length > 0) {
+        narration += ` | Settled across ${processedAllocations.length} purchase(s): ${processedAllocations.map((a) => `${a.invoiceNumber} (₹${a.allocatedAmount.toLocaleString()})`).join(", ")}`;
+      }
 
       await LedgerTransaction.create(
         [
@@ -623,7 +691,7 @@ export const executeVendorPayment = async (req, res) => {
             debit: payoutAmount,
             credit: 0,
             runningBalance: newOutstanding,
-            narration: `Payout issued via ${paymentMode}. Amount Paid: ₹${payoutAmount.toLocaleString()}`,
+            narration,
             branchId: payment.branchId,
             tenantId,
             createdBy: userId,
