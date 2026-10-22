@@ -176,15 +176,6 @@ export function generateCustomerStatementHTML(data) {
             ? fmtNum(t.credit)
             : "0.00";
 
-        const balStr = dueAmount > 0
-          ? `₹${fmtNum(dueAmount)} (Due)`
-          : orderTotal > 0
-            ? "₹0.00 (Paid)"
-            : Number(t.runningBalance || 0) > 0
-              ? `₹${fmtNum(t.runningBalance)} (Due)`
-              : "₹0.00";
-
-        const ref = t.orderNumber || t.referenceNumber || t.voucherId || "0";
         const isDirectPayment = Boolean(
           (t.referenceNumber && String(t.referenceNumber).startsWith("CPAY")) ||
           t.voucherType === "Receipt" ||
@@ -199,6 +190,18 @@ export function generateCustomerStatementHTML(data) {
           t.voucherType === "Invoice" ||
           (t.orderGrandTotal != null && Number(t.orderGrandTotal) > 0)
         );
+
+        const balStr = isOrder
+          ? (dueAmount <= 0 ? "Paid" : `₹${fmtNum(dueAmount)} (Due)`)
+          : (dueAmount > 0
+              ? `₹${fmtNum(dueAmount)} (Due)`
+              : Number(t.runningBalance || 0) > 0
+                ? `₹${fmtNum(t.runningBalance)} (Due)`
+                : Number(t.runningBalance || 0) < 0
+                  ? `₹${fmtNum(Math.abs(t.runningBalance))} (Adv)`
+                  : "0.00");
+
+        const ref = t.orderNumber || t.referenceNumber || t.voucherId || "0";
 
         let particulars = "";
         if (isDirectPayment) {
@@ -298,7 +301,7 @@ export function generateCustomerStatementHTML(data) {
               <td style="border-right:1px solid #000; padding:6px 6px; font-size:9.5px; color:#1e293b;">${particulars}</td>
               <td style="border-right:1px solid #000; padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:600; color:#0f172a;">${debitStr}</td>
               <td style="border-right:1px solid #000; padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:#15803d;">${creditStr}</td>
-              <td style="padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:${dueAmount > 0 ? "#b91c1c" : "#15803d"};">${balStr}</td>
+              <td style="padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:${(isOrder ? dueAmount > 0 : balStr.includes('(Due)')) ? '#b91c1c' : '#15803d'};">${balStr}</td>
             </tr>
             ${paymentsRow}
           `;

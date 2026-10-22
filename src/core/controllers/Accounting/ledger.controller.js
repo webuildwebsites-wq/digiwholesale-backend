@@ -463,10 +463,10 @@ export const getCustomerLedgerStatement = async (req, res) => {
         });
       }
 
-      const totalOrderPaid = Number((Number(bo.advanceAmount || 0) + allocatedSum + absorbedAdvance).toFixed(2));
+      const totalOrderPaid = Math.min(totals.grandTotal, Number((initialAdvance + allocatedSum + absorbedAdvance).toFixed(2)));
       const effectiveBalanceDue = Math.max(0, Number((totals.grandTotal - totalOrderPaid).toFixed(2)));
       const effectivePaymentStatus =
-        totalOrderPaid >= totals.grandTotal && totals.grandTotal > 0
+        effectiveBalanceDue <= 0 && totals.grandTotal > 0
           ? "PAID"
           : totalOrderPaid > 0
             ? "PARTIAL"
@@ -1498,10 +1498,40 @@ export const getCustomerOrdersForLedger = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    const customerPayments = await Payment.find({
+      partyId: customerId,
+      status: { $ne: "BOUNCED" },
+    }).lean();
+
     const orders = bulkOrders.map((bo) => {
       const totals = calculateBulkOrderTotals(bo);
       const firstOrder = bo.orders?.[0] || {};
       const orderNumber = firstOrder.orderNumber || bo._id.toString().slice(-6).toUpperCase();
+
+      const matchedPayments = customerPayments.filter((p) =>
+        (p.allocations || []).some(
+          (a) => String(a.invoiceId) === String(bo._id) || a.invoiceNumber === orderNumber
+        )
+      );
+
+      let allocatedSum = 0;
+      matchedPayments.forEach((p) => {
+        const alloc = (p.allocations || []).find(
+          (a) => String(a.invoiceId) === String(bo._id) || a.invoiceNumber === orderNumber
+        );
+        allocatedSum += Number(alloc?.allocatedAmount || p.grossAmount || 0);
+      });
+
+      const initialAdvance = Math.max(0, Number((Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)));
+      const totalOrderPaid = Math.min(totals.grandTotal, Number((initialAdvance + allocatedSum).toFixed(2)));
+      const effectiveBalanceDue = Math.max(0, Number((totals.grandTotal - totalOrderPaid).toFixed(2)));
+      const effectivePaymentStatus =
+        effectiveBalanceDue <= 0 && totals.grandTotal > 0
+          ? "PAID"
+          : totalOrderPaid > 0
+            ? "PARTIAL"
+            : "UNPAID";
+      const effectivePct = totals.grandTotal > 0 ? Math.min(100, Math.round((totalOrderPaid / totals.grandTotal) * 100)) : 0;
 
       return {
         _id: bo._id,
@@ -1517,11 +1547,11 @@ export const getCustomerOrdersForLedger = async (req, res) => {
         gstAmount: totals.gstAmount,
         grandTotal: totals.grandTotal,
         totalOrderPrice: totals.grandTotal,
-        paidAmount: totals.paidAmount,
-        advanceAmount: totals.paidAmount,
-        balanceDue: totals.balanceDue,
-        paymentStatus: totals.paymentStatus,
-        partPaymentPercentage: totals.partPaymentPercentage,
+        paidAmount: totalOrderPaid,
+        advanceAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        paymentStatus: effectivePaymentStatus,
+        partPaymentPercentage: effectivePct,
         isGSTRegistered: Boolean(customer.isGSTRegistered),
         gstNumber: customer.gstNumber || "",
         items: firstOrder.items || [],
@@ -1803,6 +1833,15 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
         });
       }
 
+      const totalOrderPaid = Math.min(totals.grandTotal, Number((initialAdvance + allocatedSum + absorbedAdvance).toFixed(2)));
+      const effectiveBalanceDue = Math.max(0, Number((totals.grandTotal - totalOrderPaid).toFixed(2)));
+      const effectivePaymentStatus =
+        effectiveBalanceDue <= 0 && totals.grandTotal > 0
+          ? "PAID"
+          : totalOrderPaid > 0
+            ? "PARTIAL"
+            : "UNPAID";
+
       const orderEntry = {
         _id: bo._id,
         orderId: bo._id,
@@ -1811,9 +1850,10 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
         orderDate: bo.createdAt,
         orderStatus: firstOrder.status || "Submitted",
         grandTotal: totals.grandTotal,
-        paidAmount: totals.paidAmount,
-        advanceAmount: totals.paidAmount,
-        balanceDue: totals.balanceDue,
+        paidAmount: totalOrderPaid,
+        advanceAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        paymentStatus: effectivePaymentStatus,
         itemsCount: totals.itemsCount,
         orderPayments,
       };

@@ -10,6 +10,7 @@ import {
   sendSuccessResponse,
   sendErrorResponse,
 } from "../../../Utils/response/responseHandler.js";
+import { calculateBulkOrderTotals } from "./ledger.controller.js";
 import {
   generatePaymentReceiptPDF,
   sendPaymentReceiptEmail,
@@ -133,14 +134,46 @@ export const executeCustomerPayment = async (req, res) => {
       const processedAllocations = [];
 
       for (const alloc of allocations) {
-        if (alloc.allocatedAmount && alloc.allocatedAmount > 0) {
-          totalAllocated += Number(alloc.allocatedAmount);
+        if (alloc.allocatedAmount && Number(alloc.allocatedAmount) > 0) {
+          const reqAlloc = Number(alloc.allocatedAmount);
+          let safeAlloc = reqAlloc;
+
+          if (alloc.invoiceId && mongoose.Types.ObjectId.isValid(alloc.invoiceId)) {
+            const bo = await BulkOrder.findById(alloc.invoiceId).session(session);
+            if (bo) {
+              const boTotals = calculateBulkOrderTotals(bo);
+              const payments = await Payment.find({
+                partyId: customerId,
+                status: { $ne: "BOUNCED" },
+              }).session(session).lean();
+
+              let allocatedSum = 0;
+              payments.forEach((p) => {
+                (p.allocations || []).forEach((a) => {
+                  if (String(a.invoiceId) === String(bo._id)) {
+                    allocatedSum += Number(a.allocatedAmount || 0);
+                  }
+                });
+              });
+
+              const initialAdvance = Math.max(0, Number((Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)));
+              const totalPaid = Number((initialAdvance + allocatedSum).toFixed(2));
+              const remainingDue = Math.max(0, Number((boTotals.grandTotal - totalPaid).toFixed(2)));
+
+              if (remainingDue <= 0) {
+                throw new Error(`Order #${alloc.invoiceNumber || bo._id} is already fully paid. Duplicate payment collection is not permitted.`);
+              }
+              safeAlloc = Math.min(reqAlloc, remainingDue);
+            }
+          }
+
+          totalAllocated += safeAlloc;
           processedAllocations.push({
             invoiceId: alloc.invoiceId,
             invoiceNumber: alloc.invoiceNumber || "INV-REF",
             invoiceModel: alloc.invoiceModel || "bulkOrders",
-            invoiceTotal: alloc.invoiceTotal || alloc.allocatedAmount,
-            allocatedAmount: Number(alloc.allocatedAmount),
+            invoiceTotal: alloc.invoiceTotal || safeAlloc,
+            allocatedAmount: safeAlloc,
           });
 
           if (
@@ -150,7 +183,7 @@ export const executeCustomerPayment = async (req, res) => {
             await BulkOrder.findByIdAndUpdate(
               alloc.invoiceId,
               {
-                $inc: { advanceAmount: Number(alloc.allocatedAmount) },
+                $inc: { advanceAmount: safeAlloc },
               },
               { session },
             ).catch(() => null);
