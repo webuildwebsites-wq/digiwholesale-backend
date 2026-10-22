@@ -118,11 +118,50 @@ export function generateVendorStatementHTML(data) {
     }
   }
 
+  // Filter out any standalone payment rows that are already displayed as nested installments under their parent Purchase Invoice
+  const allocatedPaymentIds = new Set();
+  (transactions || []).forEach((t) => {
+    if (t.orderPayments && Array.isArray(t.orderPayments)) {
+      t.orderPayments.forEach((p) => {
+        if (p.paymentNumber) allocatedPaymentIds.add(String(p.paymentNumber));
+        if (p.referenceNumber) allocatedPaymentIds.add(String(p.referenceNumber));
+        if (p.paymentId) allocatedPaymentIds.add(String(p.paymentId));
+        if (p._id) allocatedPaymentIds.add(String(p._id));
+      });
+    }
+  });
+
+  const displayTransactions = (transactions || []).filter((t) => {
+    const isPayout =
+      t.voucherType === "Payment Voucher" ||
+      (t.referenceNumber &&
+        (String(t.referenceNumber).startsWith("VPAY-") ||
+          String(t.referenceNumber).startsWith("PAY-"))) ||
+      (Number(t.debit) > 0 && !String(t.referenceNumber || "").startsWith("PO-"));
+
+    if (!isPayout) return true;
+    if (t.isOrderAllocatedPayment) return false;
+
+    const ref = String(t.referenceNumber || "");
+    const vId = String(t.voucherId || "");
+    const id = String(t._id || "");
+
+    if (
+      (ref && allocatedPaymentIds.has(ref)) ||
+      (vId && allocatedPaymentIds.has(vId)) ||
+      (id && allocatedPaymentIds.has(id))
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+
   // Build Transaction Rows
   const rowsHtml =
-    !transactions || transactions.length === 0
+    !displayTransactions || displayTransactions.length === 0
       ? `<tr><td colspan="7" style="text-align:center; padding:15px; color:#64748B; font-size:10px;">No transactions recorded for this vendor account.</td></tr>`
-      : transactions
+      : displayTransactions
           .map((t, idx) => {
             const d = fmtDate(t.transactionDate || t.createdAt);
             const isPurchase =

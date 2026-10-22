@@ -1378,6 +1378,101 @@ export const downloadVendorLedgerStatementPDF = async (req, res) => {
       };
     });
 
+    // Collect all payment references that are allocated to purchases
+    const allocatedPaymentRefs = new Set();
+    ordersMap.forEach((entry) => {
+      (entry.orderPayments || []).forEach((p) => {
+        if (p.paymentNumber) allocatedPaymentRefs.add(String(p.paymentNumber));
+        if (p.referenceNumber) allocatedPaymentRefs.add(String(p.referenceNumber));
+        if (p.paymentId) allocatedPaymentRefs.add(String(p.paymentId));
+        if (p._id) allocatedPaymentRefs.add(String(p._id));
+      });
+    });
+
+    vendorPayments.forEach((p) => {
+      if (Array.isArray(p.allocations) && p.allocations.length > 0) {
+        const hasValidAlloc = p.allocations.some((a) => Number(a.allocatedAmount || 0) > 0);
+        if (hasValidAlloc) {
+          if (p.paymentNumber) allocatedPaymentRefs.add(String(p.paymentNumber));
+          if (p._id) allocatedPaymentRefs.add(String(p._id));
+          if (p.paymentDetails?.utrNumber) allocatedPaymentRefs.add(String(p.paymentDetails.utrNumber));
+        }
+      }
+    });
+
+    // Exclude payment rows that are already displayed as nested installments under their parent purchase invoice
+    const standaloneTransactions = enrichedTxns.filter((t) => {
+      const isPayout = Boolean(
+        (t.referenceNumber && String(t.referenceNumber).startsWith('VPAY')) ||
+        (t.referenceNumber && String(t.referenceNumber).startsWith('PAY-')) ||
+        t.voucherType === 'Payment Voucher' ||
+        (Number(t.debit) > 0 && !String(t.referenceNumber || '').startsWith('PO-'))
+      );
+      if (!isPayout) return true;
+
+      const isAllocated =
+        t.isOrderAllocatedPayment ||
+        allocatedPaymentRefs.has(String(t.referenceNumber || '')) ||
+        allocatedPaymentRefs.has(String(t.voucherId || '')) ||
+        allocatedPaymentRefs.has(String(t._id || ''));
+
+      return !isAllocated;
+    });
+
+    // Detect any unrecorded purchase orders not in rawTxns
+    const existingTxnVoucherKeys = new Set(
+      rawTxns
+        .flatMap((t) => [t.voucherId ? String(t.voucherId) : '', t.referenceNumber || ''])
+        .filter(Boolean)
+    );
+
+    let unrecordedOrderTxns = Array.from(ordersMap.values())
+      .filter((ord, idx, self) => self.findIndex((o) => String(o.orderId) === String(ord.orderId)) === idx)
+      .filter((ord) => !existingTxnVoucherKeys.has(String(ord.orderId)) && !existingTxnVoucherKeys.has(String(ord.orderNumber)))
+      .map((ord) => ({
+        _id: ord.orderId,
+        voucherId: ord.orderId,
+        referenceNumber: ord.orderNumber,
+        transactionDate: ord.orderDate || ord.createdAt,
+        voucherType: 'Purchase Invoice',
+        narration: `Purchase Order #${ord.orderNumber}`,
+        debit: 0,
+        credit: Number(ord.grandTotal || 0),
+        runningBalance: Number(ord.balanceDue || 0),
+        orderId: ord.orderId,
+        orderNumber: ord.orderNumber,
+        orderStatus: ord.orderStatus,
+        orderGrandTotal: Number(ord.grandTotal || 0),
+        orderPaidAmount: Number(ord.paidAmount || 0),
+        orderBalanceDue: Number(ord.balanceDue || 0),
+        orderPayments: ord.orderPayments || [],
+      }));
+
+    if (startDate || endDate) {
+      unrecordedOrderTxns = unrecordedOrderTxns.filter((ord) => {
+        const txDate = new Date(ord.transactionDate || ord.createdAt);
+        if (startDate && txDate < new Date(startDate)) return false;
+        if (endDate) {
+          const endD = new Date(endDate);
+          endD.setHours(23, 59, 59, 999);
+          if (txDate > endD) return false;
+        }
+        return true;
+      });
+    }
+
+    const seenPdfKeys = new Set();
+    const finalTransactions = [...standaloneTransactions, ...unrecordedOrderTxns]
+      .filter((t) => {
+        const key = t.orderNumber || (t.voucherId ? String(t.voucherId) : (t.referenceNumber || String(t._id)));
+        if (seenPdfKeys.has(key)) return false;
+        seenPdfKeys.add(key);
+        return true;
+      })
+      .sort(
+        (a, b) => new Date(a.transactionDate || a.createdAt) - new Date(b.transactionDate || b.createdAt)
+      );
+
     // Totals
     const allTxns = await LedgerTransaction.find(txnQuery).lean();
     let totalDebit = 0; let totalCredit = 0;
@@ -1412,7 +1507,7 @@ export const downloadVendorLedgerStatementPDF = async (req, res) => {
       generatedOn: new Date().toLocaleDateString('en-IN').replace(/\//g, '-'),
       statementPeriod,
       bankDetails: tenant?.bankDetails || {},
-      transactions: enrichedTxns,
+      transactions: finalTransactions,
     });
 
     const pdfBuffer = await generatePDF(html);
