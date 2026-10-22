@@ -230,7 +230,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
 
     const isPaginationRequested = Boolean(page && limit);
     let transactionsQuery = LedgerTransaction.find(query)
-      .sort({ transactionDate: -1, createdAt: -1 })
+      .sort({ transactionDate: 1, createdAt: 1 })
       .populate("createdBy", "name username");
 
     if (isPaginationRequested) {
@@ -240,7 +240,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
         .limit(parseInt(limit, 10));
     }
 
-    const rawTransactions = await transactionsQuery.lean();
+    let rawTransactions = await transactionsQuery.lean();
     let allTxnsForSummary = [];
 
     const activeTenantId = customer.tenantId || req.tenantId || req.user?.tenantId;
@@ -274,8 +274,17 @@ export const getCustomerLedgerStatement = async (req, res) => {
       .lean();
 
     // Auto-sync: Check if any confirmed bulkOrder is missing from LedgerTransactions
+    // IMPORTANT: Use ALL transactions (not date-filtered) for dedup check to avoid creating
+    // duplicate LedgerTransaction records when date filters are active
+    const baseQuery = {
+      $or: [
+        { ledgerId: ledgerObj._id },
+        { partyId: customerId, entityType: "Customer" },
+      ],
+    };
+    const allExistingTxns = await LedgerTransaction.find(baseQuery).select('voucherId referenceNumber').lean();
     const existingTxnVoucherKeys = new Set(
-      rawTransactions.flatMap((t) => [
+      allExistingTxns.flatMap((t) => [
         t.voucherId ? String(t.voucherId) : '',
         t.referenceNumber || '',
       ]).filter(Boolean)
@@ -309,15 +318,44 @@ export const getCustomerLedgerStatement = async (req, res) => {
             createdBy: null,
           }]);
           if (newTxn) {
-            rawTransactions.push(newTxn.toObject ? newTxn.toObject() : newTxn);
             existingTxnVoucherKeys.add(String(bo._id));
             existingTxnVoucherKeys.add(orderRef);
+
+            // Only push to rawTransactions if within current date filter range
+            let inRange = true;
+            const tDate = new Date(newTxn.transactionDate);
+            if (startDate && tDate < new Date(startDate)) inRange = false;
+            if (endDate) {
+              const endD = new Date(endDate);
+              endD.setHours(23, 59, 59, 999);
+              if (tDate > endD) inRange = false;
+            }
+            if (inRange) {
+              rawTransactions.push(newTxn.toObject ? newTxn.toObject() : newTxn);
+            }
           }
         } catch (syncErr) {
           console.warn("[Ledger] Auto-sync missing transaction error for order:", bo._id, syncErr.message);
         }
       }
     }
+
+    // Deduplicate rawTransactions by voucherId and referenceNumber to guarantee no duplicate rows
+    const seenVoucherKeys = new Set();
+    rawTransactions = rawTransactions.filter(t => {
+      const vKey = t.voucherId ? String(t.voucherId) : null;
+      const rKey = t.referenceNumber ? String(t.referenceNumber) : null;
+      if (vKey && seenVoucherKeys.has(vKey)) return false;
+      if (rKey && seenVoucherKeys.has(rKey)) return false;
+      if (vKey) seenVoucherKeys.add(vKey);
+      if (rKey) seenVoucherKeys.add(rKey);
+      if (!vKey && !rKey) {
+        const idKey = String(t._id);
+        if (seenVoucherKeys.has(idKey)) return false;
+        seenVoucherKeys.add(idKey);
+      }
+      return true;
+    });
 
     let totalDebit = 0;
     let totalCredit = 0;
@@ -1541,7 +1579,9 @@ const buildLedgerStatementHTML = (data) => {
 export const downloadCustomerLedgerStatementPDF = async (req, res) => {
   try {
     const { customerId } = req.params;
-    const forceRegenerate = req.query.regenerate === "true" || req.query.refresh === "true";
+    const { startDate, endDate } = req.query;
+    const hasDateFilter = Boolean(startDate || endDate);
+    const forceRegenerate = hasDateFilter || req.query.regenerate === "true" || req.query.refresh === "true";
 
     if (!mongoose.Types.ObjectId.isValid(customerId)) {
       return sendErrorResponse(res, 400, "INVALID_CUSTOMER_ID", "Invalid customer ID.");
@@ -1586,17 +1626,37 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
       ],
     };
 
-    let rawTransactions = await LedgerTransaction.find(query).sort({ transactionDate: -1, createdAt: -1 }).lean();
+    // Apply date filter if startDate/endDate provided
+    if (startDate || endDate) {
+      query.transactionDate = {};
+      if (startDate) query.transactionDate.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.transactionDate.$lte = end;
+      }
+    }
+
+    let rawTransactions = await LedgerTransaction.find(query).sort({ transactionDate: 1, createdAt: 1 }).lean();
 
     // 2. Fetch customer bulk orders
-    const bulkOrders = await BulkOrder.find({ "customer.customerId": customer._id }).sort({ createdAt: -1 }).lean();
+    const bulkOrderQuery = { "customer.customerId": customer._id };
+    const bulkOrders = await BulkOrder.find(bulkOrderQuery).sort({ createdAt: 1 }).lean();
 
     // 3. Fetch customer payments
     const customerPayments = await Payment.find({ partyId: customer._id }).sort({ createdAt: 1 }).lean();
 
     // Auto-sync missing orders to transactions
+    // IMPORTANT: Use ALL transactions (not date-filtered) for dedup check
+    const basePdfQuery = {
+      $or: [
+        { ledgerId: ledger._id },
+        { partyId: customer._id, entityType: "Customer" },
+      ],
+    };
+    const allExistingPdfTxns = await LedgerTransaction.find(basePdfQuery).select('voucherId referenceNumber').lean();
     const existingTxnVoucherKeys = new Set(
-      rawTransactions.flatMap((t) => [
+      allExistingPdfTxns.flatMap((t) => [
         t.voucherId ? String(t.voucherId) : "",
         t.referenceNumber || "",
       ]).filter(Boolean)
@@ -1630,15 +1690,44 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
             createdBy: null,
           }]);
           if (newTxn) {
-            rawTransactions.push(newTxn.toObject ? newTxn.toObject() : newTxn);
             existingTxnVoucherKeys.add(String(bo._id));
             existingTxnVoucherKeys.add(orderRef);
+
+            // Only push to rawTransactions if within date filter range
+            let inRange = true;
+            const tDate = new Date(newTxn.transactionDate);
+            if (startDate && tDate < new Date(startDate)) inRange = false;
+            if (endDate) {
+              const endD = new Date(endDate);
+              endD.setHours(23, 59, 59, 999);
+              if (tDate > endD) inRange = false;
+            }
+            if (inRange) {
+              rawTransactions.push(newTxn.toObject ? newTxn.toObject() : newTxn);
+            }
           }
         } catch (syncErr) {
           console.warn("[Ledger PDF] Auto-sync error:", syncErr.message);
         }
       }
     }
+
+    // Deduplicate rawTransactions by voucherId and referenceNumber
+    const seenPdfVoucherKeys = new Set();
+    rawTransactions = rawTransactions.filter(t => {
+      const vKey = t.voucherId ? String(t.voucherId) : null;
+      const rKey = t.referenceNumber ? String(t.referenceNumber) : null;
+      if (vKey && seenPdfVoucherKeys.has(vKey)) return false;
+      if (rKey && seenPdfVoucherKeys.has(rKey)) return false;
+      if (vKey) seenPdfVoucherKeys.add(vKey);
+      if (rKey) seenPdfVoucherKeys.add(rKey);
+      if (!vKey && !rKey) {
+        const idKey = String(t._id);
+        if (seenPdfVoucherKeys.has(idKey)) return false;
+        seenPdfVoucherKeys.add(idKey);
+      }
+      return true;
+    });
 
     // Map orders
     const ordersMap = new Map();
@@ -1786,8 +1875,8 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
     const txnOrderIds = new Set(enrichedTransactions.map((t) => t.orderId ? String(t.orderId) : "").filter(Boolean));
     const txnOrderNumbers = new Set(enrichedTransactions.map((t) => t.orderNumber || "").filter(Boolean));
 
-    const unrecordedOrderTxns = customerOrdersList
-      .filter((ord) => !txnOrderIds.has(String(ord.orderId)) && !txnOrderNumbers.has(String(ord.orderNumber)))
+    let unrecordedOrderTxns = customerOrdersList
+      .filter((ord) => !existingTxnVoucherKeys.has(String(ord.orderId)) && !existingTxnVoucherKeys.has(String(ord.orderNumber)))
       .map((ord) => ({
         _id: ord.orderId,
         voucherId: ord.orderId,
@@ -1807,9 +1896,31 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
         orderPayments: ord.orderPayments || [],
       }));
 
-    const unifiedTransactions = [...standaloneTransactions, ...unrecordedOrderTxns].sort(
-      (a, b) => new Date(b.transactionDate || b.createdAt) - new Date(a.transactionDate || a.createdAt)
-    );
+    // Apply date filtering to unrecorded order transactions
+    if (startDate || endDate) {
+      unrecordedOrderTxns = unrecordedOrderTxns.filter((t) => {
+        const txDate = new Date(t.transactionDate);
+        if (startDate && txDate < new Date(startDate)) return false;
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          if (txDate > end) return false;
+        }
+        return true;
+      });
+    }
+
+    const seenPdfUnifiedKeys = new Set();
+    const unifiedTransactions = [...standaloneTransactions, ...unrecordedOrderTxns]
+      .filter((t) => {
+        const key = t.orderNumber || (t.voucherId ? String(t.voucherId) : (t.referenceNumber || String(t._id)));
+        if (seenPdfUnifiedKeys.has(key)) return false;
+        seenPdfUnifiedKeys.add(key);
+        return true;
+      })
+      .sort(
+        (a, b) => new Date(a.transactionDate || a.createdAt) - new Date(b.transactionDate || b.createdAt)
+      );
 
     const totalDebit  = unifiedTransactions.reduce((s, t) => s + Number(t.orderGrandTotal != null ? t.orderGrandTotal : t.debit || 0), 0);
     const totalCredit = unifiedTransactions.reduce((s, t) => s + Number(t.orderPaidAmount != null ? t.orderPaidAmount : t.credit || 0), 0);
@@ -1884,20 +1995,24 @@ export const downloadCustomerLedgerStatementPDF = async (req, res) => {
       companyLogo,
       bankDetails,
       generatedOn: new Date().toLocaleDateString("en-IN"),
-      statementPeriod: "All Time (Complete Ledger)",
+      statementPeriod: startDate
+        ? `${new Date(startDate).toLocaleDateString("en-IN")} to ${endDate ? new Date(endDate).toLocaleDateString("en-IN") : "Today"}`
+        : "All Time (Complete Ledger)",
       transactions: unifiedTransactions,
     };
 
     const html = buildLedgerStatementHTML(htmlData);
     const buffer = await generatePDF(html);
 
-    // Upload to GCS in background
-    uploadLedgerPDFToGCS(buffer, fileName).then(async (url) => {
-      if (url) {
-        await CustomerLedger.updateOne({ customerId }, { statementPdfUrl: url, statementPdfVersion: "v5_clean_ledger", statementPdfGenAt: new Date() });
-        console.log(`[PDF] Ledger statement stored: ${url}`);
-      }
-    }).catch((e) => console.warn("[PDF] GCS statement upload error:", e.message));
+    // Upload to GCS in background (skip for date-filtered statements to avoid polluting cache)
+    if (!hasDateFilter) {
+      uploadLedgerPDFToGCS(buffer, fileName).then(async (url) => {
+        if (url) {
+          await CustomerLedger.updateOne({ customerId }, { statementPdfUrl: url, statementPdfVersion: "v5_clean_ledger", statementPdfGenAt: new Date() });
+          console.log(`[PDF] Ledger statement stored: ${url}`);
+        }
+      }).catch((e) => console.warn("[PDF] GCS statement upload error:", e.message));
+    }
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
