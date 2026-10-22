@@ -1728,7 +1728,7 @@ export const getCustomerLedgersList = async (req, res) => {
 
 export const getVendorLedgersList = async (req, res) => {
   try {
-    const { search, status, page = 1, limit = 50 } = req.query;
+    const { search, status, duFilter, page = 1, limit = 50 } = req.query;
     const tenantId = req.user?.tenantId || null;
 
     const vendorQuery = {};
@@ -1749,6 +1749,33 @@ export const getVendorLedgersList = async (req, res) => {
     const vendors = await Vendor.find(vendorQuery)
       .sort({ createdAt: -1 })
       .lean();
+
+    // Batch-fetch all VendorPurchase + Payment for this tenant's vendors
+    const vendorIds = vendors.map((v) => v._id);
+
+    const [allPurchases, allPayments] = await Promise.all([
+      VendorPurchase.find({ "vendor.vendorId": { $in: vendorIds } })
+        .select("vendor orders shippingCharges otherCharges createdAt")
+        .lean(),
+      Payment.find({ partyId: { $in: vendorIds }, type: "VENDOR_OUTFLOW" })
+        .select("partyId grossAmount status allocations createdAt")
+        .lean(),
+    ]);
+
+    // Group by vendor
+    const purchasesByVendor = new Map();
+    allPurchases.forEach((p) => {
+      const vid = String(p.vendor?.vendorId);
+      if (!purchasesByVendor.has(vid)) purchasesByVendor.set(vid, []);
+      purchasesByVendor.get(vid).push(p);
+    });
+
+    const paymentsByVendor = new Map();
+    allPayments.forEach((p) => {
+      const vid = String(p.partyId);
+      if (!paymentsByVendor.has(vid)) paymentsByVendor.set(vid, []);
+      paymentsByVendor.get(vid).push(p);
+    });
 
     const ledgers = [];
     for (const v of vendors) {
@@ -1798,16 +1825,123 @@ export const getVendorLedgersList = async (req, res) => {
       lObj.vendorId = v;
       lObj.paymentTerms = lObj.paymentTerms || vPaymentTerms;
 
+      // ── Compute purchase-level financials ─────────────────────────────
+      const vendorPurchases = purchasesByVendor.get(String(v._id)) || [];
+      const vendorPayments = paymentsByVendor.get(String(v._id)) || [];
+
+      // Total purchased (credit limit proxy = cumulative purchase value)
+      let totalPurchasedAmount = 0;
+      let latestPurchaseDate = null;
+      let purchasesCount = 0;
+      let openPurchasesCount = 0;
+
+      vendorPurchases.forEach((vp) => {
+        const firstOrder = vp.orders?.[0] || {};
+        if (firstOrder.status === "Draft") return;
+        purchasesCount++;
+        const storedTotal = Number(firstOrder.totalOrderPrice || 0);
+        let calcTotal = 0;
+        if (storedTotal > 0) {
+          calcTotal = storedTotal;
+        } else {
+          (firstOrder.items || []).forEach((item) => {
+            const price = Number(item.price || item.buyingPrice || 0);
+            const qty = Number(item.qty || 0);
+            const gst = Number(item.gst || 0);
+            const base = price * qty;
+            calcTotal += base + (base * gst) / 100;
+          });
+          calcTotal +=
+            Number(vp.shippingCharges || 0) + Number(vp.otherCharges || 0);
+        }
+        totalPurchasedAmount += calcTotal;
+
+        const pd = new Date(vp.createdAt);
+        if (!latestPurchaseDate || pd > latestPurchaseDate)
+          latestPurchaseDate = pd;
+
+        const isOpen = !["Received", "Closed", "Cancelled"].includes(
+          firstOrder.status,
+        );
+        if (isOpen) openPurchasesCount++;
+      });
+
+      // Total paid out to vendor
+      let totalPaidOut = 0;
+      vendorPayments.forEach((p) => {
+        if (p.status !== "CANCELLED" && p.status !== "REVERSED") {
+          totalPaidOut += Number(p.grossAmount || 0);
+        }
+      });
+
+      // Pending due = what we still owe (purchases − payments, capped ≥ 0)
+      const rawBalance = totalPurchasedAmount - totalPaidOut;
+      const pendingDue = Math.max(0, Number(rawBalance.toFixed(2)));
+      // Advance = if we've paid more than we purchased (overpaid)
+      const advanceAmount = rawBalance < 0 ? Math.abs(Number(rawBalance.toFixed(2))) : 0;
+
+      // Credit limit for vendor = user-configured limit or total purchased (as utilization reference)
+      const configuredCreditLimit = Number(lObj.creditLimit || v.creditLimit || 0);
+      // If no configured limit, use total purchased as the "ceiling" for utilization display
+      const effectiveCreditLimit = configuredCreditLimit > 0 ? configuredCreditLimit : totalPurchasedAmount;
+
+      // Credit used = total pending (what we owe)
+      const creditUsed = pendingDue;
+
+      // Credit status (payable health)
+      let payableStatus = "SETTLED";
+      if (pendingDue > 0) {
+        const utilizationPct = effectiveCreditLimit > 0
+          ? (pendingDue / effectiveCreditLimit) * 100
+          : 100;
+        payableStatus = utilizationPct >= 100
+          ? "HIGH_DUE"
+          : utilizationPct >= 80
+            ? "MEDIUM_DUE"
+            : "LOW_DUE";
+      }
+
+      lObj.creditLimit = configuredCreditLimit;
+      lObj.creditUsed = creditUsed;
+      lObj.pendingDue = pendingDue;
+      lObj.advanceAmount = advanceAmount;
+      lObj.totalPurchasedAmount = totalPurchasedAmount;
+      lObj.totalPaidOut = totalPaidOut;
+      lObj.payableStatus = payableStatus;
+      lObj.isGSTRegistered = Boolean(v.gstNumber || lObj.gstin);
+      lObj.purchasesSummary = {
+        purchasesCount,
+        openPurchasesCount,
+        latestPurchaseDate: latestPurchaseDate?.toISOString() || null,
+      };
+
+      // Apply duFilter if set
+      if (duFilter === "DUE" && pendingDue <= 0) continue;
+      if (duFilter === "ADVANCE" && advanceAmount <= 0) continue;
+      if (duFilter === "SETTLED" && (pendingDue > 0 || advanceAmount > 0)) continue;
+
       if (!status || lObj.ledgerStatus === status) {
         ledgers.push(lObj);
       }
     }
+
+    // Aggregate metrics
+    const metrics = {
+      totalPayables: ledgers.reduce((s, l) => s + (l.pendingDue > 0 ? l.pendingDue : 0), 0),
+      totalAdvancesPaid: ledgers.reduce((s, l) => s + (l.advanceAmount || 0), 0),
+      totalPurchasedAmount: ledgers.reduce((s, l) => s + (l.totalPurchasedAmount || 0), 0),
+      totalPaidOut: ledgers.reduce((s, l) => s + (l.totalPaidOut || 0), 0),
+      highDueCount: ledgers.filter((l) => l.payableStatus === "HIGH_DUE").length,
+      mediumDueCount: ledgers.filter((l) => l.payableStatus === "MEDIUM_DUE").length,
+      settledCount: ledgers.filter((l) => l.payableStatus === "SETTLED").length,
+    };
 
     return sendSuccessResponse(
       res,
       200,
       {
         ledgers,
+        metrics,
         pagination: {
           total: ledgers.length,
           page: parseInt(page, 10),
@@ -1827,6 +1961,7 @@ export const getVendorLedgersList = async (req, res) => {
     );
   }
 };
+
 
 
 export const upsertCustomerLedger = async (req, res) => {
@@ -1943,6 +2078,7 @@ export const upsertVendorLedger = async (req, res) => {
       gstin,
       pan,
       paymentTerms,
+      creditLimit,
       openingBalance,
       openingBalanceType,
       ledgerStatus,
@@ -1968,6 +2104,7 @@ export const upsertVendorLedger = async (req, res) => {
         ledgerCode: `VEND-LED-${vendorId.toString().slice(-6).toUpperCase()}`,
         vendorId,
         currentOutstanding: Number(openingBalance || 0),
+        creditLimit: Number(creditLimit || 0),
         tenantId,
         createdBy: userId,
       });
@@ -1978,6 +2115,7 @@ export const upsertVendorLedger = async (req, res) => {
     if (gstin) ledger.gstin = gstin;
     if (pan) ledger.pan = pan;
     if (paymentTerms !== undefined) ledger.paymentTerms = Number(paymentTerms);
+    if (creditLimit !== undefined) ledger.creditLimit = Number(creditLimit);
     if (openingBalance !== undefined)
       ledger.openingBalance = Number(openingBalance);
     if (openingBalanceType) ledger.openingBalanceType = openingBalanceType;
@@ -1988,10 +2126,15 @@ export const upsertVendorLedger = async (req, res) => {
 
     await ledger.save();
 
+    const vendorUpdate = {};
     if (paymentTerms !== undefined) {
-      await Vendor.findByIdAndUpdate(vendorId, {
-        $set: { paymentTerms: `${paymentTerms} Days` },
-      });
+      vendorUpdate.paymentTerms = `${paymentTerms} Days`;
+    }
+    if (creditLimit !== undefined) {
+      vendorUpdate.creditLimit = Number(creditLimit);
+    }
+    if (Object.keys(vendorUpdate).length > 0) {
+      await Vendor.findByIdAndUpdate(vendorId, { $set: vendorUpdate });
     }
 
     return sendSuccessResponse(

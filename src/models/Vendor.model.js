@@ -45,6 +45,12 @@ const vendorSchema = new mongoose.Schema(
       uppercase: true,
     },
 
+    creditLimit: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     notes: {
       type: String,
       trim: true,
