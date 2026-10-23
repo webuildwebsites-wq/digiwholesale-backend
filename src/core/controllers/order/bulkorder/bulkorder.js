@@ -16,7 +16,7 @@ import { handleOrderBillingNotification } from "../../../services/billing/billin
 import { sendWhatsAppMessage, customerOrderCreditDueWhatsApp } from "../../../../Utils/whatsapp/whatsappService.js";
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
 import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
-import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
+import { invalidatePDFs } from "../../../services/pdfStorageService.js";
 import { applyPurchaseToVendorLedger } from "../../Purchase/purchase.controller.js";
 import { bucket } from "../../../config/bucket/gcs.js";
 
@@ -1178,13 +1178,6 @@ export const createBulkOrder = async (req, res) => {
                 customerName: customer.ownerName || customer.shopName,
                 orderNumber:  bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
             }).catch(err => console.error("Low stock alert error:", err.message));
-
-            generateAndStoreChallan(bulkOrder._id.toString(), req.user.tenantId).catch(err =>
-                console.error("Pre-generate challan error:", err.message)
-            );
-            generateAndStoreInvoice(bulkOrder._id.toString(), req.user.tenantId).catch(err =>
-                console.error("Pre-generate invoice error:", err.message)
-            );
         }
 
         return sendSuccessResponse(res, 201, {
@@ -1197,74 +1190,11 @@ export const createBulkOrder = async (req, res) => {
 };
 
 export const getBulkOrderChallan = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(orderId)) {
-            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
-        }
-
-        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("challanUrl challanGenAt orders customer").lean();
-        if (!bulkOrder) {
-            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
-        }
-
-        const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
-        const forceRegenerate = req.query.regenerate === 'true' || req.query.refresh === 'true';
-
-        // Check if any payment was recorded after challan was generated
-        let hasNewPayments = false;
-        if (bulkOrder.challanGenAt) {
-            const count = await Payment.countDocuments({
-                $or: [
-                    { "allocations.invoiceId": bulkOrder._id },
-                    { "allocations.invoiceNumber": bulkOrder.orders[0]?.orderNumber }
-                ],
-                createdAt: { $gt: bulkOrder.challanGenAt }
-            });
-            if (count > 0) hasNewPayments = true;
-        }
-
-        const { url, buffer } = await generateAndStoreChallan(orderId, req.user.tenantId);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Length", buffer.length);
-        return res.end(buffer);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Length", buffer.length);
-        return res.end(buffer);
-    } catch (error) {
-        console.error("Get Bulk Order Challan Error:", error);
-        return sendErrorResponse(res, 500, "CHALLAN_ERROR", error.message || "Something went wrong");
-    }
+    return sendErrorResponse(res, 410, "DEPRECATED", "Challan PDF generation is now handled directly on the frontend browser print engine.");
 };
 
 export const getBulkOrderInvoice = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(orderId)) {
-            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
-        }
-
-        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("invoiceUrl orders customer").lean();
-        if (!bulkOrder) {
-            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
-        }
-
-        const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
-        const forceRegenerate = req.query.regenerate === 'true' || req.query.refresh === 'true';
-
-        const { url, buffer } = await generateAndStoreInvoice(orderId, req.user.tenantId);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Length", buffer.length);
-        return res.end(buffer);
-    } catch (error) {
-        console.error("Get Bulk Order Invoice Error:", error);
-        return sendErrorResponse(res, 500, "INVOICE_ERROR", error.message || "Something went wrong");
-    }
+    return sendErrorResponse(res, 410, "DEPRECATED", "Invoice PDF generation is now handled directly on the frontend browser print engine.");
 };
 
 export const updateOrderStatus = async (req, res) => {

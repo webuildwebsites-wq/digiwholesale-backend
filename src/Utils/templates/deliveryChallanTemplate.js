@@ -73,10 +73,6 @@ const fmtAxis = (val) => {
 const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-') : '-');
 
-/**
- * Clean, classic Indian Optical GST Sale Invoice & Delivery Challan layout
- * Matches standardized optical wholesale billing layout without emojis.
- */
 export function renderOpticalDocumentHTML(data, docType = 'INVOICE') {
     const isChallan = docType === 'CHALLAN';
     const title = isChallan ? 'Delivery Challan' : 'Sale Invoice';
@@ -594,16 +590,10 @@ export function renderOpticalDocumentHTML(data, docType = 'INVOICE') {
 </html>`;
 }
 
-/**
- * 1. SALE / DELIVERY CHALLAN HTML TEMPLATE
- */
 export const generateDeliveryChallanHTML = (data) => {
     return renderOpticalDocumentHTML(data, 'CHALLAN');
 };
 
-/**
- * 2. SALE INVOICE HTML TEMPLATE
- */
 export const generatedorderInvoice = (data) => {
     return renderOpticalDocumentHTML(data, 'INVOICE');
 };

@@ -41,10 +41,7 @@ const formatModeLabel = (mode) => {
   return String(mode).replace(/_/g, " ");
 };
 
-/**
- * Optical Wholesale ERP Vendor Ledger Statement HTML Template
- * Mirrors the classic black-border ERP invoice layout from customerStatementTemplate.js
- */
+
 export function generateVendorStatementHTML(data) {
   const {
     vendorName = "Vendor",

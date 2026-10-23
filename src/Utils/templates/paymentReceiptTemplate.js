@@ -74,11 +74,7 @@ const fmtDate = (d) =>
       .replace(/\//g, "-")
     : "-";
 
-/**
- * 1. PAYMENT RECEIPT HTML TEMPLATE (PDF Generation)
- * Clean, classic optical ERP payment receipt matching standard optical billing layout.
- * Supports both Customer Payment Receipts (Inflow) and Vendor Payout Advice (Outflow).
- */
+
 export const generatePaymentReceiptHTML = (data) => {
   const {
     receiptNo,
@@ -467,9 +463,7 @@ export const generatePaymentReceiptHTML = (data) => {
 </html>`;
 };
 
-/**
- * 2. CUSTOMER PAYMENT CONFIRMATION EMAIL HTML TEMPLATE
- */
+
 export const generatePaymentEmailHTML = (data) => {
   const {
     customerName,
@@ -526,9 +520,6 @@ export const generatePaymentEmailHTML = (data) => {
   `;
 };
 
-/**
- * 3. VENDOR PAYMENT DISBURSEMENT EMAIL HTML TEMPLATE
- */
 export const generateVendorPaymentEmailHTML = (data) => {
   const {
     vendorName,

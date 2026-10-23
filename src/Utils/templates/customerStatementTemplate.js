@@ -14,7 +14,6 @@ try {
   staticLogoDataUrl = "";
 }
 
-// Number to Words Converter for INR
 export function numberToWordsINR(num) {
   const n = Math.round(Number(num || 0));
   if (!n || isNaN(n)) return "Zero Rupees Only";
@@ -74,10 +73,7 @@ const fmtDate = (d) =>
       .replace(/\//g, "-")
     : "0";
 
-/**
- * Optical Wholesale ERP Customer Ledger Statement HTML Template
- * Matches the classic black border-based ERP invoice layout with zero emojis.
- */
+
 export function generateCustomerStatementHTML(data) {
   const {
     customerName = "Customer",
