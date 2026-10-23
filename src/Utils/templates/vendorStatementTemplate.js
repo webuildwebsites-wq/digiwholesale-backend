@@ -106,7 +106,7 @@ export function generateVendorStatementHTML(data) {
         const fromStr = fmtDate(new Date(validDates[0]));
         const toStr = fmtDate(new Date(validDates[validDates.length - 1]));
         effectivePeriod =
-          fromStr === toStr ? fromStr : `${fromStr} to ${toStr}`;
+          fromStr === toStr ? fromStr : `From ${fromStr} To ${toStr}`;
       }
     }
     if (
@@ -114,8 +114,10 @@ export function generateVendorStatementHTML(data) {
       effectivePeriod.includes("All Time") ||
       effectivePeriod.includes("Complete Ledger")
     ) {
-      effectivePeriod = `${generatedOn}`;
+      effectivePeriod = `As of ${generatedOn}`;
     }
+  } else if (!effectivePeriod.toLowerCase().startsWith("from") && effectivePeriod.includes("to")) {
+    effectivePeriod = `From ${effectivePeriod.replace(/\s+to\s+/i, " To ")}`;
   }
 
   // Filter out any standalone payment rows that are already displayed as nested installments under their parent Purchase Invoice
@@ -238,6 +240,67 @@ export function generateVendorStatementHTML(data) {
               particulars = t.voucherType || t.description || "General Entry";
             }
 
+            // Purchase Items sub-table (shows items, category, brand, buying price, ref id, order created date)
+            const items = Array.isArray(t.items) ? t.items : [];
+            const orderCreatedDate = t.orderDate || t.createdAt;
+            const itemsRow =
+              isPurchase && items.length > 0
+                ? `
+              <tr style="background:#fff8f8; border-bottom:1px solid #fca5a5;">
+                <td colspan="7" style="padding:4px 6px 6px 6px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; padding-bottom:2px; border-bottom:1px dashed #fca5a5; font-size:8.5px;">
+                    <span style="font-weight:800; color:#b91c1c; text-transform:uppercase; letter-spacing:0.3px;">
+                      Purchase Items (${items.length} Product${items.length > 1 ? "s" : ""}) &bull; PO Ref: <strong style="font-family:monospace; color:#0284c7;">${ref}</strong> &bull; Order Created: <strong style="font-family:monospace; color:#0f172a;">${fmtDate(orderCreatedDate)}</strong>
+                    </span>
+                    <span style="color:#475569; font-weight:600;">
+                      PO Status: <strong>${t.orderStatus || "Submitted"}</strong> &bull; Invoiced Total: <strong style="color:#b91c1c;">₹${creditStr}</strong>
+                    </span>
+                  </div>
+                  <table style="width:100%; border-collapse:collapse; background:#ffffff; border:1px solid #f87171; font-size:8px;">
+                    <thead>
+                      <tr style="background:#fee2e2; border-bottom:1px solid #f87171; font-weight:700; color:#7f1d1d;">
+                        <th style="width:28px; border-right:1px solid #fca5a5; padding:2.5px 3px; text-align:center;">#</th>
+                        <th style="border-right:1px solid #fca5a5; padding:2.5px 5px; text-align:left;">Product / Item Name</th>
+                        <th style="width:95px; border-right:1px solid #fca5a5; padding:2.5px 4px; text-align:left;">Brand</th>
+                        <th style="width:80px; border-right:1px solid #fca5a5; padding:2.5px 4px; text-align:center;">Category / Type</th>
+                        <th style="width:90px; border-right:1px solid #fca5a5; padding:2.5px 4px; text-align:center;">Item Code / Ref</th>
+                        <th style="width:40px; border-right:1px solid #fca5a5; padding:2.5px 4px; text-align:center;">Qty</th>
+                        <th style="width:85px; border-right:1px solid #fca5a5; padding:2.5px 5px; text-align:right;">Buying Price (₹)</th>
+                        <th style="width:85px; padding:2.5px 5px; text-align:right;">Total (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${items
+                        .map((item, iIdx) => {
+                          const itemName = item.itemName || item.productName || item.name || "Product";
+                          const brand = item.brand || item.brandName || "—";
+                          const category = item.category || item.categoryName || item.orderType || "STOCK";
+                          const code = item.code || item.productCode || item.hsnSac || ref || "—";
+                          const buyingPrice = Number(item.buyingPrice || item.price || 0);
+                          const qty = Number(item.qty || 0);
+                          const discount = Number(item.discountAmount || 0);
+                          const total = buyingPrice * qty - discount;
+                          return `
+                            <tr style="border-bottom:1px solid #fee2e2;">
+                              <td style="border-right:1px solid #fca5a5; padding:2.5px 3px; text-align:center; font-weight:700; color:#64748b;">${iIdx + 1}</td>
+                              <td style="border-right:1px solid #fca5a5; padding:2.5px 5px; font-weight:600; color:#0f172a;">${itemName}</td>
+                              <td style="border-right:1px solid #fca5a5; padding:2.5px 4px; color:#334155;">${brand}</td>
+                              <td style="border-right:1px solid #fca5a5; padding:2.5px 4px; text-align:center; font-weight:600; color:#475569;">${category}</td>
+                              <td style="border-right:1px solid #fca5a5; padding:2.5px 4px; text-align:center; font-family:monospace; color:#0284c7;">${code}</td>
+                              <td style="border-right:1px solid #fca5a5; padding:2.5px 4px; text-align:center; font-weight:700; color:#0f172a;">${qty}</td>
+                              <td style="border-right:1px solid #fca5a5; padding:2.5px 5px; text-align:right; font-family:monospace; font-weight:700; color:#475569;">₹${fmtNum(buyingPrice)}</td>
+                              <td style="padding:2.5px 5px; text-align:right; font-family:monospace; font-weight:700; color:#0f172a;">₹${fmtNum(total)}</td>
+                            </tr>
+                          `;
+                        })
+                        .join("")}
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+            `
+                : "";
+
             // Payment Breakdown sub-table (for purchase orders with payment history)
             const paymentsRow =
               t.orderPayments &&
@@ -342,6 +405,7 @@ export function generateVendorStatementHTML(data) {
                   <td style="border-right:1px solid #000; padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:600; color:#b91c1c;">${creditStr}</td>
                   <td style="padding:6px 6px; text-align:right; font-family:monospace; font-size:10px; font-weight:700; color:${balColor};">${balStr}</td>
                 </tr>
+                ${itemsRow}
                 ${paymentsRow}
               `;
           })

@@ -165,7 +165,51 @@ export const generatePaymentReceiptHTML = (data) => {
   let tableHeaderHtml = "";
   let tableRowsHtml = "";
 
-  if (isOrderReceipt && Array.isArray(orderPayments) && orderPayments.length > 0) {
+  const itemsList = Array.isArray(data.items) && data.items.length > 0
+    ? data.items
+    : Array.isArray(orderSummary?.items) && orderSummary.items.length > 0
+      ? orderSummary.items
+      : [];
+
+  if (isVendor && itemsList.length > 0) {
+    tableHeaderHtml = `
+      <tr style="background:#ffffff; border-bottom:1px solid #000000; font-size:9.5px; font-weight:700;">
+        <th style="width:28px; border-right:1px solid #000; padding:4px 2px; text-align:center;">#</th>
+        <th style="border-right:1px solid #000; padding:4px 6px; text-align:left;">Product / Item Name</th>
+        <th style="width:95px; border-right:1px solid #000; padding:4px 4px; text-align:left;">Brand</th>
+        <th style="width:85px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Category / Type</th>
+        <th style="width:95px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Item Code / Ref</th>
+        <th style="width:40px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Qty</th>
+        <th style="width:85px; border-right:1px solid #000; padding:4px 6px; text-align:right;">Buying Price (₹)</th>
+        <th style="width:90px; padding:4px 6px; text-align:right;">Total (₹)</th>
+      </tr>
+    `;
+
+    tableRowsHtml = itemsList
+      .map((item, idx) => {
+        const itemName = item.itemName || item.productName || item.name || "Product";
+        const brand = item.brand || item.brandName || "—";
+        const category = item.category || item.categoryName || item.orderType || "STOCK";
+        const code = item.code || item.productCode || item.hsnSac || refNumber || "—";
+        const buyingPrice = Number(item.buyingPrice || item.price || 0);
+        const qty = Number(item.qty || 0);
+        const discount = Number(item.discountAmount || 0);
+        const lineTotal = buyingPrice * qty - discount;
+        return `
+        <tr style="border-bottom:1px solid #000000;">
+          <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">${idx + 1}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-weight:600; color:#0f172a;">${itemName}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; font-size:10px; color:#334155;">${brand}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:9.5px; font-weight:600; color:#475569;">${category}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:10px; font-family:monospace; color:#0284c7;">${code}</td>
+          <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:10px; font-weight:700;">${qty}</td>
+          <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-size:10px; font-family:monospace; font-weight:700; color:#475569;">₹${fmtNum(buyingPrice)}</td>
+          <td style="padding:3px 6px; text-align:right; font-size:10px; font-weight:700; font-family:monospace; color:#0f172a;">₹${fmtNum(lineTotal)}</td>
+        </tr>
+      `;
+      })
+      .join("");
+  } else if (isOrderReceipt && Array.isArray(orderPayments) && orderPayments.length > 0) {
     tableHeaderHtml = `
       <tr style="background:#ffffff; border-bottom:1px solid #000000; font-size:9.5px; font-weight:700;">
         <th style="width:28px; border-right:1px solid #000; padding:4px 2px; text-align:center;">#</th>
@@ -224,7 +268,7 @@ export const generatePaymentReceiptHTML = (data) => {
         <th style="border-right:1px solid #000; padding:4px 6px; text-align:left;">Transaction Description / Particulars</th>
         <th style="width:130px; border-right:1px solid #000; padding:4px 4px; text-align:center;">Payment Mode</th>
         <th style="width:140px; border-right:1px solid #000; padding:4px 6px; text-align:left;">Reference # / UTR</th>
-        <th style="width:120px; border-right:1px solid #000; padding:4px 6px; text-align:right;">Amount Received (₹)</th>
+        <th style="width:120px; border-right:1px solid #000; padding:4px 6px; text-align:right;">${isVendor ? "Amount Paid (₹)" : "Amount Received (₹)"}</th>
         <th style="width:75px; padding:4px 4px; text-align:center;">Status</th>
       </tr>
     `;
@@ -232,7 +276,7 @@ export const generatePaymentReceiptHTML = (data) => {
     tableRowsHtml = `
       <tr style="border-bottom:1px solid #000000;">
         <td style="border-right:1px solid #000; padding:3px 2px; text-align:center; font-size:10px;">1</td>
-        <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-weight:600;">Direct Customer Khata Account Collection</td>
+        <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-weight:600;">${isVendor ? "Vendor Payout Disbursement / Supplier Account Clearance" : "Direct Customer Khata Account Collection"}</td>
         <td style="border-right:1px solid #000; padding:3px 4px; text-align:center; font-size:9.5px;">${modeName}</td>
         <td style="border-right:1px solid #000; padding:3px 6px; font-size:10px; font-family:monospace; font-weight:600; color:#0284c7;">${refNumber}</td>
         <td style="border-right:1px solid #000; padding:3px 6px; text-align:right; font-size:10px; font-weight:700; font-family:monospace;">${fmtNum(grossAmount)}</td>
@@ -349,11 +393,12 @@ export const generatePaymentReceiptHTML = (data) => {
     ${isOrderReceipt && orderSummary ? `
     <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:6px 12px; border-bottom:1px solid #000000; font-size:10px;">
       <div>
-        <span style="font-weight:700;">Order Number:</span> <span style="font-family:monospace; font-weight:700; color:#0284c7;">${orderSummary.orderNumber || "-"}</span>
+        <span style="font-weight:700;">${isVendor ? "PO Reference:" : "Order Number:"}</span> <span style="font-family:monospace; font-weight:700; color:#0284c7;">${orderSummary.orderNumber || refNumber}</span>
+        &nbsp;|&nbsp; <span style="font-weight:700;">Order Created:</span> <span style="font-family:monospace; font-weight:700; color:#0f172a;">${fmtDate(orderSummary.orderDate || orderSummary.createdAt)}</span>
         &nbsp;|&nbsp; <span style="font-weight:700;">Order Status:</span> <span style="font-weight:700; color:#059669;">${orderSummary.orderStatus || "Submitted"}</span>
       </div>
       <div>
-        <span style="font-weight:700;">Order Total:</span> <span style="font-family:monospace; font-weight:700;">₹${fmtNum(orderTotalAmount)}</span>
+        <span style="font-weight:700;">${isVendor ? "Purchase Total:" : "Order Total:"}</span> <span style="font-family:monospace; font-weight:700;">₹${fmtNum(orderTotalAmount)}</span>
         &nbsp;|&nbsp; <span style="font-weight:700;">Remaining Balance Due:</span> <span style="font-family:monospace; font-weight:800; color:${orderDueBalance > 0 ? '#b91c1c' : '#15803d'};">₹${fmtNum(orderDueBalance)}</span>
       </div>
     </div>` : ""}
@@ -367,9 +412,9 @@ export const generatePaymentReceiptHTML = (data) => {
         ${tableRowsHtml}
         <!-- Integrated Total Row -->
         <tr style="font-weight:800; font-size:10.5px; border-top:1px solid #000;">
-          <td colspan="5" style="border-right:1px solid #000; padding:4px 6px; text-align:right;">Total Amount Received</td>
+          <td colspan="${isVendor && itemsList.length > 0 ? 6 : 5}" style="border-right:1px solid #000; padding:4px 6px; text-align:right;">${isVendor ? "Total Amount Disbursed / Paid" : "Total Amount Received"}</td>
           <td style="border-right:1px solid #000; padding:4px 6px; text-align:right; font-family:monospace; color:#15803d;">₹${fmtNum(totalReceivedAmount)}</td>
-          <td style="padding:4px 4px; text-align:center; font-size:9px; color:#15803d;">PAID</td>
+          <td style="padding:4px 4px; text-align:center; font-size:9px; color:#15803d;">${isVendor ? "PAID OUT" : "PAID"}</td>
         </tr>
       </tbody>
     </table>
@@ -390,7 +435,9 @@ export const generatePaymentReceiptHTML = (data) => {
         <div>
           <span style="font-weight:700; text-decoration:underline;">Declaration</span>
           <div style="font-size:8.5px; color:#1e293b; line-height:1.3; margin-top:2px;">
-            This is an authenticated computer-generated payment voucher and official acknowledgment of money received and credited to the respective customer ledger account.
+            ${isVendor
+              ? "This is an authenticated computer-generated vendor payout voucher confirming disbursement of funds against supplier purchase orders / ledger account."
+              : "This is an authenticated computer-generated payment voucher and official acknowledgment of money received and credited to the respective customer ledger account."}
           </div>
         </div>
       </div>

@@ -505,6 +505,8 @@ export const generatePaymentReceiptPDF = async (paymentId, tenantId) => {
         grossAmount,
         paymentDetails,
         allocations,
+        orderSummary,
+        items: (orderSummary?.items && orderSummary.items.length > 0) ? orderSummary.items : [],
         narration,
         accountSummary: {
           currentOutstanding,
