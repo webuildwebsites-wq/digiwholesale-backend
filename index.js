@@ -45,6 +45,7 @@ import paymentRouter from './src/routes/Accounting/payment.routes.js';
 import ledgerRouter from './src/routes/Accounting/ledger.routes.js';
 import accountRouter from './src/routes/Accounting/account.routes.js';
 import agingRouter from './src/routes/Accounting/aging.routes.js';
+import gstReportRouter from './src/routes/Accounting/gstReport.routes.js';
 import batchRouter       from './src/routes/Product/batch.routes.js';
 import externalRouter   from './src/routes/external.routes.js';
 
@@ -194,6 +195,7 @@ try {
   app.use("/api/v1/ledgers", ledgerRouter);
   app.use("/api/v1/accounts", accountRouter);
   app.use("/api/v1/reports/aging", agingRouter);
+  app.use("/api/v1/reports/gst", gstReportRouter);
   app.use("/api/v1/batches", batchRouter);
 
   // EXTERNAL / CROSS-PLATFORM ROUTES (Digi-Retailer ↔ Digi-Wholesaler)
@@ -203,6 +205,7 @@ try {
   app.use("/api/ledgers", ledgerRouter);
   app.use("/api/accounts", accountRouter);
   app.use("/api/reports/aging", agingRouter);
+  app.use("/api/reports/gst", gstReportRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);
