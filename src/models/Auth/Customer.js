@@ -72,7 +72,7 @@ const customerSchema = new mongoose.Schema(
     },
     businessEmail: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
       lowercase: true,
       match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid businessEmail']
@@ -193,27 +193,19 @@ const customerSchema = new mongoose.Schema(
     },
     panCard: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
     aadharCard: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
     panCardImg: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
     aadharCardImg: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
 
 
@@ -343,9 +335,9 @@ const customerSchema = new mongoose.Schema(
       validate: {
         validator: function (value) {
           if (!value || value.length === 0) return true;
-          return value.length === 3;
+          return value.length <= 3;
         },
-        message: 'chequeDetails must have exactly 3 entries if provided'
+        message: 'chequeDetails can have up to 3 entries if provided'
       }
     },
     chequeRemark: {

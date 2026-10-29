@@ -131,15 +131,17 @@ export const salesHeadApproveCustomer = async (req, res) => {
 
       await customer.save();
 
-      sendEmail({
-        to: customer.businessEmail,
-        subject: "Your Account Approved - Welcome to DigiWholesale",
-        html: CredentialsTemplate(
-          customer.ownerName,
-          customer.businessEmail,
-          plainPassword
-        ),
-      }).catch((err) => console.error("Background email error:", err));
+      if (customer.businessEmail) {
+        sendEmail({
+          to: customer.businessEmail,
+          subject: "Your Account Approved - Welcome to DigiWholesale",
+          html: CredentialsTemplate(
+            customer.ownerName,
+            customer.businessEmail,
+            plainPassword
+          ),
+        }).catch((err) => console.error("Background email error:", err));
+      }
 
       const customerObj = customer.toObject();
       delete customerObj.password;

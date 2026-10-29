@@ -166,8 +166,8 @@ export const customerBasicRegistration = async (req, res) => {
       return sendErrorResponse(res, 400, "INVALID_ID", "Invalid draft customer ID format");
     }
 
-    if (!businessType || !shopName || !ownerName || !businessEmail) {
-      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "businessType, shopName, ownerName, businessEmail and orderMode are required");
+    if (!businessType || !shopName || !ownerName) {
+      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "businessType, shopName, and ownerName are required");
     }
 
     if (!salesPerson || !salesPersonRefId) {
@@ -185,10 +185,6 @@ export const customerBasicRegistration = async (req, res) => {
     if (isGSTRegistered === true) {
       if (!gstNumber || !gstType || !gstCertificateImg) {
         return sendErrorResponse(res, 400, "VALIDATION_ERROR", "gstNumber, gstType and gstCertificateImg are required when GST registered");
-      }
-    } else {
-      if (!panCard || !aadharCard || !panCardImg || !aadharCardImg) {
-        return sendErrorResponse(res, 400, "VALIDATION_ERROR", "panCard, aadharCard and their images are required when not GST registered");
       }
     }
 
@@ -226,15 +222,7 @@ export const customerBasicRegistration = async (req, res) => {
       );
     }
 
-    if (chequeDetails !== undefined && chequeDetails !== null) {
-      if (!Array.isArray(chequeDetails)) {
-        return sendErrorResponse(res, 400, "VALIDATION_ERROR", "chequeDetails must be an array");
-      }
-
-      if (chequeDetails.length > 0 && chequeDetails.length !== 3) {
-        return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Exactly 3 cheque entries are required");
-      }
-
+    if (chequeDetails !== undefined && chequeDetails !== null && Array.isArray(chequeDetails)) {
       for (let i = 0; i < chequeDetails.length; i++) {
         const cheque = chequeDetails[i];
         const hasNumber = cheque.chequeNumber && cheque.chequeNumber.trim() !== "";
@@ -243,14 +231,6 @@ export const customerBasicRegistration = async (req, res) => {
           return sendErrorResponse(res, 400, "VALIDATION_ERROR", `chequeDetails[${i}]: both chequeNumber and chequeImage are required together`);
         }
       }
-    }
-
-    // if chequeDetails not provided, chequeRemark is required
-    const noChequeProvided = !chequeDetails || !Array.isArray(chequeDetails) ||
-      chequeDetails.every(c => (!c.chequeNumber || c.chequeNumber.trim() === "") && (!c.chequeImage || c.chequeImage.trim() === ""));
-
-    if (noChequeProvided && (!chequeRemark || chequeRemark.trim() === "")) {
-      return sendErrorResponse(res, 400, "VALIDATION_ERROR", "chequeRemark is required when chequeDetails are not provided");
     }
 
     if (!billingCycle || !['7_days', '15_days', 'end_of_month', 'custom'].includes(billingCycle)) {
@@ -292,13 +272,15 @@ export const customerBasicRegistration = async (req, res) => {
       return sendErrorResponse(res, 400, "VALIDATION_ERROR", `BusinessTypeRefId must be a valid ObjectId (24 hex characters)`);
     }
 
-    const existingCustomer = await Customer.findOne({
-      businessEmail: businessEmail.toLowerCase(),
-      tenantId: req.user.tenantId,
-    });
+    if (businessEmail && businessEmail.trim()) {
+      const existingCustomer = await Customer.findOne({
+        businessEmail: (businessEmail && businessEmail.trim()) ? businessEmail.toLowerCase().trim() : undefined,
+        tenantId: req.user.tenantId,
+      });
 
-    if (existingCustomer) {
-      return sendErrorResponse(res, 409, "CUSTOMER_EXISTS", "Customer with this business email already exists");
+      if (existingCustomer) {
+        return sendErrorResponse(res, 409, "CUSTOMER_EXISTS", "Customer with this business email already exists");
+      }
     }
 
     // Validate BusinessType
@@ -381,7 +363,7 @@ export const customerBasicRegistration = async (req, res) => {
       orderMode: "Online",
       mobileNo1,
       mobileNo2,
-      businessEmail: businessEmail.toLowerCase().trim(),
+      businessEmail: (businessEmail && businessEmail.trim()) ? businessEmail.toLowerCase().trim() : undefined,
       isGSTRegistered: isGSTRegistered,
       gstNumber: isGSTRegistered ? gstNumber : undefined,
       gstType:
@@ -392,10 +374,10 @@ export const customerBasicRegistration = async (req, res) => {
           }
           : undefined,
       gstCertificateImg: isGSTRegistered ? gstCertificateImg : undefined,
-      panCard: !isGSTRegistered ? panCard : undefined,
-      aadharCard: !isGSTRegistered ? aadharCard : undefined,
-      panCardImg: !isGSTRegistered ? panCardImg : undefined,
-      aadharCardImg: !isGSTRegistered ? aadharCardImg : undefined,
+      panCard: !isGSTRegistered ? (panCard || undefined) : undefined,
+      aadharCard: !isGSTRegistered ? (aadharCard || undefined) : undefined,
+      panCardImg: !isGSTRegistered ? (panCardImg || undefined) : undefined,
+      aadharCardImg: !isGSTRegistered ? (aadharCardImg || undefined) : undefined,
 
       // Account Status
       status: {
