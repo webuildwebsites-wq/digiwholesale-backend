@@ -10,6 +10,7 @@ import {
   downloadCustomerLedgerStatementPDF,
   getVendorOrdersForLedger,
   downloadVendorLedgerStatementPDF,
+  sendCustomerBankDetails,
 } from '../../core/controllers/Accounting/ledger.controller.js';
 import { sendPaymentDueReminder } from '../../core/controllers/Accounting/payment.controller.js';
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
@@ -28,6 +29,8 @@ router.post('/customer/:customerId/send-due-reminder', (req, res, next) => {
   req.body = { ...req.body, partyId: req.params.customerId, entityType: 'Customer' };
   return sendPaymentDueReminder(req, res, next);
 });
+router.post('/customer/:customerId/send-bank-details', sendCustomerBankDetails);
+router.post('/customer/send-bank-details', sendCustomerBankDetails);
 
 // Vendor Ledgers & Statements
 router.get('/vendors', getVendorLedgersList);

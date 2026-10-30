@@ -9,6 +9,9 @@ import BulkOrder from "../../../models/order/BulkOrder.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import Employee from "../../../models/Auth/Employee.js";
 import Tenant from "../../../models/Tenant/Tenant.model.js";
+import BankAccount from "../../../models/Accounting/BankAccount.model.js";
+import { sendEmail } from "../../config/Email/emailService.js";
+import { sendWhatsAppMessage, wholesalerBankDetailsWhatsApp } from "../../../Utils/whatsapp/whatsappService.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
@@ -2193,4 +2196,302 @@ const uploadLedgerPDFToGCS = async (buffer, fileName) => {
 
 export const downloadCustomerLedgerStatementPDF = async (req, res) => {
   return sendErrorResponse(res, 410, 'DEPRECATED', 'Customer ledger statement PDF generation is now handled directly on the frontend browser print engine.');
+};
+
+/**
+ * Send Wholesaler Bank Details to Customer via WhatsApp and/or Email
+ */
+export const sendCustomerBankDetails = async (req, res) => {
+  try {
+    const customerId = req.params.customerId || req.body.customerId || req.body.partyId;
+    const tenantId = req.user?.tenantId || null;
+    const { bankAccountId, channel = "both", mobile: customMobile, email: customEmail, customNote } = req.body;
+
+    if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      return sendErrorResponse(res, 400, "INVALID_CUSTOMER_ID", "Valid customer ID is required.");
+    }
+
+    const customer = await Customer.findById(customerId);
+    if (!customer) {
+      return sendErrorResponse(res, 404, "CUSTOMER_NOT_FOUND", "Customer not found.");
+    }
+
+    // 1. Resolve Bank Account
+    let bankAccount = null;
+    if (bankAccountId && mongoose.Types.ObjectId.isValid(bankAccountId)) {
+      bankAccount = await BankAccount.findOne({ _id: bankAccountId, tenantId, isActive: true });
+    }
+
+    if (!bankAccount) {
+      // Find default active bank account for this tenant
+      bankAccount = await BankAccount.findOne({ tenantId, isActive: true, isDefault: true });
+    }
+
+    if (!bankAccount) {
+      // Find any active bank account for this tenant
+      bankAccount = await BankAccount.findOne({ tenantId, isActive: true });
+    }
+
+    // Tenant info for company branding and fallback bank details
+    const tenant = tenantId ? await Tenant.findOne({ tenantId }) : null;
+    const companyName = process.env.COMPANY_NAME || tenant?.name || tenant?.storeInformation?.storeName || "DigiOptics Wholesale";
+    const companyPhone = process.env.COMPANY_PHONE || tenant?.phone || tenant?.storeInformation?.contactNumber || "+91 9650560526";
+    const companyEmail = process.env.COMPANY_EMAIL || tenant?.email || tenant?.storeInformation?.email || "support@digioptics.com";
+    const companyAddress = tenant?.storeInformation?.address || tenant?.address || "";
+
+    // If still no bank account in BankAccount collection, check tenant.settings
+    let resolvedBank = null;
+    if (bankAccount) {
+      resolvedBank = {
+        bankName: bankAccount.bankName,
+        accountHolderName: bankAccount.accountHolderName || companyName,
+        accountNumber: bankAccount.accountNumber,
+        ifscCode: bankAccount.ifscCode,
+        branchName: bankAccount.branchName || "",
+        accountType: bankAccount.accountType || "Current",
+        upiId: bankAccount.upiId || "",
+      };
+    } else if (tenant?.settings?.bankName && tenant?.settings?.bankAccountNo) {
+      resolvedBank = {
+        bankName: tenant.settings.bankName,
+        accountHolderName: tenant.settings.accountHolderName || companyName,
+        accountNumber: tenant.settings.bankAccountNo,
+        ifscCode: tenant.settings.bankIFSC || "",
+        branchName: tenant.settings.bankBranch || "",
+        accountType: "Current",
+        upiId: tenant.settings.upiId || "",
+      };
+    }
+
+    if (!resolvedBank || !resolvedBank.accountNumber) {
+      return sendErrorResponse(
+        res,
+        400,
+        "NO_BANK_ACCOUNT_CONFIGURED",
+        "No active bank account found. Please configure a bank account in Settings > Bank Accounts."
+      );
+    }
+
+    // 2. Resolve Customer Ledger & Balance
+    const ledger = await CustomerLedger.findOne({ customerId });
+    const pendingDue = Number(
+      ledger?.creditUsed !== undefined
+        ? ledger.creditUsed
+        : customer.creditUsed ||
+          (ledger?.currentBalance > 0 ? ledger.currentBalance : 0) ||
+          0
+    );
+
+    const customerName = customer.shopName || customer.ownerName || "Valued Customer";
+    const recipientMobile = (customMobile || customer.mobileNo1 || customer.mobile || customer.mobileNo2 || "").trim();
+    const recipientEmail = (customEmail || customer.businessEmail || customer.email || "").trim();
+
+    const sendWhatsApp = channel === "both" || channel === "whatsapp";
+    const sendMail = channel === "both" || channel === "email";
+
+    let whatsappSent = false;
+    let emailSent = false;
+    let waError = null;
+    let mailError = null;
+
+    // 3. Send WhatsApp
+    if (sendWhatsApp) {
+      if (!recipientMobile) {
+        waError = "Customer has no mobile number on file";
+      } else {
+        const waMessage = wholesalerBankDetailsWhatsApp({
+          customerName,
+          companyName,
+          companyPhone,
+          bankDetails: resolvedBank,
+          pendingDue,
+        });
+
+        const waRes = await sendWhatsAppMessage({
+          to: recipientMobile,
+          message: waMessage,
+        });
+        whatsappSent = Boolean(waRes?.success);
+        if (!waRes?.success) {
+          waError = waRes?.error || "Failed to deliver WhatsApp message";
+        }
+      }
+    }
+
+    // 4. Send Email
+    if (sendMail) {
+      if (!recipientEmail) {
+        mailError = "Customer has no email address on file";
+      } else {
+        const formattedDue = pendingDue > 0
+          ? `₹${pendingDue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : null;
+
+        const emailHtml = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Wholesaler Bank Details</title>
+          </head>
+          <body style="margin: 0; padding: 20px; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+            <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+              
+              <!-- Header -->
+              <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 28px 24px; text-align: center; color: #ffffff;">
+                <h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.025em;">${companyName}</h1>
+                <p style="margin: 6px 0 0; font-size: 13px; opacity: 0.9; font-weight: 500;">Official Wholesaler Bank & Payment Details</p>
+              </div>
+
+              <!-- Content Body -->
+              <div style="padding: 28px 24px;">
+                <p style="margin: 0 0 16px; font-size: 15px; color: #334155;">
+                  Dear <strong>${customerName}</strong>,
+                </p>
+                <p style="margin: 0 0 20px; font-size: 14px; color: #475569; line-height: 1.5;">
+                  Please find below our official bank account details for electronic fund transfers (NEFT / RTGS / IMPS / UPI) against your wholesale orders and ledger account.
+                </p>
+
+                ${
+                  formattedDue
+                    ? `
+                  <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px 18px; margin-bottom: 22px;">
+                    <span style="font-size: 12px; font-weight: 700; color: #92400e; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Current Outstanding Balance</span>
+                    <span style="font-size: 22px; font-weight: 800; color: #b45309;">${formattedDue}</span>
+                  </div>`
+                    : ""
+                }
+
+                <!-- Bank Card Box -->
+                <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 20px; margin-bottom: 22px;">
+                  <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-size: 15px; font-weight: 700; color: #0f172a;">${resolvedBank.bankName}</span>
+                    ${
+                      resolvedBank.accountType
+                        ? `<span style="font-size: 11px; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 12px; font-weight: 600;">${resolvedBank.accountType} A/C</span>`
+                        : ""
+                    }
+                  </div>
+
+                  <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b; width: 40%;">Account Holder:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 600;">${resolvedBank.accountHolderName}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">Account Number:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 700; font-size: 16px; letter-spacing: 0.5px; font-family: monospace;">${resolvedBank.accountNumber}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">IFSC Code:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 700; font-family: monospace;">${resolvedBank.ifscCode}</td>
+                    </tr>
+                    ${
+                      resolvedBank.branchName
+                        ? `
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">Branch:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 500;">${resolvedBank.branchName}</td>
+                    </tr>`
+                        : ""
+                    }
+                    ${
+                      resolvedBank.upiId
+                        ? `
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">UPI ID / VPA:</td>
+                      <td style="padding: 6px 0; color: #16a34a; font-weight: 700; font-family: monospace;">${resolvedBank.upiId}</td>
+                    </tr>`
+                        : ""
+                    }
+                  </table>
+                </div>
+
+                ${
+                  customNote
+                    ? `
+                <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px 16px; margin-bottom: 22px; border-radius: 0 6px 6px 0;">
+                  <p style="margin: 0; font-size: 13px; color: #1e40af;"><strong>Note:</strong> ${customNote}</p>
+                </div>`
+                    : ""
+                }
+
+                <div style="background: #f1f5f9; border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+                  <p style="margin: 0; font-size: 13px; color: #334155; line-height: 1.5;">
+                    💡 <strong>Payment Confirmation:</strong> After initiating the transfer, kindly share the UTR / transaction receipt via WhatsApp or email for immediate ledger reconciliation.
+                  </p>
+                </div>
+
+                <p style="margin: 24px 0 4px; font-size: 13px; color: #64748b;">
+                  For billing queries or assistance, reach us at <strong>${companyPhone}</strong> or <a href="mailto:${companyEmail}" style="color: #2563eb; text-decoration: none;">${companyEmail}</a>.
+                </p>
+              </div>
+
+              <!-- Footer -->
+              <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 24px; text-align: center; font-size: 12px; color: #94a3b8;">
+                <p style="margin: 0;">${companyName} ${companyAddress ? `• ${companyAddress}` : ""}</p>
+                <p style="margin: 4px 0 0;">This is an automated communication regarding your wholesale ledger account.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+
+        const mailRes = await sendEmail({
+          to: recipientEmail,
+          subject: `Wholesaler Bank Account Details - ${companyName}`,
+          html: emailHtml,
+        });
+
+        emailSent = Boolean(mailRes?.success);
+        if (!mailRes?.success) {
+          mailError = mailRes?.error || "Failed to deliver email";
+        }
+      }
+    }
+
+    // Determine final status
+    const atLeastOneSuccess = (sendWhatsApp && whatsappSent) || (sendMail && emailSent);
+
+    if (!atLeastOneSuccess) {
+      const errMsg = [
+        sendWhatsApp && waError ? `WhatsApp: ${waError}` : null,
+        sendMail && mailError ? `Email: ${mailError}` : null,
+      ]
+        .filter(Boolean)
+        .join("; ");
+
+      return sendErrorResponse(
+        res,
+        400,
+        "SEND_BANK_DETAILS_FAILED",
+        errMsg || "Failed to send bank details via selected channel(s)."
+      );
+    }
+
+    const channelSummary = [];
+    if (sendWhatsApp) channelSummary.push(`WhatsApp ${whatsappSent ? "Sent" : "Failed"}`);
+    if (sendMail) channelSummary.push(`Email ${emailSent ? "Sent" : "Failed"}`);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      {
+        customerId,
+        customerName,
+        bankDetails: resolvedBank,
+        pendingDue,
+        recipientMobile: recipientMobile || null,
+        recipientEmail: recipientEmail || null,
+        whatsappSent,
+        emailSent,
+        waError,
+        mailError,
+      },
+      `Bank details successfully dispatched (${channelSummary.join(", ")}).`
+    );
+  } catch (error) {
+    console.error("sendCustomerBankDetails error:", error);
+    return sendErrorResponse(res, 500, "SEND_BANK_DETAILS_ERROR", error.message);
+  }
 };

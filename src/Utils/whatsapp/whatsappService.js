@@ -399,3 +399,37 @@ Thank you for your cooperation,
 *${companyName} Accounts Team*`;
 };
 
+/**
+ * Wholesaler Bank Details Notification (WhatsApp)
+ */
+export const wholesalerBankDetailsWhatsApp = ({
+  customerName = "Customer",
+  companyName = "DigiOptics Wholesale",
+  companyPhone = "+91 9650560526",
+  bankDetails,
+  pendingDue = null,
+}) => {
+  const dueSection =
+    pendingDue !== null && pendingDue !== undefined && Number(pendingDue) > 0
+      ? `\n*Current Outstanding Balance:* ₹${fmtInr(pendingDue)}\n`
+      : "";
+
+  return `Hello *${customerName}* 👋,
+
+Please find our official bank account details below for electronic fund transfers (NEFT / RTGS / IMPS / UPI):
+${dueSection}
+*🏦 Wholesaler Bank Details:*
+• *Bank Name:* ${bankDetails.bankName || "—"}
+• *Account Holder:* ${bankDetails.accountHolderName || companyName}
+• *Account Number:* ${bankDetails.accountNumber || "—"}
+• *IFSC Code:* ${bankDetails.ifscCode || "—"}
+${bankDetails.branchName ? `• *Branch:* ${bankDetails.branchName}\n` : ""}${bankDetails.accountType ? `• *Account Type:* ${bankDetails.accountType}\n` : ""}${bankDetails.upiId ? `• *UPI ID / VPA:* ${bankDetails.upiId}\n` : ""}
+After completing the payment, please share the transaction receipt / UTR reference with our accounts team.
+
+For any questions or ledger queries, contact us at ${companyPhone}.
+
+Warm regards,  
+*${companyName} Accounts Team*`;
+};
+
+
