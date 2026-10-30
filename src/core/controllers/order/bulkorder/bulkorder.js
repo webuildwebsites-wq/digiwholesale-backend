@@ -930,16 +930,33 @@ export const createBulkOrder = async (req, res) => {
                         : Number(product?.price || 0);
                     const effectiveProductBuying = Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0));
 
+                    const minAllowedSelling = batchSellingPrice || effectiveProductSelling || 0;
                     if (item.price == null || Number(item.price) <= 0) {
-                        item.price = effectiveProductSelling || batchSellingPrice || 0;
+                        item.price = minAllowedSelling;
                     } else {
                         item.price = Number(item.price);
+                        if (minAllowedSelling > 0 && item.price < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
                     }
 
                     if (item.sellingPrice == null || Number(item.sellingPrice) <= 0) {
                         item.sellingPrice = item.price;
                     } else {
                         item.sellingPrice = Number(item.sellingPrice);
+                        if (minAllowedSelling > 0 && item.sellingPrice < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
                     }
 
                     if (item.buyingPrice == null || Number(item.buyingPrice) <= 0) {
@@ -959,15 +976,32 @@ export const createBulkOrder = async (req, res) => {
                         : Number(product?.price || 0);
                     const effectiveProductBuying = Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0));
 
+                    const minAllowedSelling = effectiveProductSelling || 0;
                     if (item.price == null || Number(item.price) <= 0) {
-                        item.price = effectiveProductSelling;
+                        item.price = minAllowedSelling;
                     } else {
                         item.price = Number(item.price);
+                        if (minAllowedSelling > 0 && item.price < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
                     }
                     if (item.sellingPrice == null || Number(item.sellingPrice) <= 0) {
                         item.sellingPrice = item.price;
                     } else {
                         item.sellingPrice = Number(item.sellingPrice);
+                        if (minAllowedSelling > 0 && item.sellingPrice < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
                     }
                     if (item.buyingPrice == null || Number(item.buyingPrice) <= 0) {
                         item.buyingPrice = effectiveProductBuying;
