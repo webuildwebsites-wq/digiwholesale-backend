@@ -439,17 +439,27 @@ export const updateChequeStatus = async (req, res) => {
     // Auto-expire any stale cheques first
     await autoExpireStaleCheques(tenantId);
 
-    // Guard: Actions cannot be taken until maturity date arrives
+    // Guard: Actions cannot be taken until maturity date arrives (allow on or after maturity date)
     if (["CLEARED", "BOUNCED", "DEPOSITED"].includes(status) && payment.paymentDetails?.isPostDated) {
-      const chqDate = payment.paymentDetails?.chequeDate ? new Date(payment.paymentDetails.chequeDate) : null;
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      if (chqDate && chqDate > todayStart) {
+      const toLocalDateKey = (d) => {
+        if (!d) return "";
+        const date = new Date(d);
+        if (isNaN(date.getTime())) return "";
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      };
+
+      const todayKey = toLocalDateKey(new Date());
+      const chqDateKey = toLocalDateKey(payment.paymentDetails?.chequeDate);
+
+      if (chqDateKey && chqDateKey > todayKey) {
         return sendErrorResponse(
           res,
           400,
           "CHEQUE_NOT_YET_MATURED",
-          `Cheque #${payment.paymentDetails?.chequeNumber || ""} maturity date is ${chqDate.toLocaleDateString("en-IN")}. Action cannot be taken before maturity date.`,
+          `Cheque #${payment.paymentDetails?.chequeNumber || ""} maturity date is ${new Date(payment.paymentDetails.chequeDate).toLocaleDateString("en-IN")}. Action cannot be taken before maturity date.`,
         );
       }
     }
