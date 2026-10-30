@@ -14,6 +14,7 @@ import {
   sendErrorResponse,
 } from "../../../Utils/response/responseHandler.js";
 import { bucket } from "../../config/bucket/gcs.js";
+import { autoExpireStaleCheques } from "../../services/chequeExpiryService.js";
 
 export const parseCreditDays = (cd) => {
   if (!cd) return 0;
@@ -397,6 +398,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
       );
 
       let allocatedSum = 0;
+      let pdcWaitingSum = 0;
       const orderPayments = [];
       matchedPayments.forEach((p) => {
         const alloc = (p.allocations || []).find(
@@ -405,7 +407,35 @@ export const getCustomerLedgerStatement = async (req, res) => {
             a.invoiceNumber === orderNumber,
         );
         const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
-        allocatedSum += amt;
+
+        const isCheque = p.paymentMode === "CHEQUE";
+        const isPDC = Boolean(p.paymentDetails?.isPostDated);
+        const isCredited = Boolean(p.paymentDetails?.isCredited);
+        const chequeStatus = p.paymentDetails?.chequeStatus || p.status;
+        const chqDate = p.paymentDetails?.chequeDate ? new Date(p.paymentDetails.chequeDate) : null;
+        let expDate = p.paymentDetails?.chequeExpiryDate ? new Date(p.paymentDetails.chequeExpiryDate) : null;
+        if (!expDate && chqDate) {
+          expDate = new Date(chqDate);
+          expDate.setMonth(expDate.getMonth() + 3);
+        }
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const isExpired = p.status === "EXPIRED" || chequeStatus === "EXPIRED" || Boolean(expDate && !isCredited && new Date() > expDate);
+        const isBounced = chequeStatus === "BOUNCED" || p.status === "BOUNCED";
+        const isMatured = !isPDC || (chqDate && chqDate <= todayEnd);
+        const daysUntilExpiry = expDate ? Math.max(0, Math.ceil((expDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+        const isExpiringSoon = !isExpired && daysUntilExpiry <= 15;
+        const isPDCWaiting = isCheque && !isExpired && !isBounced && (isPDC ? !isCredited : (chequeStatus === "PENDING" || chequeStatus === "DEPOSITED" || p.status === "RECEIVED"));
+
+        if (!isPDCWaiting && !isBounced && !isExpired) {
+          allocatedSum += amt;
+        } else if (isPDCWaiting) {
+          pdcWaitingSum += amt;
+        }
+
         orderPayments.push({
           paymentId: p._id,
           paymentNumber: p.paymentNumber,
@@ -415,9 +445,27 @@ export const getCustomerLedgerStatement = async (req, res) => {
           utrNumber: p.paymentDetails?.utrNumber || "",
           bankName: p.paymentDetails?.bankName || "",
           chequeNumber: p.paymentDetails?.chequeNumber || "",
+          chequeDate: p.paymentDetails?.chequeDate || null,
+          chequeExpiryDate: expDate,
+          clearanceDate: p.paymentDetails?.clearanceDate || null,
+          bounceDate: p.paymentDetails?.bounceDate || null,
+          bounceReason: p.paymentDetails?.bounceReason || "",
+          retryCount: p.paymentDetails?.retryCount || 0,
+          lastRetryDate: p.paymentDetails?.lastRetryDate || null,
+          bankAccountName: p.paymentDetails?.bankAccountName || "",
+          bankAccountNumber: p.paymentDetails?.bankAccountNumber || "",
           amount: amt,
-          remarks: p.paymentDetails?.remarks || "Part Payment",
-          status: p.status || "CLEARED",
+          remarks: p.paymentDetails?.remarks || (isExpired ? "Cheque Expired (Stale >3 Months)" : isBounced ? `Cheque Bounced (${p.paymentDetails?.bounceReason || 'Dishonoured'})` : isPDCWaiting ? "Post-Dated Cheque (Waiting Clearance)" : "Part Payment"),
+          status: isExpired ? "EXPIRED" : isBounced ? "BOUNCED" : isPDCWaiting ? "IN_CLEARING" : (p.status || "CLEARED"),
+          chequeStatus: isExpired ? "EXPIRED" : p.paymentDetails?.chequeStatus || (isBounced ? "BOUNCED" : isPDCWaiting ? "PENDING" : "CLEARED"),
+          isPostDated: Boolean(p.paymentDetails?.isPostDated),
+          isCredited: Boolean(p.paymentDetails?.isCredited),
+          isPDCWaiting,
+          isExpired,
+          canRetry: isBounced && !isExpired,
+          isMatured,
+          isExpiringSoon,
+          daysUntilExpiry,
         });
       });
 
@@ -495,6 +543,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
         paidAmount: totalOrderPaid,
         advanceAmount: totalOrderPaid,
         balanceDue: effectiveBalanceDue,
+        pdcWaitingAmount: Number(pdcWaitingSum.toFixed(2)),
         paymentStatus: effectivePaymentStatus,
         partPaymentPercentage: effectivePct,
         isGSTRegistered: Boolean(customer.isGSTRegistered),
@@ -575,6 +624,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
         orderGrandTotal: matchedOrder ? matchedOrder.grandTotal : null,
         orderPaidAmount: matchedOrder ? matchedOrder.paidAmount : null,
         orderBalanceDue: matchedOrder ? matchedOrder.balanceDue : null,
+        pdcWaitingAmount: matchedOrder ? matchedOrder.pdcWaitingAmount : 0,
         partPaymentStatus: matchedOrder ? matchedOrder.paymentStatus : null,
         partPaymentPercentage: matchedOrder ? matchedOrder.partPaymentPercentage : null,
         isGSTInvoice: Boolean(customer.isGSTRegistered),
@@ -1079,6 +1129,7 @@ export const getVendorLedgerStatement = async (req, res) => {
         orderGrandTotal: matchedOrder ? matchedOrder.grandTotal : null,
         orderPaidAmount: matchedOrder ? matchedOrder.paidAmount : null,
         orderBalanceDue: matchedOrder ? matchedOrder.balanceDue : null,
+        pdcWaitingAmount: matchedOrder ? matchedOrder.pdcWaitingAmount : 0,
         partPaymentStatus: matchedOrder ? matchedOrder.paymentStatus : null,
         partPaymentPercentage: matchedOrder ? matchedOrder.partPaymentPercentage : null,
         orderPayments: matchedOrder ? matchedOrder.orderPayments : [],
@@ -2020,11 +2071,39 @@ export const getCustomerOrdersForLedger = async (req, res) => {
       );
 
       let allocatedSum = 0;
+      let pdcWaitingSum = 0;
       matchedPayments.forEach((p) => {
         const alloc = (p.allocations || []).find(
           (a) => String(a.invoiceId) === String(bo._id) || a.invoiceNumber === orderNumber
         );
-        allocatedSum += Number(alloc?.allocatedAmount || p.grossAmount || 0);
+        const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
+        const isCheque = p.paymentMode === "CHEQUE";
+        const isPDC = Boolean(p.paymentDetails?.isPostDated);
+        const isCredited = Boolean(p.paymentDetails?.isCredited);
+        const chequeStatus = p.paymentDetails?.chequeStatus || p.status;
+        const chqDate = p.paymentDetails?.chequeDate ? new Date(p.paymentDetails.chequeDate) : null;
+        let expDate = p.paymentDetails?.chequeExpiryDate ? new Date(p.paymentDetails.chequeExpiryDate) : null;
+        if (!expDate && chqDate) {
+          expDate = new Date(chqDate);
+          expDate.setMonth(expDate.getMonth() + 3);
+        }
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const isExpired = p.status === "EXPIRED" || chequeStatus === "EXPIRED" || Boolean(expDate && !isCredited && new Date() > expDate);
+        const isBounced = chequeStatus === "BOUNCED" || p.status === "BOUNCED";
+        const isMatured = !isPDC || (chqDate && chqDate <= todayEnd);
+        const daysUntilExpiry = expDate ? Math.max(0, Math.ceil((expDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+        const isExpiringSoon = !isExpired && daysUntilExpiry <= 15;
+        const isPDCWaiting = isCheque && !isExpired && !isBounced && (isPDC ? !isCredited : (chequeStatus === "PENDING" || chequeStatus === "DEPOSITED" || p.status === "RECEIVED"));
+
+        if (!isPDCWaiting && !isBounced && !isExpired) {
+          allocatedSum += amt;
+        } else if (isPDCWaiting) {
+          pdcWaitingSum += amt;
+        }
       });
 
       const initialAdvance = Math.max(0, Number((Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)));
@@ -2057,6 +2136,18 @@ export const getCustomerOrdersForLedger = async (req, res) => {
         paidAmount: totalOrderPaid,
         advanceAmount: totalOrderPaid,
         balanceDue: effectiveBalanceDue,
+        pdcWaitingAmount: Number(pdcWaitingSum.toFixed(2)),
+        paymentStatus: effectivePaymentStatus,
+        partPaymentPercentage: effectivePct,
+        gstAmount: totals.gstAmount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
+        grandTotal: totals.grandTotal,
+        totalOrderPrice: totals.grandTotal,
+        paidAmount: totalOrderPaid,
+        advanceAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        pdcWaitingAmount: Number(pdcWaitingSum.toFixed(2)),
         paymentStatus: effectivePaymentStatus,
         partPaymentPercentage: effectivePct,
         isGSTRegistered: Boolean(customer.isGSTRegistered),

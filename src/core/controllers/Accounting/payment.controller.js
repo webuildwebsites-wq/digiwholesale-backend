@@ -56,6 +56,9 @@ const runInTransaction = async (workFn) => {
   }
 };
 
+export { autoExpireStaleCheques } from "../../services/chequeExpiryService.js";
+import { autoExpireStaleCheques } from "../../services/chequeExpiryService.js";
+
 export const executeCustomerPayment = async (req, res) => {
   try {
     const {
@@ -65,6 +68,7 @@ export const executeCustomerPayment = async (req, res) => {
       paymentMode,
       allocations = [],
       paymentDetails = {},
+      isPostDated,
     } = req.body;
 
     const userId = req.user?.id || req.user?._id;
@@ -134,6 +138,8 @@ export const executeCustomerPayment = async (req, res) => {
       let totalAllocated = 0;
       const processedAllocations = [];
 
+      const isPDC = paymentMode === "CHEQUE" && (Boolean(isPostDated) || Boolean(paymentDetails?.isPostDated));
+
       for (const alloc of allocations) {
         if (alloc.allocatedAmount && Number(alloc.allocatedAmount) > 0) {
           const reqAlloc = Number(alloc.allocatedAmount);
@@ -177,7 +183,9 @@ export const executeCustomerPayment = async (req, res) => {
             allocatedAmount: safeAlloc,
           });
 
+          // Only credit bulkOrder advance immediately if NOT a post-dated cheque
           if (
+            !isPDC &&
             alloc.invoiceId &&
             mongoose.Types.ObjectId.isValid(alloc.invoiceId)
           ) {
@@ -193,8 +201,6 @@ export const executeCustomerPayment = async (req, res) => {
       }
 
       const grossAmount = Number(amount);
-      const initialStatus = "COMPLETED";
-
       const existingCreditUsed = Number(
         ledger.creditUsed !== undefined && ledger.creditUsed !== null
           ? ledger.creditUsed
@@ -212,6 +218,47 @@ export const executeCustomerPayment = async (req, res) => {
                 : 0) ||
               0,
       );
+
+      // Post-Dated Cheque branch: Register as PENDING in-hand cheque without immediate balance reduction
+      if (isPDC) {
+        const paymentNumber = `CPAY-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+        let chequeExpiryDate = null;
+        if (paymentDetails?.chequeDate) {
+          const exp = new Date(paymentDetails.chequeDate);
+          exp.setMonth(exp.getMonth() + 3); // 3 months validity from maturity
+          chequeExpiryDate = exp;
+        }
+
+        const payment = new Payment({
+          paymentNumber,
+          type: "CUSTOMER_INFLOW",
+          partyId: customerId,
+          partyModel: "Customer",
+          partyName: customer.shopName || customer.ownerName || "Customer",
+          paymentMode,
+          grossAmount,
+          netAmountPaid: grossAmount,
+          allocations: processedAllocations,
+          advanceAmount: existingAdvance,
+          paymentDetails: {
+            ...paymentDetails,
+            isPostDated: true,
+            chequeStatus: "PENDING",
+            chequeExpiryDate,
+            retryCount: 0,
+            isCredited: false,
+            collectedByName: req.user?.name || req.user?.username || "",
+          },
+          status: "RECEIVED",
+          branchId: branchId || ledger.branchId || null,
+          tenantId,
+          createdBy: userId,
+        });
+
+        await payment.save({ session });
+        return payment;
+      }
 
       let adjustedFromCreditUsed = 0;
       let remainingCreditUsed = existingCreditUsed;
@@ -236,6 +283,8 @@ export const executeCustomerPayment = async (req, res) => {
 
       const paymentNumber = `CPAY-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
 
+      const initialStatus = paymentMode === "CHEQUE" ? "CLEARED" : "COMPLETED";
+
       const payment = new Payment({
         paymentNumber,
         type: "CUSTOMER_INFLOW",
@@ -249,6 +298,9 @@ export const executeCustomerPayment = async (req, res) => {
         advanceAmount: newAdvanceAmount,
         paymentDetails: {
           ...paymentDetails,
+          isPostDated: false,
+          chequeStatus: paymentMode === "CHEQUE" ? "CLEARED" : "COMPLETED",
+          isCredited: true,
           adjustedFromCreditUsed,
           remainingCreditUsed,
           advanceCredited: newAdvanceAmount - existingAdvance,
@@ -321,16 +373,22 @@ export const executeCustomerPayment = async (req, res) => {
       return payment;
     });
 
-    // Automatically send Payment Receipt confirmation Email & WhatsApp to customer
-    sendPaymentReceiptNotifications({ paymentId: result._id, tenantId }).catch((err) =>
-      console.error("[PaymentReceipt] Background notification error:", err.message),
-    );
+    // Send Payment Receipt confirmation Email & WhatsApp only if credited immediately
+    if (result.paymentDetails?.isCredited) {
+      sendPaymentReceiptNotifications({ paymentId: result._id, tenantId }).catch((err) =>
+        console.error("[PaymentReceipt] Background notification error:", err.message),
+      );
+    }
+
+    const successMsg = result.paymentDetails?.isPostDated
+      ? "Post-Dated Cheque recorded successfully as Pending Clearance. Amount will reflect in customer ledger and balance upon cheque clearance."
+      : "Customer payment processed successfully.";
 
     return sendSuccessResponse(
       res,
       201,
       result,
-      "Customer payment processed successfully.",
+      successMsg,
     );
   } catch (error) {
     console.error("executeCustomerPayment error:", error);
@@ -350,12 +408,12 @@ export const updateChequeStatus = async (req, res) => {
     const userId = req.user?.id || req.user?._id;
     const tenantId = req.user?.tenantId || null;
 
-    if (!["DEPOSITED", "CLEARED", "BOUNCED"].includes(status)) {
+    if (!["DEPOSITED", "CLEARED", "BOUNCED", "RETRY", "REPRESENTED", "EXPIRED"].includes(status)) {
       return sendErrorResponse(
         res,
         400,
         "INVALID_STATUS",
-        "Status must be DEPOSITED, CLEARED, or BOUNCED.",
+        "Status must be DEPOSITED, CLEARED, BOUNCED, RETRY, or EXPIRED.",
       );
     }
 
@@ -378,6 +436,24 @@ export const updateChequeStatus = async (req, res) => {
       );
     }
 
+    // Auto-expire any stale cheques first
+    await autoExpireStaleCheques(tenantId);
+
+    // Guard: Actions cannot be taken until maturity date arrives
+    if (["CLEARED", "BOUNCED", "DEPOSITED"].includes(status) && payment.paymentDetails?.isPostDated) {
+      const chqDate = payment.paymentDetails?.chequeDate ? new Date(payment.paymentDetails.chequeDate) : null;
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      if (chqDate && chqDate > todayStart) {
+        return sendErrorResponse(
+          res,
+          400,
+          "CHEQUE_NOT_YET_MATURED",
+          `Cheque #${payment.paymentDetails?.chequeNumber || ""} maturity date is ${chqDate.toLocaleDateString("en-IN")}. Action cannot be taken before maturity date.`,
+        );
+      }
+    }
+
     const result = await runInTransaction(async (session) => {
       const ledger = await CustomerLedger.findOne({
         customerId: payment.partyId,
@@ -386,130 +462,336 @@ export const updateChequeStatus = async (req, res) => {
         session,
       );
 
+      const isUncreditedPDC = Boolean(payment.paymentDetails?.isPostDated) && !Boolean(payment.paymentDetails?.isCredited);
+
       if (status === "CLEARED") {
-        payment.status = "CLEARED";
-        payment.paymentDetails.clearanceDate = clearanceDate
+        const effectiveClearDate = clearanceDate
           ? new Date(clearanceDate)
           : new Date();
-        await payment.save({ session });
 
-        if (ledger) {
-          await LedgerTransaction.create(
-            [
-              {
-                entityType: "Customer",
-                ledgerId: ledger._id,
-                partyId: payment.partyId,
-                transactionDate: payment.paymentDetails.clearanceDate,
-                voucherType: "Receipt",
-                voucherId: payment._id,
-                referenceNumber: `CLR-${payment.paymentNumber}`,
-                credit: 0,
-                debit: 0,
-                runningBalance: Number(ledger.currentBalance || 0),
-                narration: `Cheque #${payment.paymentDetails?.chequeNumber || ""} cleared in bank on ${new Date(payment.paymentDetails.clearanceDate).toLocaleDateString()}. Amount: ₹${Number(payment.grossAmount).toLocaleString()}.`,
-                branchId: payment.branchId,
-                tenantId,
-                createdBy: userId,
-              },
-            ],
-            { session },
-          );
+        if (isUncreditedPDC) {
+          // Post-Dated Cheque cleared: credit allocations to BulkOrders now
+          if (payment.allocations && payment.allocations.length > 0) {
+            for (const alloc of payment.allocations) {
+              if (alloc.invoiceId && mongoose.Types.ObjectId.isValid(alloc.invoiceId)) {
+                await BulkOrder.findByIdAndUpdate(
+                  alloc.invoiceId,
+                  {
+                    $inc: { advanceAmount: Number(alloc.allocatedAmount) },
+                  },
+                  { session },
+                ).catch(() => null);
+              }
+            }
+          }
+
+          if (ledger) {
+            const grossAmount = Number(payment.grossAmount);
+            const existingCreditUsed = Number(
+              ledger.creditUsed !== undefined && ledger.creditUsed !== null
+                ? ledger.creditUsed
+                : customer?.creditUsed ||
+                    (ledger.currentBalance > 0 ? ledger.currentBalance : 0) ||
+                    0,
+            );
+
+            const existingAdvance = Number(
+              ledger.advanceAmount !== undefined && ledger.advanceAmount !== null
+                ? ledger.advanceAmount
+                : customer?.customerBalance ||
+                    (ledger.currentBalance < 0
+                      ? Math.abs(ledger.currentBalance)
+                      : 0) ||
+                    0,
+            );
+
+            let adjustedFromCreditUsed = 0;
+            let remainingCreditUsed = existingCreditUsed;
+            let newAdvanceAmount = existingAdvance;
+
+            if (existingCreditUsed > 0) {
+              if (grossAmount <= existingCreditUsed) {
+                adjustedFromCreditUsed = grossAmount;
+                remainingCreditUsed = existingCreditUsed - grossAmount;
+              } else {
+                adjustedFromCreditUsed = existingCreditUsed;
+                remainingCreditUsed = 0;
+                newAdvanceAmount =
+                  existingAdvance + (grossAmount - existingCreditUsed);
+              }
+            } else {
+              newAdvanceAmount = existingAdvance + grossAmount;
+            }
+
+            const newCurrentBalance =
+              remainingCreditUsed > 0 ? remainingCreditUsed : -newAdvanceAmount;
+
+            ledger.creditUsed = remainingCreditUsed;
+            ledger.advanceAmount = newAdvanceAmount;
+            ledger.currentBalance = newCurrentBalance;
+            await ledger.save({ session });
+
+            if (customer) {
+              await Customer.findByIdAndUpdate(
+                customer._id,
+                {
+                  $set: {
+                    creditUsed: remainingCreditUsed,
+                    customerBalance: newAdvanceAmount,
+                  },
+                },
+                { session },
+              );
+            }
+
+            payment.paymentDetails.adjustedFromCreditUsed = adjustedFromCreditUsed;
+            payment.paymentDetails.remainingCreditUsed = remainingCreditUsed;
+            payment.paymentDetails.advanceCredited = newAdvanceAmount - existingAdvance;
+
+            const bankInfo = payment.paymentDetails?.bankAccountName ? ` (${payment.paymentDetails.bankAccountName})` : '';
+            const narration = `Post-Dated Cheque #${payment.paymentDetails?.chequeNumber || 'N/A'} cleared in bank${bankInfo} on ${effectiveClearDate.toLocaleDateString()}. ₹${grossAmount.toLocaleString()} credited.`;
+
+            await LedgerTransaction.create(
+              [
+                {
+                  entityType: "Customer",
+                  ledgerId: ledger._id,
+                  partyId: payment.partyId,
+                  transactionDate: effectiveClearDate,
+                  voucherType: "Receipt",
+                  voucherId: payment._id,
+                  referenceNumber: payment.paymentNumber,
+                  credit: grossAmount,
+                  debit: 0,
+                  runningBalance: newCurrentBalance,
+                  narration,
+                  branchId: payment.branchId,
+                  tenantId,
+                  createdBy: userId,
+                },
+              ],
+              { session },
+            );
+          }
+
+          payment.status = "CLEARED";
+          payment.paymentDetails.chequeStatus = "CLEARED";
+          payment.paymentDetails.clearanceDate = effectiveClearDate;
+          payment.paymentDetails.isCredited = true;
+          await payment.save({ session });
+        } else {
+          payment.status = "CLEARED";
+          payment.paymentDetails.chequeStatus = "CLEARED";
+          payment.paymentDetails.clearanceDate = effectiveClearDate;
+          await payment.save({ session });
+
+          if (ledger) {
+            await LedgerTransaction.create(
+              [
+                {
+                  entityType: "Customer",
+                  ledgerId: ledger._id,
+                  partyId: payment.partyId,
+                  transactionDate: effectiveClearDate,
+                  voucherType: "Receipt",
+                  voucherId: payment._id,
+                  referenceNumber: `CLR-${payment.paymentNumber}`,
+                  credit: 0,
+                  debit: 0,
+                  runningBalance: Number(ledger.currentBalance || 0),
+                  narration: `Cheque #${payment.paymentDetails?.chequeNumber || ""} cleared in bank on ${effectiveClearDate.toLocaleDateString()}. Amount: ₹${Number(payment.grossAmount).toLocaleString()}.`,
+                  branchId: payment.branchId,
+                  tenantId,
+                  createdBy: userId,
+                },
+              ],
+              { session },
+            );
+          }
         }
       } else if (status === "BOUNCED") {
         payment.status = "BOUNCED";
+        payment.paymentDetails.chequeStatus = "BOUNCED";
         payment.paymentDetails.bounceReason =
           bounceReason || "Cheque bounced / Dishonoured";
         payment.paymentDetails.bounceDate = new Date();
         payment.paymentDetails.bouncePenaltyDebited = 500;
         await payment.save({ session });
 
-        // Unallocate invoices
-        if (payment.allocations && payment.allocations.length > 0) {
-          for (const alloc of payment.allocations) {
-            if (
-              alloc.invoiceId &&
-              mongoose.Types.ObjectId.isValid(alloc.invoiceId)
-            ) {
-              await BulkOrder.findByIdAndUpdate(
-                alloc.invoiceId,
+        if (isUncreditedPDC) {
+          // PDC was NEVER credited into ledger/orders, so do NOT reverse principal grossAmount.
+          // Only debit the bounce charge penalty (₹500) to customer ledger.
+          if (ledger) {
+            const bounceCharge = 500;
+            const newCreditUsed = Number(ledger.creditUsed || 0) + bounceCharge;
+            const newBalance =
+              newCreditUsed > 0 ? newCreditUsed : -Number(ledger.advanceAmount || 0);
+
+            ledger.creditUsed = newCreditUsed;
+            ledger.currentBalance = newBalance;
+            await ledger.save({ session });
+
+            if (customer) {
+              await Customer.findByIdAndUpdate(
+                customer._id,
                 {
-                  $inc: { advanceAmount: -Number(alloc.allocatedAmount) },
+                  $set: {
+                    creditUsed: newCreditUsed,
+                  },
                 },
                 { session },
-              ).catch(() => null);
+              );
             }
-          }
-        }
 
-        if (ledger) {
-          const grossAmount = Number(payment.grossAmount);
-          const bounceCharge = 500;
-
-          const restoredCreditUsed = Math.min(
-            Number(ledger.creditUsed || 0) +
-              Number(
-                payment.paymentDetails?.adjustedFromCreditUsed || grossAmount,
-              ),
-            Number(ledger.creditUsed || 0) + grossAmount,
-          );
-          const advanceReduction = Math.max(
-            0,
-            Number(ledger.advanceAmount || 0) -
-              Number(payment.paymentDetails?.advanceCredited || 0),
-          );
-          const newCreditUsed = restoredCreditUsed + bounceCharge;
-          const newAdvance = advanceReduction;
-          const newBalance = newCreditUsed > 0 ? newCreditUsed : -newAdvance;
-
-          ledger.creditUsed = newCreditUsed;
-          ledger.advanceAmount = newAdvance;
-          ledger.currentBalance = newBalance;
-          await ledger.save({ session });
-
-          if (customer) {
-            await Customer.findByIdAndUpdate(
-              customer._id,
-              {
-                $set: {
-                  creditUsed: newCreditUsed,
-                  customerBalance: newAdvance,
+            await LedgerTransaction.create(
+              [
+                {
+                  entityType: "Customer",
+                  ledgerId: ledger._id,
+                  partyId: payment.partyId,
+                  transactionDate: new Date(),
+                  voucherType: "Debit Note",
+                  voucherId: payment._id,
+                  referenceNumber: `BNC-${payment.paymentNumber}`,
+                  debit: bounceCharge,
+                  credit: 0,
+                  runningBalance: newBalance,
+                  narration: `Post-Dated Cheque #${payment.paymentDetails?.chequeNumber || "N/A"} bounced (${payment.paymentDetails.bounceReason}). ₹${bounceCharge} penalty debited.`,
+                  branchId: payment.branchId,
+                  tenantId,
+                  createdBy: userId,
                 },
-              },
+              ],
               { session },
             );
           }
+        } else {
+          // Regular / previously credited cheque: Unallocate orders and reverse grossAmount + penalty
+          if (payment.allocations && payment.allocations.length > 0) {
+            for (const alloc of payment.allocations) {
+              if (
+                alloc.invoiceId &&
+                mongoose.Types.ObjectId.isValid(alloc.invoiceId)
+              ) {
+                await BulkOrder.findByIdAndUpdate(
+                  alloc.invoiceId,
+                  {
+                    $inc: { advanceAmount: -Number(alloc.allocatedAmount) },
+                  },
+                  { session },
+                ).catch(() => null);
+              }
+            }
+          }
 
-          await LedgerTransaction.create(
-            [
-              {
-                entityType: "Customer",
-                ledgerId: ledger._id,
-                partyId: payment.partyId,
-                transactionDate: new Date(),
-                voucherType: "Debit Note",
-                voucherId: payment._id,
-                referenceNumber: `BNC-${payment.paymentNumber}`,
-                debit: grossAmount + bounceCharge,
-                credit: 0,
-                runningBalance: newBalance,
-                narration: `Cheque #${payment.paymentDetails?.chequeNumber || "N/A"} bounced (${payment.paymentDetails.bounceReason}). ₹${grossAmount.toLocaleString()} reversed + ₹${bounceCharge} penalty debited.`,
-                branchId: payment.branchId,
-                tenantId,
-                createdBy: userId,
-              },
-            ],
-            { session },
-          );
+          if (ledger) {
+            const grossAmount = Number(payment.grossAmount);
+            const bounceCharge = 500;
+
+            const restoredCreditUsed = Math.min(
+              Number(ledger.creditUsed || 0) +
+                Number(
+                  payment.paymentDetails?.adjustedFromCreditUsed || grossAmount,
+                ),
+              Number(ledger.creditUsed || 0) + grossAmount,
+            );
+            const advanceReduction = Math.max(
+              0,
+              Number(ledger.advanceAmount || 0) -
+                Number(payment.paymentDetails?.advanceCredited || 0),
+            );
+            const newCreditUsed = restoredCreditUsed + bounceCharge;
+            const newAdvance = advanceReduction;
+            const newBalance = newCreditUsed > 0 ? newCreditUsed : -newAdvance;
+
+            ledger.creditUsed = newCreditUsed;
+            ledger.advanceAmount = newAdvance;
+            ledger.currentBalance = newBalance;
+            await ledger.save({ session });
+
+            if (customer) {
+              await Customer.findByIdAndUpdate(
+                customer._id,
+                {
+                  $set: {
+                    creditUsed: newCreditUsed,
+                    customerBalance: newAdvance,
+                  },
+                },
+                { session },
+              );
+            }
+
+            await LedgerTransaction.create(
+              [
+                {
+                  entityType: "Customer",
+                  ledgerId: ledger._id,
+                  partyId: payment.partyId,
+                  transactionDate: new Date(),
+                  voucherType: "Debit Note",
+                  voucherId: payment._id,
+                  referenceNumber: `BNC-${payment.paymentNumber}`,
+                  debit: grossAmount + bounceCharge,
+                  credit: 0,
+                  runningBalance: newBalance,
+                  narration: `Cheque #${payment.paymentDetails?.chequeNumber || "N/A"} bounced (${payment.paymentDetails.bounceReason}). ₹${grossAmount.toLocaleString()} reversed + ₹${bounceCharge} penalty debited.`,
+                  branchId: payment.branchId,
+                  tenantId,
+                  createdBy: userId,
+                },
+              ],
+              { session },
+            );
+          }
         }
       } else if (status === "DEPOSITED") {
         payment.status = "DEPOSITED";
+        payment.paymentDetails.chequeStatus = "DEPOSITED";
         payment.paymentDetails.depositDate = new Date();
+        await payment.save({ session });
+      } else if (status === "RETRY" || status === "REPRESENTED") {
+        const chqDate = payment.paymentDetails?.chequeDate ? new Date(payment.paymentDetails.chequeDate) : null;
+        let expDate = payment.paymentDetails?.chequeExpiryDate ? new Date(payment.paymentDetails.chequeExpiryDate) : null;
+        if (!expDate && chqDate) {
+          expDate = new Date(chqDate);
+          expDate.setMonth(expDate.getMonth() + 3);
+        }
+
+        if (expDate && new Date() > expDate) {
+          throw new Error(
+            `Cheque validity expired on ${expDate.toLocaleDateString("en-IN")} (3 months from maturity date). Stale cheques cannot be retried. Please request a new cheque from the customer.`,
+          );
+        }
+
+        payment.status = "RECEIVED";
+        payment.paymentDetails.chequeStatus = "PENDING";
+        payment.paymentDetails.isCredited = false;
+        payment.paymentDetails.retryCount = (payment.paymentDetails.retryCount || 0) + 1;
+        payment.paymentDetails.lastRetryDate = new Date();
+        if (!payment.paymentDetails.retryHistory) {
+          payment.paymentDetails.retryHistory = [];
+        }
+        payment.paymentDetails.retryHistory.push({
+          retryDate: new Date(),
+          previousStatus: "BOUNCED",
+          notes: req.body.notes || req.body.retryNotes || "Cheque re-presented to bank for clearance",
+        });
+        await payment.save({ session });
+      } else if (status === "EXPIRED") {
+        payment.status = "EXPIRED";
+        payment.paymentDetails.chequeStatus = "EXPIRED";
         await payment.save({ session });
       }
 
       return payment;
     });
+
+    if (status === "CLEARED") {
+      sendPaymentReceiptNotifications({ paymentId: result._id, tenantId }).catch((err) =>
+        console.error("[PaymentReceipt] Background notification error:", err.message),
+      );
+    }
 
     return sendSuccessResponse(
       res,
@@ -538,6 +820,7 @@ export const executeVendorPayment = async (req, res) => {
       paymentMode,
       allocations = [],
       paymentDetails = {},
+      isPostDated,
     } = req.body;
 
     const payoutAmount = Number(grossAmount || amount || 0);
@@ -745,6 +1028,13 @@ export const getPaymentsList = async (req, res) => {
     if (partyId && mongoose.Types.ObjectId.isValid(partyId))
       query.partyId = partyId;
 
+    if (req.query.isPostDated !== undefined && req.query.isPostDated !== "") {
+      query["paymentDetails.isPostDated"] = req.query.isPostDated === "true";
+    }
+    if (req.query.chequeStatus) {
+      query["paymentDetails.chequeStatus"] = req.query.chequeStatus;
+    }
+
     if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) query.createdAt.$gte = new Date(startDate);
@@ -783,6 +1073,145 @@ export const getPaymentsList = async (req, res) => {
   } catch (error) {
     console.error("getPaymentsList error:", error);
     return sendErrorResponse(res, 500, "GET_PAYMENTS_FAILED", error.message);
+  }
+};
+
+export const getPdcChequeAlerts = async (req, res) => {
+  try {
+    const tenantId = req.user?.tenantId || null;
+
+    // Automatically expire any stale cheques in the DB before querying
+    await autoExpireStaleCheques(tenantId);
+
+    const query = {
+      paymentMode: "CHEQUE",
+      "paymentDetails.isPostDated": true,
+      "paymentDetails.isCredited": false,
+      "paymentDetails.chequeStatus": { $nin: ["CLEARED", "CANCELLED"] },
+      status: { $nin: ["CLEARED", "CANCELLED"] },
+    };
+
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const pendingPdcCheques = await Payment.find(query)
+      .sort({ "paymentDetails.chequeDate": 1, createdAt: -1 })
+      .lean();
+
+    const alerts = pendingPdcCheques.map((item) => {
+      const chqDate = item.paymentDetails?.chequeDate ? new Date(item.paymentDetails.chequeDate) : null;
+      let expDate = item.paymentDetails?.chequeExpiryDate ? new Date(item.paymentDetails.chequeExpiryDate) : null;
+      if (!expDate && chqDate) {
+        expDate = new Date(chqDate);
+        expDate.setMonth(expDate.getMonth() + 3);
+      }
+
+      const isMatured = chqDate ? chqDate <= todayEnd : true;
+      const isExpired = item.status === "EXPIRED" || item.paymentDetails?.chequeStatus === "EXPIRED" || Boolean(expDate && new Date() > expDate);
+      const isBounced = item.status === "BOUNCED" || item.paymentDetails?.chequeStatus === "BOUNCED";
+      const canRetry = isBounced && !isExpired;
+      const daysDiff = chqDate ? Math.ceil((chqDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+      const daysUntilExpiry = expDate ? Math.max(0, Math.ceil((expDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+      const isExpiringSoon = !isExpired && daysUntilExpiry <= 15;
+
+      let urgency = "UPCOMING";
+      let message = "";
+      if (isExpired) {
+        urgency = "EXPIRED";
+        message = `Cheque expired on ${expDate.toLocaleDateString("en-IN")} (>3 months). Stale cheque cannot be processed.`;
+      } else if (isExpiringSoon) {
+        urgency = "EXPIRING_SOON";
+        message = `Warning: Cheque will expire on ${expDate.toLocaleDateString("en-IN")} (${daysUntilExpiry} days remaining). Action required before 3-month RBI deadline!`;
+      } else if (isBounced) {
+        urgency = "BOUNCED";
+        message = `Cheque bounced (${item.paymentDetails?.bounceReason || "Dishonoured"}). Valid for retry until ${expDate ? expDate.toLocaleDateString("en-IN") : "3 months"}.`;
+      } else if (isMatured) {
+        if (daysDiff === 0) {
+          urgency = "DUE_TODAY";
+          message = "Cheque maturity date is today. Verify if cleared or bounced.";
+        } else {
+          urgency = "OVERDUE";
+          message = `Cheque was due on ${chqDate.toLocaleDateString("en-IN")}. Please confirm if cleared or bounced.`;
+        }
+      } else {
+        urgency = "UPCOMING";
+        message = `Cheque is maturing in ${daysDiff} day${daysDiff > 1 ? "s" : ""} (${chqDate.toLocaleDateString("en-IN")}). Actions will unlock on maturity.`;
+      }
+
+      return {
+        _id: item._id,
+        paymentId: item._id,
+        paymentNumber: item.paymentNumber,
+        partyId: item.partyId,
+        partyModel: item.partyModel || "Customer",
+        partyName: item.partyName || "Customer",
+        grossAmount: item.grossAmount,
+        amount: item.grossAmount,
+        chequeNumber: item.paymentDetails?.chequeNumber || "",
+        chequeDate: item.paymentDetails?.chequeDate || null,
+        chequeExpiryDate: expDate,
+        daysUntilExpiry,
+        isExpired,
+        isBounced,
+        canRetry,
+        isExpiringSoon,
+        retryCount: item.paymentDetails?.retryCount || 0,
+        lastRetryDate: item.paymentDetails?.lastRetryDate || null,
+        bounceReason: item.paymentDetails?.bounceReason || "",
+        bankName: item.paymentDetails?.bankName || "",
+        bankAccountName: item.paymentDetails?.bankAccountName || "",
+        bankAccountNumber: item.paymentDetails?.bankAccountNumber || "",
+        receiverUpiId: item.paymentDetails?.receiverUpiId || "",
+        allocations: (item.allocations || []).map((a) => ({
+          orderNumber: a.invoiceNumber,
+          orderId: a.invoiceId,
+          allocatedAmount: a.allocatedAmount,
+        })),
+        isMatured,
+        urgency,
+        message,
+        daysDiff,
+        status: isExpired ? "EXPIRED" : item.status,
+        chequeStatus: isExpired ? "EXPIRED" : item.paymentDetails?.chequeStatus || "PENDING",
+        createdAt: item.createdAt,
+      };
+    });
+
+    const maturedAlerts = alerts.filter((a) => a.isMatured && !a.isBounced && !a.isExpired);
+    const bouncedAlerts = alerts.filter((a) => a.isBounced && !a.isExpired);
+    const expiringSoonAlerts = alerts.filter((a) => a.isExpiringSoon && !a.isExpired);
+    const upcomingAlerts = alerts.filter((a) => !a.isMatured && !a.isBounced && !a.isExpired);
+    const expiredAlerts = alerts.filter((a) => a.isExpired);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      {
+        total: alerts.length,
+        maturedCount: maturedAlerts.length,
+        bouncedCount: bouncedAlerts.length,
+        expiringSoonCount: expiringSoonAlerts.length,
+        upcomingCount: upcomingAlerts.length,
+        expiredCount: expiredAlerts.length,
+        alerts,
+        maturedAlerts,
+        bouncedAlerts,
+        expiringSoonAlerts,
+        upcomingAlerts,
+        expiredAlerts,
+      },
+      "PDC cheque alerts retrieved.",
+    );
+  } catch (error) {
+    console.error("getPdcChequeAlerts error:", error);
+    return sendErrorResponse(res, 500, "GET_PDC_ALERTS_FAILED", error.message);
   }
 };
 

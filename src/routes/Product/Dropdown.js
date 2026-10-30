@@ -16,6 +16,13 @@ import {
   createSpecificLab, getAllSpecificLabs, getSpecificLabById, updateSpecificLab, deleteSpecificLab
 } from '../../core/controllers/Product/DropdownController.js';
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
+import {
+  createBankAccount,
+  getAllBankAccounts,
+  getBankAccountById,
+  updateBankAccount,
+  deleteBankAccount
+} from '../../core/controllers/Accounting/bankAccount.controller.js';
 
 const dropdownRouter = express.Router();
 
@@ -120,5 +127,12 @@ dropdownRouter.get('/specific-labs', getAllSpecificLabs);
 dropdownRouter.get('/specific-labs/:id', getSpecificLabById);
 dropdownRouter.put('/specific-labs/:id', updateSpecificLab);
 dropdownRouter.delete('/specific-labs/:id', deleteSpecificLab);
+
+// Bank Account Routes
+dropdownRouter.post('/bank-accounts', createBankAccount);
+dropdownRouter.get('/bank-accounts', getAllBankAccounts);
+dropdownRouter.get('/bank-accounts/:id', getBankAccountById);
+dropdownRouter.put('/bank-accounts/:id', updateBankAccount);
+dropdownRouter.delete('/bank-accounts/:id', deleteBankAccount);
 
 export default dropdownRouter;

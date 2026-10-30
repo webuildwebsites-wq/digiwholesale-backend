@@ -103,6 +103,21 @@ const PaymentSchema = new mongoose.Schema({
     bounceReason: { type: String, trim: true },
     bouncePenaltyDebited: { type: Number, default: 0 },
     cashVoucherNo: { type: String, trim: true },
+    bankAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount' },
+    bankAccountName: { type: String, trim: true },
+    bankAccountNumber: { type: String, trim: true },
+    isPostDated: { type: Boolean, default: false },
+    chequeStatus: { type: String, enum: ['PENDING', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'CANCELLED', 'EXPIRED', 'REPRESENTED'], default: 'PENDING' },
+    chequeExpiryDate: { type: Date },
+    retryCount: { type: Number, default: 0 },
+    lastRetryDate: { type: Date },
+    retryHistory: [{
+      retryDate: { type: Date, default: Date.now },
+      previousStatus: { type: String },
+      notes: { type: String, trim: true }
+    }],
+    depositDate: { type: Date },
+    isCredited: { type: Boolean, default: false },
     collectedByEmployeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'employee' },
     collectedByName: { type: String, trim: true },
     screenshotUrl: { type: String, trim: true },
@@ -110,7 +125,7 @@ const PaymentSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['DRAFT', 'PENDING_VERIFICATION', 'RECEIVED', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'COMPLETED', 'CANCELLED'], 
+    enum: ['DRAFT', 'PENDING_VERIFICATION', 'RECEIVED', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'COMPLETED', 'CANCELLED', 'EXPIRED'], 
     default: 'COMPLETED',
     index: true 
   },
