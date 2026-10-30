@@ -1094,22 +1094,22 @@ export const getPdcChequeAlerts = async (req, res) => {
     await autoExpireStaleCheques(tenantId);
 
     const query = {
-      paymentMode: "CHEQUE",
-      "paymentDetails.isPostDated": true,
+      paymentMode: { $regex: /^cheque$/i },
       "paymentDetails.isCredited": false,
       "paymentDetails.chequeStatus": { $nin: ["CLEARED", "CANCELLED"] },
       status: { $nin: ["CLEARED", "CANCELLED"] },
+      $or: [
+        { "paymentDetails.isPostDated": true },
+        { "paymentDetails.chequeDate": { $exists: true, $ne: null } },
+      ],
     };
 
     if (tenantId) {
       query.tenantId = tenantId;
     }
 
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const today = new Date();
+    const todayMidnightMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
     const pendingPdcCheques = await Payment.find(query)
       .sort({ "paymentDetails.chequeDate": 1, createdAt: -1 })
@@ -1123,36 +1123,50 @@ export const getPdcChequeAlerts = async (req, res) => {
         expDate.setMonth(expDate.getMonth() + 3);
       }
 
-      const isMatured = chqDate ? chqDate <= todayEnd : true;
-      const isExpired = item.status === "EXPIRED" || item.paymentDetails?.chequeStatus === "EXPIRED" || Boolean(expDate && new Date() > expDate);
+      const chqMidnightMs = chqDate ? new Date(chqDate.getFullYear(), chqDate.getMonth(), chqDate.getDate()).getTime() : todayMidnightMs;
+      const diffMs = chqMidnightMs - todayMidnightMs;
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      const isDueToday = diffDays === 0;
+      const isOverdue = diffDays < 0;
+      const isUpcoming = diffDays > 0;
+      const isMatured = diffDays <= 0;
+
+      const isExpired = item.status === "EXPIRED" || item.paymentDetails?.chequeStatus === "EXPIRED" || Boolean(expDate && today.getTime() > expDate.getTime());
       const isBounced = item.status === "BOUNCED" || item.paymentDetails?.chequeStatus === "BOUNCED";
       const canRetry = isBounced && !isExpired;
-      const daysDiff = chqDate ? Math.ceil((chqDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24)) : 0;
-      const daysUntilExpiry = expDate ? Math.max(0, Math.ceil((expDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+
+      const expMidnightMs = expDate ? new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate()).getTime() : 0;
+      const daysUntilExpiry = expDate ? Math.max(0, Math.ceil((expMidnightMs - todayMidnightMs) / (1000 * 60 * 60 * 24))) : 0;
       const isExpiringSoon = !isExpired && daysUntilExpiry <= 15;
+
+      const chqDateFormatted = chqDate ? chqDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+      const expDateFormatted = expDate ? expDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+      const partyTitle = item.partyName || "Customer";
+      const chqNum = item.paymentDetails?.chequeNumber ? `#${item.paymentDetails.chequeNumber}` : "PDC";
+      const amountStr = `₹${Number(item.grossAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 
       let urgency = "UPCOMING";
       let message = "";
       if (isExpired) {
         urgency = "EXPIRED";
-        message = `Cheque expired on ${expDate.toLocaleDateString("en-IN")} (>3 months). Stale cheque cannot be processed.`;
+        message = `Cheque ${chqNum} for ${amountStr} (${partyTitle}) expired on ${expDateFormatted} (>3 months). Stale cheque cannot be processed.`;
       } else if (isExpiringSoon) {
         urgency = "EXPIRING_SOON";
-        message = `Warning: Cheque will expire on ${expDate.toLocaleDateString("en-IN")} (${daysUntilExpiry} days remaining). Action required before 3-month RBI deadline!`;
+        message = `Warning: Cheque ${chqNum} for ${amountStr} (${partyTitle}) will expire on ${expDateFormatted} (${daysUntilExpiry} days remaining). Action required before 3-month RBI deadline!`;
       } else if (isBounced) {
         urgency = "BOUNCED";
-        message = `Cheque bounced (${item.paymentDetails?.bounceReason || "Dishonoured"}). Valid for retry until ${expDate ? expDate.toLocaleDateString("en-IN") : "3 months"}.`;
-      } else if (isMatured) {
-        if (daysDiff === 0) {
-          urgency = "DUE_TODAY";
-          message = "Cheque maturity date is today. Verify if cleared or bounced.";
-        } else {
-          urgency = "OVERDUE";
-          message = `Cheque was due on ${chqDate.toLocaleDateString("en-IN")}. Please confirm if cleared or bounced.`;
-        }
+        message = `Cheque ${chqNum} (${partyTitle}) bounced (${item.paymentDetails?.bounceReason || "Dishonoured"}). Valid for retry until ${expDateFormatted}.`;
+      } else if (isDueToday) {
+        urgency = "DUE_TODAY";
+        message = `Cheque ${chqNum} for ${amountStr} from ${partyTitle} is scheduled for CLEARANCE TODAY (${chqDateFormatted}). Please verify bank credit or mark status.`;
+      } else if (isOverdue) {
+        const overdueDays = Math.abs(diffDays);
+        urgency = "OVERDUE";
+        message = `Cheque ${chqNum} for ${amountStr} from ${partyTitle} was due for clearance on ${chqDateFormatted} (${overdueDays} day${overdueDays > 1 ? "s" : ""} ago). Please confirm if cleared or bounced.`;
       } else {
         urgency = "UPCOMING";
-        message = `Cheque is maturing in ${daysDiff} day${daysDiff > 1 ? "s" : ""} (${chqDate.toLocaleDateString("en-IN")}). Actions will unlock on maturity.`;
+        message = `Cheque ${chqNum} for ${amountStr} from ${partyTitle} is maturing for clearance on ${chqDateFormatted} (in ${diffDays} day${diffDays > 1 ? "s" : ""}).`;
       }
 
       return {
@@ -1161,7 +1175,7 @@ export const getPdcChequeAlerts = async (req, res) => {
         paymentNumber: item.paymentNumber,
         partyId: item.partyId,
         partyModel: item.partyModel || "Customer",
-        partyName: item.partyName || "Customer",
+        partyName: partyTitle,
         grossAmount: item.grossAmount,
         amount: item.grossAmount,
         chequeNumber: item.paymentDetails?.chequeNumber || "",
@@ -1172,6 +1186,10 @@ export const getPdcChequeAlerts = async (req, res) => {
         isBounced,
         canRetry,
         isExpiringSoon,
+        isDueToday: !isExpired && !isBounced && isDueToday,
+        isOverdue: !isExpired && !isBounced && isOverdue,
+        isUpcoming: !isExpired && !isBounced && isUpcoming,
+        isMatured: !isExpired && !isBounced && isMatured,
         retryCount: item.paymentDetails?.retryCount || 0,
         lastRetryDate: item.paymentDetails?.lastRetryDate || null,
         bounceReason: item.paymentDetails?.bounceReason || "",
@@ -1184,20 +1202,21 @@ export const getPdcChequeAlerts = async (req, res) => {
           orderId: a.invoiceId,
           allocatedAmount: a.allocatedAmount,
         })),
-        isMatured,
         urgency,
         message,
-        daysDiff,
+        daysDiff: diffDays,
         status: isExpired ? "EXPIRED" : item.status,
         chequeStatus: isExpired ? "EXPIRED" : item.paymentDetails?.chequeStatus || "PENDING",
         createdAt: item.createdAt,
       };
     });
 
-    const maturedAlerts = alerts.filter((a) => a.isMatured && !a.isBounced && !a.isExpired);
+    const dueTodayAlerts = alerts.filter((a) => a.isDueToday);
+    const overdueAlerts = alerts.filter((a) => a.isOverdue);
+    const maturedAlerts = alerts.filter((a) => a.isMatured);
     const bouncedAlerts = alerts.filter((a) => a.isBounced && !a.isExpired);
     const expiringSoonAlerts = alerts.filter((a) => a.isExpiringSoon && !a.isExpired);
-    const upcomingAlerts = alerts.filter((a) => !a.isMatured && !a.isBounced && !a.isExpired);
+    const upcomingAlerts = alerts.filter((a) => a.isUpcoming);
     const expiredAlerts = alerts.filter((a) => a.isExpired);
 
     return sendSuccessResponse(
@@ -1205,12 +1224,19 @@ export const getPdcChequeAlerts = async (req, res) => {
       200,
       {
         total: alerts.length,
+        dueTodayCount: dueTodayAlerts.length,
+        overdueCount: overdueAlerts.length,
         maturedCount: maturedAlerts.length,
         bouncedCount: bouncedAlerts.length,
         expiringSoonCount: expiringSoonAlerts.length,
         upcomingCount: upcomingAlerts.length,
         expiredCount: expiredAlerts.length,
+        totalDueTodayAmount: dueTodayAlerts.reduce((sum, a) => sum + (Number(a.amount) || 0), 0),
+        totalOverdueAmount: overdueAlerts.reduce((sum, a) => sum + (Number(a.amount) || 0), 0),
+        totalUpcomingAmount: upcomingAlerts.reduce((sum, a) => sum + (Number(a.amount) || 0), 0),
         alerts,
+        dueTodayAlerts,
+        overdueAlerts,
         maturedAlerts,
         bouncedAlerts,
         expiringSoonAlerts,

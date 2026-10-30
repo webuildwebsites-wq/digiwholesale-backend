@@ -48,6 +48,7 @@ import agingRouter from './src/routes/Accounting/aging.routes.js';
 import gstReportRouter from './src/routes/Accounting/gstReport.routes.js';
 import batchRouter       from './src/routes/Product/batch.routes.js';
 import externalRouter   from './src/routes/external.routes.js';
+import notificationRouter from './src/routes/Notification/notification.routes.js';
 
 if (!process.env.PASSWORD_SECRET) {
   console.error('FATAL: PASSWORD_SECRET environment variable is not set. Server cannot start.');
@@ -197,10 +198,12 @@ try {
   app.use("/api/v1/reports/aging", agingRouter);
   app.use("/api/v1/reports/gst", gstReportRouter);
   app.use("/api/v1/batches", batchRouter);
+  app.use("/api/v1/notifications", notificationRouter);
 
   // EXTERNAL / CROSS-PLATFORM ROUTES (Digi-Retailer ↔ Digi-Wholesaler)
   app.use("/api/ext", externalRouter);
 
+  app.use("/api/notifications", notificationRouter);
   app.use("/api/payments", paymentRouter);
   app.use("/api/ledgers", ledgerRouter);
   app.use("/api/accounts", accountRouter);
@@ -247,4 +250,4 @@ connectDB()
     console.log("MongoDB TTL indexes active - Automatic deletion enabled for records older than 30 days");
     startBillingCron();
   })
-  .catch(err => console.error("DB Failed:", err));
+  .catch(err => console.error("DB Failed:", err));
