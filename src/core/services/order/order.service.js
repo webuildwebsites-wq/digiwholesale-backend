@@ -613,9 +613,40 @@ export async function getProductCoatingsService({ brand, category, tenantId } = 
 export async function getProductNamesService({ brand, category, search = "", limit = 100, page = 1, tenantId } = {}) {
   const filter = { productName: { $nin: [null, ""] } };
   if (tenantId) filter.tenantId = tenantId;
-  if (brand?.trim()) filter.brand = { $regex: `^${brand.trim()}$`, $options: "i" };
-  if (category?.trim()) filter.category = { $regex: `^${category.trim()}$`, $options: "i" };
-  if (search.trim()) filter.productName = { $regex: search.trim(), $options: "i" };
+  if (brand?.trim()) filter.brand = { $regex: `^${brand.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
+  if (category?.trim()) filter.category = { $regex: `^${category.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
+
+  const trimmedSearch = search?.trim();
+  if (trimmedSearch) {
+    const escaped = trimmedSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const searchRegex = { $regex: escaped, $options: "i" };
+
+    const tokens = trimmedSearch.split(/\s+/).filter(Boolean);
+    if (tokens.length > 1) {
+      filter.$and = [
+        ...(filter.$and || []),
+        ...tokens.map((token) => {
+          const tokenEscaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const tokenRegex = { $regex: tokenEscaped, $options: "i" };
+          return {
+            $or: [
+              { productCode: tokenRegex },
+              { productName: tokenRegex },
+              { category: tokenRegex },
+              { brand: tokenRegex },
+            ],
+          };
+        }),
+      ];
+    } else {
+      filter.$or = [
+        { productCode: searchRegex },
+        { productName: searchRegex },
+        { category: searchRegex },
+        { brand: searchRegex },
+      ];
+    }
+  }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const total = await DigiProduct.countDocuments(filter);
