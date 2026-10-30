@@ -280,6 +280,10 @@ const customerDraftSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    hasBlankCheques: {
+      type: Boolean,
+      default: false
+    },
     chequeDetails: {
       type: [{
         chequeNumber: {
