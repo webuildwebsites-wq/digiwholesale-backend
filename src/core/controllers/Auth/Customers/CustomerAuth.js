@@ -678,276 +678,243 @@ export const updateCustomerProfile = async (req, res) => {
     const updateData = req.body;
 
     const customer = await Customer.findOne({ _id: customerId, tenantId: req.user.tenantId });
-    console.log("customer : ", customer);
-
     if (!customer) {
       return sendErrorResponse(res, 404, "NOT_FOUND", "Customer not found");
     }
 
     const updateFields = {};
 
-    if (updateData.shopName) updateFields.shopName = updateData.shopName;
-    if (updateData.ownerName) updateFields.ownerName = updateData.ownerName;
-    if (updateData.mobileNo1) updateFields.mobileNo1 = updateData.mobileNo1;
-    if (updateData.mobileNo2) updateFields.mobileNo2 = updateData.mobileNo2;
-    if (updateData.creditUsed) updateFields.creditUsed = updateData.creditUsed;
-    if (updateData.businessEmail)
-      updateFields.businessEmail = updateData.businessEmail;
+    // Basic & Names
+    const shop = (updateData.shopName || updateData.firmName || '').trim();
+    const owner = (updateData.ownerName || updateData.proprietorName || '').trim();
+    if (shop) {
+      updateFields.shopName = shop;
+      updateFields.firmName = shop;
+    }
+    if (owner) {
+      updateFields.ownerName = owner;
+      updateFields.proprietorName = owner;
+    }
 
-    if (updateData.yearOfEstablishment !== undefined) updateFields.yearOfEstablishment = updateData.yearOfEstablishment;
-    if (updateData.proposedDiscount !== undefined) updateFields.proposedDiscount = updateData.proposedDiscount;
+    if (updateData.mobileNo1) updateFields.mobileNo1 = updateData.mobileNo1.trim();
+    if (updateData.mobileNo2 !== undefined) updateFields.mobileNo2 = updateData.mobileNo2 ? updateData.mobileNo2.trim() : "";
+    if (updateData.creditUsed !== undefined) updateFields.creditUsed = Number(updateData.creditUsed) || 0;
+    if (updateData.creditLimit !== undefined) updateFields.creditLimit = Math.max(0, Number(updateData.creditLimit) || 0);
+
+    if (updateData.yearOfEstablishment !== undefined) updateFields.yearOfEstablishment = updateData.yearOfEstablishment ? Number(updateData.yearOfEstablishment) : undefined;
+    if (updateData.proposedDiscount !== undefined) updateFields.proposedDiscount = Number(updateData.proposedDiscount) || 0;
     if (updateData.currentlyDealtBrands !== undefined) updateFields.currentlyDealtBrands = updateData.currentlyDealtBrands?.trim();
-    if (updateData.minSalesValue !== undefined) updateFields.minSalesValue = updateData.minSalesValue;
-    if (updateData.finalDiscount !== undefined) updateFields.finalDiscount = updateData.finalDiscount;
+    if (updateData.minSalesValue !== undefined) updateFields.minSalesValue = Number(updateData.minSalesValue) || 0;
+    if (updateData.finalDiscount !== undefined) updateFields.finalDiscount = Number(updateData.finalDiscount) || 0;
+    if (updateData.dcWithoutValue !== undefined) updateFields.dcWithoutValue = Boolean(updateData.dcWithoutValue);
 
-    // Validate BusinessType
-    if (updateData.BusinessType && updateData.BusinessTypeRefId) {
-      const businessType = await BusinessType.findById(updateData.BusinessTypeRefId);
-      if (!businessType) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `BusinessType with refId ${updateData.BusinessTypeRefId} does not exist`
-        );
+    // GST & Identity Documents
+    const isGst = updateData.IsGSTRegistered !== undefined 
+      ? updateData.IsGSTRegistered 
+      : (updateData.isGSTRegistered !== undefined ? updateData.isGSTRegistered : updateData.isGstRegistered);
+    if (isGst !== undefined) updateFields.isGSTRegistered = Boolean(isGst);
+
+    const gstRefId = updateData.gstTypeRefId || updateData.gstType?.refId;
+    const gstName = updateData.gstType?.name || (typeof updateData.gstType === 'string' ? updateData.gstType : null);
+    if (gstRefId) {
+      const gstDoc = await GSTType.findById(gstRefId);
+      if (gstDoc) {
+        updateFields.gstType = { name: gstDoc.name, refId: gstDoc._id };
       }
-      if (businessType.name !== updateData.BusinessType) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect BusinessType name for refId ${updateData.BusinessTypeRefId}. Expected: ${businessType.name}, Received: ${updateData.BusinessType}`
-        );
-      }
-      updateFields.BusinessType = {
-        name: updateData.BusinessType,
-        refId: updateData.BusinessTypeRefId,
-      };
+    } else if (gstName) {
+      updateFields.gstType = { name: gstName };
     }
 
-    // Validate zone
-    if (updateData.zone && updateData.zoneRefId) {
-      const location = await Location.findById(updateData.zoneRefId);
-      if (!location) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `Zone with refId ${updateData.zoneRefId} does not exist`
-        );
+    if (updateData.gstNumber !== undefined) updateFields.gstNumber = updateData.gstNumber ? updateData.gstNumber.trim().toUpperCase() : "";
+    if (updateData.gstCertificateImg !== undefined) updateFields.gstCertificateImg = updateData.gstCertificateImg;
+    if (updateData.panCard !== undefined) updateFields.panCard = updateData.panCard ? updateData.panCard.trim().toUpperCase() : "";
+    if (updateData.panCardImg !== undefined) updateFields.panCardImg = updateData.panCardImg;
+    if (updateData.aadharCard !== undefined) updateFields.aadharCard = updateData.aadharCard ? updateData.aadharCard.trim() : "";
+    if (updateData.aadharCardImg !== undefined) updateFields.aadharCardImg = updateData.aadharCardImg;
+    if (updateData.shopImg !== undefined) updateFields.shopImg = updateData.shopImg;
+
+    // Sales Person
+    const spRefId = updateData.salesPersonRefId || updateData.salesPerson?.refId;
+    const spName = updateData.salesPerson?.name || (typeof updateData.salesPerson === 'string' ? updateData.salesPerson : null);
+    if (spRefId) {
+      const spDoc = await employeeSchema.findById(spRefId);
+      if (spDoc) {
+        updateFields.salesPerson = { name: spDoc.employeeName, refId: spDoc._id };
       }
-      if (location.zone !== updateData.zone.toUpperCase()) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect zone name for refId ${updateData.zoneRefId}. Expected: ${location.zone}, Received: ${updateData.zone}`
-        );
-      }
-      updateFields.zone = {
-        name: updateData.zone.toUpperCase(),
-        refId: updateData.zoneRefId,
-      };
+    } else if (spName) {
+      updateFields.salesPerson = { name: spName };
     }
 
-    // Validate specificLab
-    if (updateData.specificLab && updateData.specificLabRefId) {
-      const specificLab = await SpecificLab.findById(updateData.specificLabRefId);
-      if (!specificLab) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `SpecificLab with refId ${updateData.specificLabRefId} does not exist`
-        );
+    // Cheques & Bank details
+    if (updateData.hasBlankCheques !== undefined) updateFields.hasBlankCheques = Boolean(updateData.hasBlankCheques);
+    if (Array.isArray(updateData.chequeDetails)) {
+      updateFields.chequeDetails = updateData.chequeDetails.slice(0, 3).map(c => ({
+        chequeNumber: (c.chequeNumber || "").trim(),
+        chequeImage: c.chequeImage || ""
+      }));
+    }
+    if (updateData.chequeRemark !== undefined) updateFields.chequeRemark = updateData.chequeRemark?.trim() || "";
+    if (Array.isArray(updateData.bankDetails)) updateFields.bankDetails = updateData.bankDetails;
+
+    // Brands, Brand Categories & Flat Fitting
+    if (Array.isArray(updateData.brands)) updateFields.brands = updateData.brands;
+    if (Array.isArray(updateData.brandCategories)) updateFields.brandCategories = updateData.brandCategories;
+    if (Array.isArray(updateData.flatFittingData)) updateFields.flatFittingData = updateData.flatFittingData;
+
+    // BusinessType
+    const btRefId = updateData.BusinessTypeRefId || updateData.businessTypeRefId || updateData.businessType?.refId || updateData.BusinessType?.refId;
+    const btName = updateData.BusinessType?.name || updateData.businessType?.name || (typeof updateData.BusinessType === 'string' ? updateData.BusinessType : (typeof updateData.businessType === 'string' ? updateData.businessType : null));
+    if (btRefId) {
+      const businessType = await BusinessType.findById(btRefId);
+      if (businessType) {
+        updateFields.businessType = { name: businessType.name, refId: businessType._id };
+        updateFields.BusinessType = updateFields.businessType;
       }
-      if (specificLab.name !== updateData.specificLab) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect specificLab name for refId ${updateData.specificLabRefId}. Expected: ${specificLab.name}, Received: ${updateData.specificLab}`
-        );
-      }
-      updateFields.specificLab = {
-        name: updateData.specificLab,
-        refId: updateData.specificLabRefId,
-      };
+    } else if (btName) {
+      updateFields.businessType = { name: btName };
+      updateFields.BusinessType = updateFields.businessType;
     }
 
-    // Validate plant
-    if (updateData.plant && updateData.plantRefId) {
-      const plant = await Plant.findById(updateData.plantRefId);
-      if (!plant) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `Plant with refId ${updateData.plantRefId} does not exist`
-        );
+    // Zone
+    const zRefId = updateData.zoneRefId || updateData.zone?.refId;
+    const zName = updateData.zone?.name || (typeof updateData.zone === 'string' ? updateData.zone : null);
+    if (zRefId) {
+      const location = await Location.findById(zRefId);
+      if (location) {
+        updateFields.zone = { name: location.zone.toUpperCase(), refId: location._id };
       }
-      if (plant.name !== updateData.plant) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect plant name for refId ${updateData.plantRefId}. Expected: ${plant.name}, Received: ${updateData.plant}`
-        );
-      }
-      updateFields.plant = {
-        name: updateData.plant,
-        refId: updateData.plantRefId,
-      };
+    } else if (zName) {
+      updateFields.zone = { name: zName.toUpperCase() };
     }
 
-    // Validate fittingCenter
-    if (updateData.fittingCenter && updateData.fittingCenterRefId) {
-      const fittingCenter = await FittingCenter.findById(updateData.fittingCenterRefId);
-      if (!fittingCenter) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `FittingCenter with refId ${updateData.fittingCenterRefId} does not exist`
-        );
+    // SpecificLab
+    const labRefId = updateData.specificLabRefId || updateData.specificLab?.refId;
+    const labName = updateData.specificLab?.name || (typeof updateData.specificLab === 'string' ? updateData.specificLab : null);
+    if (labRefId) {
+      const specificLab = await SpecificLab.findById(labRefId);
+      if (specificLab) {
+        updateFields.specificLab = { name: specificLab.name, refId: specificLab._id };
       }
-      if (fittingCenter.name !== updateData.fittingCenter) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect fittingCenter name for refId ${updateData.fittingCenterRefId}. Expected: ${fittingCenter.name}, Received: ${updateData.fittingCenter}`
-        );
-      }
-      updateFields.fittingCenter = {
-        name: updateData.fittingCenter,
-        refId: updateData.fittingCenterRefId,
-      };
+    } else if (labName) {
+      updateFields.specificLab = { name: labName };
     }
 
-    // Validate creditDays
-    if (updateData.creditDays && updateData.creditDaysRefId) {
-      const creditDay = await CreditDay.findById(updateData.creditDaysRefId);
-      if (!creditDay) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `CreditDays with refId ${updateData.creditDaysRefId} does not exist`
-        );
+    // Plant
+    const pRefId = updateData.plantRefId || updateData.plant?.refId;
+    const pName = updateData.plant?.name || (typeof updateData.plant === 'string' ? updateData.plant : null);
+    if (pRefId) {
+      const plant = await Plant.findById(pRefId);
+      if (plant) {
+        updateFields.plant = { name: plant.name, refId: plant._id };
       }
-      if (creditDay.days.toString() !== updateData.creditDays.toString()) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect creditDays value for refId ${updateData.creditDaysRefId}. Expected: ${creditDay.days}, Received: ${updateData.creditDays}`
-        );
-      }
-      updateFields.creditDays = {
-        name: updateData.creditDays,
-        refId: updateData.creditDaysRefId,
-      };
+    } else if (pName) {
+      updateFields.plant = { name: pName };
     }
 
-    // Validate courierName
-    if (updateData.courierName && updateData.courierNameRefId) {
-      const courierName = await CourierName.findById(updateData.courierNameRefId);
-      if (!courierName) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `CourierName with refId ${updateData.courierNameRefId} does not exist`
-        );
+    // FittingCenter
+    const fcRefId = updateData.fittingCenterRefId || updateData.fittingCenter?.refId;
+    const fcName = updateData.fittingCenter?.name || (typeof updateData.fittingCenter === 'string' ? updateData.fittingCenter : null);
+    if (fcRefId) {
+      const fittingCenter = await FittingCenter.findById(fcRefId);
+      if (fittingCenter) {
+        updateFields.fittingCenter = { name: fittingCenter.name, refId: fittingCenter._id };
       }
-      if (courierName.name !== updateData.courierName) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect courierName for refId ${updateData.courierNameRefId}. Expected: ${courierName.name}, Received: ${updateData.courierName}`
-        );
-      }
-      updateFields.courierName = {
-        name: updateData.courierName,
-        refId: updateData.courierNameRefId,
-      };
+    } else if (fcName) {
+      updateFields.fittingCenter = { name: fcName };
     }
 
-    // Validate courierTime
-    if (updateData.courierTime && updateData.courierTimeRefId) {
-      const courierTime = await CourierTime.findById(updateData.courierTimeRefId);
-      if (!courierTime) {
-        return sendErrorResponse(
-          res,
-          404,
-          "INVALID_REF_ID",
-          `CourierTime with refId ${updateData.courierTimeRefId} does not exist`
-        );
+    // CreditDays
+    const cdRefId = updateData.creditDaysRefId || updateData.creditDays?.refId;
+    const cdVal = updateData.creditDays?.name || updateData.creditDays;
+    if (cdRefId) {
+      const creditDay = await CreditDay.findById(cdRefId);
+      if (creditDay) {
+        updateFields.creditDays = { name: creditDay.days.toString(), refId: creditDay._id };
       }
-
-      if (courierTime.time !== updateData.courierTime) {
-        return sendErrorResponse(
-          res,
-          400,
-          "NAME_MISMATCH",
-          `Incorrect courierTime for refId ${updateData.courierTimeRefId}. Expected: ${courierTime.time}, Received: ${updateData.courierTime}`
-        );
-      }
-      updateFields.courierTime = {
-        name: updateData.courierTime,
-        refId: updateData.courierTimeRefId,
-      };
+    } else if (cdVal !== undefined && cdVal !== null) {
+      updateFields.creditDays = { name: cdVal.toString() };
     }
 
-    if (updateData.billToAddress) {
-      if (typeof updateData.billToAddress !== 'object' || Array.isArray(updateData.billToAddress)) {
-        return sendErrorResponse(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "Bill to address must be an object.",
-        );
+    // CourierName
+    const cnRefId = updateData.courierNameRefId || updateData.courierName?.refId;
+    const cnName = updateData.courierName?.name || (typeof updateData.courierName === 'string' ? updateData.courierName : null);
+    if (cnRefId) {
+      const courierName = await CourierName.findById(cnRefId);
+      if (courierName) {
+        updateFields.courierName = { name: courierName.name, refId: courierName._id };
       }
+    } else if (cnName) {
+      updateFields.courierName = { name: cnName };
+    }
+
+    // CourierTime
+    const ctRefId = updateData.courierTimeRefId || updateData.courierTime?.refId;
+    const ctName = updateData.courierTime?.name || (typeof updateData.courierTime === 'string' ? updateData.courierTime : null);
+    if (ctRefId) {
+      const courierTime = await CourierTime.findById(ctRefId);
+      if (courierTime) {
+        updateFields.courierTime = { name: courierTime.time, refId: courierTime._id };
+      }
+    } else if (ctName) {
+      updateFields.courierTime = { name: ctName };
+    }
+
+    const currentUserId = req.user?.id || req.user?._id;
+
+    // Ensure customer root createdBy & department exist if missing
+    if (!customer.createdBy && currentUserId) {
+      customer.createdBy = currentUserId;
+    }
+    if (!customer.createdByDepartment) {
+      customer.createdByDepartment = req.user?.Department || 'SUPERADMIN';
+    }
+
+    // BillToAddress
+    if (updateData.billToAddress && typeof updateData.billToAddress === 'object') {
+      const existingAddr = customer.billToAddress || {};
       const addr = updateData.billToAddress;
-      if (
-        !addr.branchName ||
-        !addr.customerContactName ||
-        !addr.customerContactNumber ||
-        !addr.country ||
-        !addr.state ||
-        !addr.city ||
-        !addr.zipCode ||
-        !addr.address ||
-        !addr.billingCurrency ||
-        !addr.billingMode
-      ) {
-        return sendErrorResponse(
-          res,
-          400,
-          "VALIDATION_ERROR",
-          "All bill to address fields are required (branchName, customerContactName, customerContactNumber, country, state, city, zipCode, address, billingCurrency, billingMode)",
-        );
-      }
       updateFields.billToAddress = {
-        branchName: addr.branchName.trim(),
-        customerContactName: addr.customerContactName.trim(),
-        customerContactNumber: addr.customerContactNumber.trim(),
-        country: addr.country,
-        state: addr.state,
-        zipCode: addr.zipCode,
-        city: addr.city.trim(),
-        address: addr.address.trim(),
-        billingCurrency: addr.billingCurrency,
-        billingMode: addr.billingMode,
-        createdBy: req.user.id,
+        branchName: (addr.branchName ?? existingAddr.branchName ?? '').trim(),
+        customerContactName: (addr.customerContactName ?? addr.contactPerson ?? existingAddr.customerContactName ?? existingAddr.contactPerson ?? '').trim(),
+        customerContactNumber: (addr.customerContactNumber ?? addr.contactNumber ?? existingAddr.customerContactNumber ?? existingAddr.contactNumber ?? '').trim(),
+        country: addr.country ?? existingAddr.country ?? 'India',
+        state: addr.state ?? existingAddr.state ?? '',
+        zipCode: addr.zipCode ?? addr.pincode ?? existingAddr.zipCode ?? existingAddr.pincode ?? '',
+        city: (addr.city ?? existingAddr.city ?? '').trim(),
+        address: (addr.address ?? existingAddr.address ?? '').trim(),
+        billingCurrency: addr.billingCurrency ?? existingAddr.billingCurrency ?? 'INR',
+        billingMode: addr.billingMode ?? existingAddr.billingMode ?? 'DIRECT',
+        createdBy: addr.createdBy || existingAddr.createdBy || currentUserId,
+        updatedBy: currentUserId,
       };
     }
 
-    if (updateData.businessEmail) {
+    // CustomerShipToDetails
+    if (Array.isArray(updateData.customerShipToDetails)) {
+      const existingShipList = customer.customerShipToDetails || [];
+      updateFields.customerShipToDetails = updateData.customerShipToDetails.map((addr, idx) => {
+        const existingShip = (addr._id ? existingShipList.find(s => String(s._id) === String(addr._id)) : null) || existingShipList[idx] || {};
+        return {
+          branchName: (addr.branchName ?? existingShip.branchName ?? '').trim(),
+          customerContactName: (addr.customerContactName ?? addr.contactPerson ?? existingShip.customerContactName ?? existingShip.contactPerson ?? '').trim(),
+          customerContactNumber: (addr.customerContactNumber ?? addr.contactNumber ?? existingShip.customerContactNumber ?? existingShip.contactNumber ?? '').trim(),
+          country: addr.country ?? existingShip.country ?? 'India',
+          state: addr.state ?? existingShip.state ?? '',
+          zipCode: addr.zipCode ?? addr.pincode ?? existingShip.zipCode ?? existingShip.pincode ?? '',
+          city: (addr.city ?? existingShip.city ?? '').trim(),
+          address: (addr.address ?? existingShip.address ?? '').trim(),
+          billingCurrency: addr.billingCurrency ?? existingShip.billingCurrency ?? 'INR',
+          billingMode: addr.billingMode ?? existingShip.billingMode ?? 'DIRECT',
+          createdBy: addr.createdBy || existingShip.createdBy || currentUserId,
+          updatedBy: currentUserId,
+        };
+      });
+    }
+
+    // BusinessEmail
+    if (updateData.businessEmail && updateData.businessEmail.trim().toLowerCase() !== (customer.businessEmail || '').toLowerCase()) {
       const existingCustomer = await Customer.findOne({
-        businessEmail: updateData.businessEmail.toLowerCase(),
+        businessEmail: updateData.businessEmail.trim().toLowerCase(),
         tenantId: req.user.tenantId,
         _id: { $ne: customerId },
       });
@@ -956,10 +923,10 @@ export const updateCustomerProfile = async (req, res) => {
           res,
           409,
           "EMAIL_EXISTS",
-          "Another customer with this business email already exists",
+          "Another customer with this business email already exists"
         );
       }
-      updateFields.businessEmail = updateData.businessEmail.toLowerCase().trim();
+      updateFields.businessEmail = updateData.businessEmail.trim().toLowerCase();
     }
 
     Object.assign(customer, updateFields);
