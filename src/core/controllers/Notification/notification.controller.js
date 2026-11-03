@@ -177,7 +177,7 @@ export const getAllSystemNotifications = async (req, res) => {
           entityId: cust._id,
           entityNumber: cust.customerCode || 'REG',
           partyName: name,
-          actionUrl: `/customer/approvals`,
+          actionUrl: `/approvals`,
           actionLabel: 'Review Approval',
           meta: { stage: isFinancePending ? 'finance' : 'salesHead' },
         });
@@ -199,7 +199,7 @@ export const getAllSystemNotifications = async (req, res) => {
           }),
           entityId: cust._id,
           partyName: name,
-          actionUrl: `/customer/corrections`,
+          actionUrl: `/corrections`,
           actionLabel: 'View Correction',
           meta: { correction: true },
         });
@@ -230,7 +230,7 @@ export const getAllSystemNotifications = async (req, res) => {
         partyName: ret.customerName || 'Customer',
         amount: retAmt,
         amountFormatted: retAmtStr,
-        actionUrl: `/returns/refund`,
+        actionUrl: `/return-refund`,
         actionLabel: 'Review Return',
         meta: { status: ret.status },
       });
