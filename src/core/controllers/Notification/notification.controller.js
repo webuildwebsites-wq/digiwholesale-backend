@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import BulkOrder from '../../../models/order/BulkOrder.js';
 import Customer from '../../../models/Auth/Customer.js';
 import ReturnRefund from '../../../models/SALES/ReturnRefund.model.js';
+import Payment from '../../../models/Accounting/Payment.model.js';
+import { autoExpireStaleCheques } from '../../services/chequeExpiryService.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../../Utils/response/responseHandler.js';
 
 /**
@@ -12,8 +14,11 @@ export const getAllSystemNotifications = async (req, res) => {
     const tenantId = req.user?.tenantId || null;
     const tenantFilter = tenantId ? { tenantId } : {};
 
+    // Auto-expire any stale cheques (> 3 months) before querying
+    await autoExpireStaleCheques(tenantId).catch(() => {});
+
     // Fetch operational data in parallel
-    const [activeOrders, pendingCustomers, pendingReturns] = await Promise.all([
+    const [activeOrders, pendingCustomers, pendingReturns, pendingCheques] = await Promise.all([
       // A. Active Orders (ReadyToDispatch, Processing, QC, or recent Submitted)
       BulkOrder.find({
         ...tenantFilter,
@@ -44,6 +49,23 @@ export const getAllSystemNotifications = async (req, res) => {
       })
         .sort({ createdAt: -1 })
         .limit(25)
+        .lean()
+        .catch(() => []),
+
+      // D. Pending PDC & In-Clearing Cheques
+      Payment.find({
+        ...tenantFilter,
+        paymentMode: { $regex: /^cheque$/i },
+        'paymentDetails.isCredited': false,
+        'paymentDetails.chequeStatus': { $nin: ['CLEARED', 'CANCELLED', 'EXPIRED'] },
+        status: { $nin: ['CLEARED', 'CANCELLED', 'EXPIRED'] },
+        $or: [
+          { 'paymentDetails.isPostDated': true },
+          { 'paymentDetails.chequeDate': { $exists: true, $ne: null } },
+        ],
+      })
+        .sort({ 'paymentDetails.chequeDate': 1, createdAt: -1 })
+        .limit(60)
         .lean()
         .catch(() => []),
     ]);
@@ -236,6 +258,169 @@ export const getAllSystemNotifications = async (req, res) => {
       });
     });
 
+    // --- 4. Process PDC Cheque Notifications (Maturity date alerts) ---
+    const today = new Date();
+    const todayMidnightMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+
+    let pdcDueTodayCount = 0;
+    let pdcOverdueCount = 0;
+    let pdcExpiringCount = 0;
+    const dueTodayCheques = [];
+
+    (pendingCheques || []).forEach((item) => {
+      const chqDate = item.paymentDetails?.chequeDate ? new Date(item.paymentDetails.chequeDate) : null;
+      let expDate = item.paymentDetails?.chequeExpiryDate ? new Date(item.paymentDetails.chequeExpiryDate) : null;
+      if (!expDate && chqDate) {
+        expDate = new Date(chqDate);
+        expDate.setMonth(expDate.getMonth() + 3);
+      }
+
+      const chqMidnightMs = chqDate
+        ? new Date(chqDate.getFullYear(), chqDate.getMonth(), chqDate.getDate()).getTime()
+        : null;
+
+      const diffDays = chqMidnightMs != null
+        ? Math.round((chqMidnightMs - todayMidnightMs) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const isDueToday = diffDays === 0;
+      const isOverdue = diffDays != null && diffDays < 0;
+
+      const expMidnightMs = expDate
+        ? new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate()).getTime()
+        : 0;
+      const daysUntilExpiry = expDate
+        ? Math.max(0, Math.ceil((expMidnightMs - todayMidnightMs) / (1000 * 60 * 60 * 24)))
+        : 0;
+      const isExpiringSoon = expDate && daysUntilExpiry <= 15 && daysUntilExpiry > 0;
+
+      const chqNum = item.paymentDetails?.chequeNumber ? `#${item.paymentDetails.chequeNumber}` : 'PDC';
+      const partyTitle = item.partyName || (item.partyModel === 'Vendor' ? 'Vendor' : 'Customer');
+      const amount = Number(item.grossAmount || 0);
+      const amountStr = `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+      const chqDateFormatted = chqDate
+        ? chqDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+        : 'Today';
+      const expDateFormatted = expDate
+        ? expDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '—';
+
+      const actionUrl = item.partyModel === 'Vendor'
+        ? `/accounting/vendor-statement/${item.partyId || ''}`
+        : (item.partyId ? `/accounting/customer-statement/${item.partyId}` : '/accounting/cheques');
+
+      if (isDueToday) {
+        pdcDueTodayCount++;
+        dueTodayCheques.push({ chqNum, partyTitle, amountStr, amount, id: item._id, partyId: item.partyId });
+
+        notifications.push({
+          id: `pdc-due-${item._id}`,
+          category: 'CHEQUES',
+          categoryLabel: 'PDC Clearance',
+          type: 'PDC_DUE_TODAY',
+          severity: 'URGENT',
+          title: `PDC Scheduled for Clearance Today: Cheque ${chqNum}`,
+          message: `You have PDC Cheque ${chqNum} (${partyTitle}, ${amountStr}) scheduled for clearance today. If the cheque has been cleared, please update its status; otherwise, take the necessary action.`,
+          date: chqDate || item.createdAt || new Date(),
+          formattedDate: `Today (${chqDateFormatted})`,
+          entityId: item._id,
+          entityNumber: item.paymentDetails?.chequeNumber || item.paymentNumber,
+          partyName: partyTitle,
+          amount,
+          amountFormatted: amountStr,
+          actionUrl,
+          actionLabel: 'Update Status',
+          meta: {
+            paymentId: item._id,
+            partyId: item.partyId,
+            partyModel: item.partyModel,
+            chequeNumber: item.paymentDetails?.chequeNumber,
+            chequeDate: item.paymentDetails?.chequeDate,
+            isDueToday: true,
+          },
+        });
+      } else if (isOverdue) {
+        pdcOverdueCount++;
+        const overdueDays = Math.abs(diffDays);
+        notifications.push({
+          id: `pdc-overdue-${item._id}`,
+          category: 'CHEQUES',
+          categoryLabel: 'PDC Clearance',
+          type: 'PDC_OVERDUE',
+          severity: overdueDays >= 3 ? 'URGENT' : 'WARNING',
+          title: `Overdue PDC Clearance: Cheque ${chqNum}`,
+          message: `PDC Cheque ${chqNum} (${partyTitle}, ${amountStr}) was scheduled for clearance on ${chqDateFormatted} (${overdueDays} day${overdueDays > 1 ? 's' : ''} ago). If the cheque has been cleared, please update its status; otherwise, take the necessary action.`,
+          date: chqDate || item.createdAt || new Date(),
+          formattedDate: `${overdueDays}d overdue (${chqDateFormatted})`,
+          entityId: item._id,
+          entityNumber: item.paymentDetails?.chequeNumber || item.paymentNumber,
+          partyName: partyTitle,
+          amount,
+          amountFormatted: amountStr,
+          actionUrl,
+          actionLabel: 'Update Status',
+          meta: {
+            paymentId: item._id,
+            partyId: item.partyId,
+            partyModel: item.partyModel,
+            chequeNumber: item.paymentDetails?.chequeNumber,
+            chequeDate: item.paymentDetails?.chequeDate,
+            isOverdue: true,
+          },
+        });
+      } else if (isExpiringSoon) {
+        pdcExpiringCount++;
+        notifications.push({
+          id: `pdc-expiring-${item._id}`,
+          category: 'CHEQUES',
+          categoryLabel: 'Cheque Expiry',
+          type: 'CHEQUE_EXPIRING_SOON',
+          severity: 'WARNING',
+          title: `Cheque Expiring Soon: ${chqNum}`,
+          message: `Cheque ${chqNum} (${partyTitle}, ${amountStr}) will expire on ${expDateFormatted} (${daysUntilExpiry} day${daysUntilExpiry > 1 ? 's' : ''} remaining). Please verify clearance before the 3-month RBI deadline.`,
+          date: item.createdAt || new Date(),
+          formattedDate: `Exp: ${expDateFormatted}`,
+          entityId: item._id,
+          entityNumber: item.paymentDetails?.chequeNumber || item.paymentNumber,
+          partyName: partyTitle,
+          amount,
+          amountFormatted: amountStr,
+          actionUrl,
+          actionLabel: 'Review Cheque',
+          meta: {
+            paymentId: item._id,
+            partyId: item.partyId,
+            isExpiringSoon: true,
+          },
+        });
+      }
+    });
+
+    // If there are multiple PDCs scheduled for clearance today, add a consolidated summary notification
+    if (dueTodayCheques.length > 1) {
+      const totalDueTodayAmt = dueTodayCheques.reduce((sum, c) => sum + (c.amount || 0), 0);
+      const totalDueTodayStr = `₹${totalDueTodayAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+      notifications.unshift({
+        id: `pdc-summary-today-${today.toISOString().slice(0, 10)}`,
+        category: 'CHEQUES',
+        categoryLabel: 'PDC Clearance',
+        type: 'PDC_DUE_SUMMARY',
+        severity: 'URGENT',
+        title: `${dueTodayCheques.length} PDCs Scheduled for Clearance Today`,
+        message: 'You have these PDCs scheduled for clearance today. If the cheque has been cleared, please update its status; otherwise, take the necessary action.',
+        date: new Date(),
+        formattedDate: 'Today',
+        amount: totalDueTodayAmt,
+        amountFormatted: totalDueTodayStr,
+        actionUrl: '/accounting/cheques',
+        actionLabel: 'Manage All Cheques',
+        meta: {
+          dueTodayCount: dueTodayCheques.length,
+          totalAmount: totalDueTodayAmt,
+        },
+      });
+    }
+
     // Sort notifications: URGENT first, then WARNING, then INFO; then date desc
     const severityWeight = { URGENT: 1, WARNING: 2, ERROR: 2, INFO: 3, SUCCESS: 4 };
     notifications.sort((a, b) => {
@@ -263,6 +448,12 @@ export const getAllSystemNotifications = async (req, res) => {
           customers: {
             pendingApprovals: pendingApprovalsCount,
             corrections: pendingCorrectionsCount,
+          },
+          cheques: {
+            dueToday: pdcDueTodayCount,
+            overdue: pdcOverdueCount,
+            expiringSoon: pdcExpiringCount,
+            totalPending: (pendingCheques || []).length,
           },
           returns: {
             pending: pendingReturnsCount,
