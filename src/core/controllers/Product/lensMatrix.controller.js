@@ -100,35 +100,71 @@ export const getLensMatrixData = async (req, res) => {
 
     const rawSphs = new Set();
     const rawCyls = new Set();
+    const rawAdds = new Set();
+    let totalStockQty = 0;
 
     products.forEach((p) => {
-      const s = parsePower(p.sph);
-      const c = parsePower(p.cyl);
+      totalStockQty += (p.qty || 0);
+
+      let s = parsePower(p.sph);
+      let c = parsePower(p.cyl);
+      let a = parsePower(p.addition);
+
+      // Handle Plano / zero-power / sunglasses / non-powered products
+      if (s === null && c === null && (a === null || a === 0)) {
+        s = 0;
+        c = 0;
+      } else {
+        if (s !== null && c === null) c = 0;
+        if (s === null && c !== null) s = 0;
+      }
+
       if (s !== null) rawSphs.add(s);
       if (c !== null) rawCyls.add(c);
+      if (a !== null && a > 0) rawAdds.add(a);
     });
+
+    if (rawSphs.size === 0) rawSphs.add(0);
+    if (rawCyls.size === 0) rawCyls.add(0);
 
     const sortedSphs = Array.from(rawSphs).sort((a, b) => a - b);
     const sortedCyls = Array.from(rawCyls).sort((a, b) => a - b);
+    const sortedAdds = Array.from(rawAdds).sort((a, b) => a - b);
 
     const matrixMap = {};
     products.forEach((p) => {
-      const s = parsePower(p.sph);
-      const c = parsePower(p.cyl);
+      let s = parsePower(p.sph);
+      let c = parsePower(p.cyl);
+      let a = parsePower(p.addition);
+
+      if (s === null && c === null && (a === null || a === 0)) {
+        s = 0;
+        c = 0;
+      } else {
+        if (s !== null && c === null) c = 0;
+        if (s === null && c !== null) s = 0;
+      }
+
+      const itemData = {
+        _id: p._id,
+        productCode: p.productCode,
+        sph: s !== null ? s.toFixed(2) : "0.00",
+        cyl: c !== null ? c.toFixed(2) : "0.00",
+        addition: a !== null && a > 0 ? a.toFixed(2) : "",
+        qty: p.qty ?? 0,
+        price: p.price ?? 0,
+        buyingPrice: p.buyingPrice ?? p.price ?? 0,
+        sellingPrice: p.sellingPrice ?? p.price ?? 0,
+        mrp: p.mrp ?? 0,
+      };
+
       if (s !== null && c !== null) {
         const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
-        matrixMap[key] = {
-          _id: p._id,
-          productCode: p.productCode,
-          sph: s.toFixed(2),
-          cyl: c.toFixed(2),
-          addition: p.addition || "",
-          qty: p.qty ?? 0,
-          price: p.price ?? 0,
-          buyingPrice: p.buyingPrice ?? p.price ?? 0,
-          sellingPrice: p.sellingPrice ?? p.price ?? 0,
-          mrp: p.mrp ?? 0,
-        };
+        matrixMap[key] = itemData;
+      }
+      if (s !== null && a !== null && a > 0) {
+        const addKey = `${s.toFixed(2)}_ADD_${a.toFixed(2)}`;
+        matrixMap[addKey] = itemData;
       }
     });
 
@@ -138,8 +174,10 @@ export const getLensMatrixData = async (req, res) => {
       category: products[0].category,
       brand: products[0].brand,
       totalCount: products.length,
+      totalStockQty,
       sphValues: sortedSphs.map((s) => s.toFixed(2)),
       cylValues: sortedCyls.map((c) => c.toFixed(2)),
+      additionValues: sortedAdds.map((a) => a.toFixed(2)),
       matrix: matrixMap,
       products,
     });
@@ -190,7 +228,17 @@ export const updateLensMatrix = async (req, res) => {
     const productByCode = new Map();
     const productById = new Map();
     const productByPowerAndAdd = new Map();
+    const productByPowerAddAxis = new Map();
+    const productBySphAndAdd = new Map();
     const productsByPower = new Map();
+    const productsBySph = new Map();
+
+    const cleanAdd = (a) => {
+      if (a === null || a === undefined || a === "") return "";
+      const p = parsePower(a);
+      if (p === null || p === 0) return "";
+      return p.toFixed(2);
+    };
 
     existingProducts.forEach((p) => {
       if (p.productCode) {
@@ -198,18 +246,47 @@ export const updateLensMatrix = async (req, res) => {
       }
       productById.set(p._id.toString(), p);
 
-      const s = parsePower(p.sph);
-      const c = parsePower(p.cyl);
-      if (s !== null && c !== null) {
-        const addClean = p.addition ? String(p.addition).trim() : "";
-        const powerAddKey = `${s.toFixed(2)}_${c.toFixed(2)}_${addClean}`;
-        productByPowerAndAdd.set(powerAddKey, p);
+      let s = parsePower(p.sph);
+      let c = parsePower(p.cyl);
+      const addClean = cleanAdd(p.addition);
 
-        const powerKey = `${s.toFixed(2)}_${c.toFixed(2)}`;
-        if (!productsByPower.has(powerKey)) {
-          productsByPower.set(powerKey, []);
+      // Handle Plano / zero power / non-powered products
+      if (s === null && c === null && !addClean) {
+        s = 0;
+        c = 0;
+      } else {
+        if (s !== null && c === null) c = 0;
+        if (s === null && c !== null) s = 0;
+      }
+
+      if (s !== null) {
+        const sKey = s.toFixed(2);
+        if (!productsBySph.has(sKey)) productsBySph.set(sKey, []);
+        productsBySph.get(sKey).push(p);
+
+        if (addClean) {
+          const sphAddKey = `${sKey}_${addClean}`;
+          if (!productBySphAndAdd.has(sphAddKey)) productBySphAndAdd.set(sphAddKey, []);
+          productBySphAndAdd.get(sphAddKey).push(p);
         }
-        productsByPower.get(powerKey).push(p);
+
+        if (c !== null) {
+          const cKey = c.toFixed(2);
+          const powerKey = `${sKey}_${cKey}`;
+          if (!productsByPower.has(powerKey)) productsByPower.set(powerKey, []);
+          productsByPower.get(powerKey).push(p);
+
+          if (addClean) {
+            const powerAddKey = `${sKey}_${cKey}_${addClean}`;
+            productByPowerAndAdd.set(powerAddKey, p);
+
+            const axClean = String(p.axis || "").trim();
+            if (axClean) {
+              const powerAddAxisKey = `${powerAddKey}_${axClean}`;
+              productByPowerAddAxis.set(powerAddAxisKey, p);
+            }
+          }
+        }
       }
     });
 
@@ -220,17 +297,54 @@ export const updateLensMatrix = async (req, res) => {
       if (item._id && productById.has(String(item._id))) {
         return [productById.get(String(item._id))];
       }
-      const s = parsePower(item.sph);
-      const c = parsePower(item.cyl);
-      if (s !== null && c !== null) {
-        const addClean = item.addition ? String(item.addition).trim() : "";
-        if (addClean && productByPowerAndAdd.has(`${s.toFixed(2)}_${c.toFixed(2)}_${addClean}`)) {
-          return [productByPowerAndAdd.get(`${s.toFixed(2)}_${c.toFixed(2)}_${addClean}`)];
+      let s = parsePower(item.sph);
+      let c = parsePower(item.cyl);
+      const addClean = cleanAdd(item.addition);
+
+      if (s === null && c === null && !addClean) {
+        s = 0;
+        c = 0;
+      } else {
+        if (s !== null && c === null) c = 0;
+        if (s === null && c !== null) s = 0;
+      }
+
+      if (s !== null) {
+        const sKey = s.toFixed(2);
+        if (addClean) {
+          if (c !== null) {
+            const axClean = String(item.axis || "").trim();
+            if (axClean) {
+              const powerAddAxisKey = `${sKey}_${c.toFixed(2)}_${addClean}_${axClean}`;
+              if (productByPowerAddAxis.has(powerAddAxisKey)) {
+                return [productByPowerAddAxis.get(powerAddAxisKey)];
+              }
+            }
+            const powerAddKey = `${sKey}_${c.toFixed(2)}_${addClean}`;
+            if (productByPowerAndAdd.has(powerAddKey)) {
+              return [productByPowerAndAdd.get(powerAddKey)];
+            }
+          }
+          const sphAddKey = `${sKey}_${addClean}`;
+          if (productBySphAndAdd.has(sphAddKey)) {
+            return productBySphAndAdd.get(sphAddKey);
+          }
         }
-        if (productsByPower.has(`${s.toFixed(2)}_${c.toFixed(2)}`)) {
-          return productsByPower.get(`${s.toFixed(2)}_${c.toFixed(2)}`);
+
+        if (c !== null && productsByPower.has(`${sKey}_${c.toFixed(2)}`)) {
+          return productsByPower.get(`${sKey}_${c.toFixed(2)}`);
+        }
+
+        if (productsBySph.has(sKey)) {
+          return productsBySph.get(sKey);
         }
       }
+
+      // If single-variant product and no powers specified
+      if (existingProducts.length === 1) {
+        return [existingProducts[0]];
+      }
+
       return [];
     };
 
@@ -302,6 +416,7 @@ export const updateLensMatrix = async (req, res) => {
             totalStockQty: totalStock,
             sphRange: historyEntry.sphRange,
             cylRange: historyEntry.cylRange,
+              additionRange: historyEntry.additionRange || "",
             buyingPrice: historyEntry.buyingPrice,
             sellingPrice: historyEntry.sellingPrice,
             mrp: historyEntry.mrp,
@@ -364,73 +479,230 @@ export const updateLensMatrix = async (req, res) => {
       summaryText = `Deleted ${updatedCount} lens combination(s)`;
     } else {
       const bulkOps = [];
+      const newDocsToInsert = [];
+      let createdCount = 0;
+
+      // Base template product to inherit common lens properties (brand, category, coating, etc.)
+      const tpl = existingProducts.find((p) => !p.isDeleted) || existingProducts[0];
+
+      // Prepare collision-free productCode generator for new combinations
+      let nextCodeNum = 1;
+      let codePrefix = "";
+      let codeSuffix = "";
+
+      const sampleCode = tpl.productCode || "";
+      const prefixNumMatch = sampleCode.match(/^(\d+)(.*)$/);
+      const suffixNumMatch = sampleCode.match(/^(.*?)(\d+)$/);
+
+      if (prefixNumMatch) {
+        codeSuffix = prefixNumMatch[2];
+        existingProducts.forEach((p) => {
+          const m = (p.productCode || "").match(/^(\d+)/);
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (n >= nextCodeNum) nextCodeNum = n + 1;
+          }
+        });
+      } else if (suffixNumMatch) {
+        codePrefix = suffixNumMatch[1];
+        existingProducts.forEach((p) => {
+          const m = (p.productCode || "").match(/(\d+)$/);
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (n >= nextCodeNum) nextCodeNum = n + 1;
+          }
+        });
+      } else {
+        codePrefix = (tpl.brand || "DO").substring(0, 4).toUpperCase();
+      }
+
+      const existingCodesList = await DigiProduct.find({ tenantId }).distinct("productCode");
+      const existingCodesSet = new Set(existingCodesList.map((c) => String(c).toUpperCase()));
+
+      const getNextProductCode = () => {
+        while (true) {
+          const code = prefixNumMatch
+            ? `${nextCodeNum++}${codeSuffix}`
+            : `${codePrefix}${nextCodeNum++}`;
+          if (!existingCodesSet.has(code.toUpperCase())) {
+            existingCodesSet.add(code.toUpperCase());
+            return code;
+          }
+        }
+      };
+
       for (const item of updates) {
-        const s = parsePower(item.sph);
-        const c = parsePower(item.cyl);
+        const matchedProds = findMatchingProducts(item);
 
-        if (s === null || c === null) continue;
-        const key = `${s.toFixed(2)}_${c.toFixed(2)}`;
-
-        // Use the correctly populated Map (productsByPower)
-        const matchedProds = productsByPower.get(key) || [];
-        if (matchedProds.length === 0) continue;
-
-        for (const prod of matchedProds) {
-          if (action === "UPDATE_QTY") {
-            const val = Number(item.value);
-            if (isNaN(val)) continue;
-            const newQty = Math.max(0, Math.round(val));
-            bulkOps.push({
-              updateOne: {
-                filter: { _id: prod._id, tenantId },
-                update: { $set: { qty: newQty } },
-              },
-            });
-            updatedCount++;
-          } else if (action === "UPDATE_PRICE") {
-            const updateFields = {};
-
-            if (item.buyingPrice != null && !isNaN(Number(item.buyingPrice))) {
-              const bp = Math.max(0, Number(item.buyingPrice));
-              updateFields.buyingPrice = bp;
-              updateFields.price = bp;
-            }
-            if (item.sellingPrice != null && !isNaN(Number(item.sellingPrice))) {
-              updateFields.sellingPrice = Math.max(0, Number(item.sellingPrice));
-            }
-            if (item.mrp != null && !isNaN(Number(item.mrp))) {
-              updateFields.mrp = Math.max(0, Number(item.mrp));
-            }
-
-            if (Object.keys(updateFields).length === 0 && item.value != null && !isNaN(Number(item.value))) {
-              const newPrice = Math.max(0, Number(item.value));
-              updateFields.buyingPrice = newPrice;
-              updateFields.sellingPrice = newPrice;
-              updateFields.mrp = newPrice;
-              updateFields.price = newPrice;
-            }
-
-            if (Object.keys(updateFields).length > 0) {
+        if (matchedProds && matchedProds.length > 0) {
+          for (const prod of matchedProds) {
+            if (action === "UPDATE_QTY") {
+              const val = Number(item.value !== undefined ? item.value : item.qty);
+              if (isNaN(val)) continue;
+              const newQty = Math.max(0, Math.round(val));
               bulkOps.push({
                 updateOne: {
                   filter: { _id: prod._id, tenantId },
-                  update: { $set: updateFields },
+                  update: { $set: { qty: newQty } },
                 },
               });
               updatedCount++;
+            } else if (
+              action === "UPDATE_PRICE" ||
+              action === "UPDATE_SELLING_PRICE" ||
+              action === "UPDATE_BUYING_PRICE" ||
+              action === "UPDATE_MRP"
+            ) {
+              const updateFields = {};
+
+              if (item.buyingPrice != null && !isNaN(Number(item.buyingPrice))) {
+                const bp = Math.max(0, Number(item.buyingPrice));
+                updateFields.buyingPrice = bp;
+                updateFields.price = bp;
+              }
+              if (item.sellingPrice != null && !isNaN(Number(item.sellingPrice))) {
+                updateFields.sellingPrice = Math.max(0, Number(item.sellingPrice));
+              }
+              if (item.mrp != null && !isNaN(Number(item.mrp))) {
+                updateFields.mrp = Math.max(0, Number(item.mrp));
+              }
+
+              if (
+                Object.keys(updateFields).length === 0 &&
+                item.value != null &&
+                !isNaN(Number(item.value))
+              ) {
+                const newPrice = Math.max(0, Number(item.value));
+                if (action === "UPDATE_SELLING_PRICE") {
+                  updateFields.sellingPrice = newPrice;
+                } else if (action === "UPDATE_BUYING_PRICE") {
+                  updateFields.buyingPrice = newPrice;
+                  updateFields.price = newPrice;
+                } else if (action === "UPDATE_MRP") {
+                  updateFields.mrp = newPrice;
+                } else {
+                  updateFields.buyingPrice = newPrice;
+                  updateFields.sellingPrice = newPrice;
+                  updateFields.mrp = newPrice;
+                  updateFields.price = newPrice;
+                }
+              }
+
+              if (Object.keys(updateFields).length > 0) {
+                bulkOps.push({
+                  updateOne: {
+                    filter: { _id: prod._id, tenantId },
+                    update: { $set: updateFields },
+                  },
+                });
+                updatedCount++;
+              }
             }
           }
+        } else {
+          // Combination does not exist in DB yet: automatically create/upsert it!
+          const sVal = parsePower(item.sph);
+          const cVal = parsePower(item.cyl);
+          const aVal = cleanAdd(item.addition);
+
+          let newQty = 0;
+          if (action === "UPDATE_QTY") {
+            const val = Number(item.value !== undefined ? item.value : item.qty);
+            if (!isNaN(val)) newQty = Math.max(0, Math.round(val));
+          }
+
+          let newBp = tpl.buyingPrice ?? tpl.price ?? 0;
+          let newSp = tpl.sellingPrice ?? tpl.price ?? 0;
+          let newMrp = tpl.mrp ?? 0;
+
+          if (item.buyingPrice != null && !isNaN(Number(item.buyingPrice))) {
+            newBp = Math.max(0, Number(item.buyingPrice));
+          }
+          if (item.sellingPrice != null && !isNaN(Number(item.sellingPrice))) {
+            newSp = Math.max(0, Number(item.sellingPrice));
+          }
+          if (item.mrp != null && !isNaN(Number(item.mrp))) {
+            newMrp = Math.max(0, Number(item.mrp));
+          }
+
+          if (item.value != null && !isNaN(Number(item.value))) {
+            const valNum = Math.max(0, Number(item.value));
+            if (action === "UPDATE_SELLING_PRICE") newSp = valNum;
+            else if (action === "UPDATE_BUYING_PRICE") newBp = valNum;
+            else if (action === "UPDATE_MRP") newMrp = valNum;
+            else if (action === "UPDATE_PRICE") {
+              newBp = valNum;
+              newSp = valNum;
+              newMrp = valNum;
+            }
+          }
+
+          const newProdDoc = {
+            productCode: getNextProductCode(),
+            productName: cleanName,
+            category: tpl.category,
+            brand: tpl.brand || "",
+            color: tpl.color || "",
+            size: tpl.size || "",
+            type: tpl.type || "",
+            shape: tpl.shape || "",
+            material: tpl.material || "",
+            dimensions: tpl.dimensions || "",
+            addition: aVal ? aVal : (tpl.addition || ""),
+            sph: sVal !== null ? sVal.toFixed(2) : (tpl.sph || "0.00"),
+            cyl: cVal !== null ? cVal.toFixed(2) : (tpl.cyl || "0.00"),
+            axis: item.axis ? String(item.axis).trim() : (tpl.axis || ""),
+            index: tpl.index || "",
+            coating: tpl.coating || "",
+            disposability: tpl.disposability || "",
+            expiry: tpl.expiry || null,
+            price: newBp,
+            buyingPrice: newBp,
+            sellingPrice: newSp,
+            mrp: newMrp,
+            gst: tpl.gst ?? 0,
+            hsnSac: tpl.hsnSac || "",
+            qty: newQty,
+            image: tpl.image || "",
+            orderSource: tpl.orderSource || "INHOUSE",
+            vendor: tpl.vendor || { id: null, name: null },
+            createdBy: req.user?._id || req.user?.id || tpl.createdBy,
+            tenantId,
+          };
+
+          newDocsToInsert.push(newProdDoc);
+          createdCount++;
         }
       }
 
       if (bulkOps.length > 0) {
         await DigiProduct.bulkWrite(bulkOps, { session });
       }
+      if (newDocsToInsert.length > 0) {
+        await DigiProduct.insertMany(newDocsToInsert, { session });
+      }
+
+      const totalProcessed = updatedCount + createdCount;
+      if (totalProcessed === 0) {
+        throw new Error(
+          `No valid updates or additions could be processed for "${cleanName}". Please verify the values in the file.`
+        );
+      }
 
       if (action === "UPDATE_QTY") {
-        summaryText = `Updated stock quantity across ${updatedCount} lens combination(s)`;
-      } else if (action === "UPDATE_PRICE") {
-        summaryText = `Updated prices (Buying, Selling & MRP) across ${updatedCount} lens combination(s)`;
+        summaryText = `Updated stock quantity across ${updatedCount} existing combination(s)`;
+      } else if (action === "UPDATE_SELLING_PRICE") {
+        summaryText = `Updated selling price across ${updatedCount} existing combination(s)`;
+      } else if (action === "UPDATE_BUYING_PRICE") {
+        summaryText = `Updated buying price across ${updatedCount} existing combination(s)`;
+      } else if (action === "UPDATE_MRP") {
+        summaryText = `Updated MRP across ${updatedCount} existing combination(s)`;
+      } else {
+        summaryText = `Updated prices across ${updatedCount} existing combination(s)`;
+      }
+
+      if (createdCount > 0) {
+        summaryText += ` and created ${createdCount} new combination(s)`;
       }
 
       const remainingProducts = await DigiProduct.find({
@@ -449,13 +721,27 @@ export const updateLensMatrix = async (req, res) => {
         const distinctCyls = Array.from(
           new Set(remainingProducts.map((p) => parsePower(p.cyl)).filter((x) => x !== null))
         ).sort((a, b) => a - b);
+        const distinctAdds = Array.from(
+          new Set(remainingProducts.map((p) => parsePower(p.addition)).filter((x) => x !== null))
+        ).sort((a, b) => a - b);
         const totalStock = remainingProducts.reduce((sum, p) => sum + (p.qty || 0), 0);
         const sample =
           remainingProducts.find((p) => p.sellingPrice || p.buyingPrice || p.mrp) || remainingProducts[0];
 
+        const resolvedPriceType =
+          action === "UPDATE_SELLING_PRICE"
+            ? "Selling Price"
+            : action === "UPDATE_BUYING_PRICE"
+            ? "Buying Price"
+            : action === "UPDATE_MRP"
+            ? "MRP"
+            : action === "UPDATE_PRICE"
+            ? (priceType || "Buying, Selling & MRP")
+            : "";
+
         const historyEntry = {
           action,
-          priceType: action === "UPDATE_PRICE" ? "Buying, Selling & MRP" : "",
+          priceType: resolvedPriceType,
           totalLenses: remainingProducts.length,
           totalStockQty: totalStock,
           sphRange: distinctSphs.length
@@ -463,6 +749,9 @@ export const updateLensMatrix = async (req, res) => {
             : "",
           cylRange: distinctCyls.length
             ? `${distinctCyls[0].toFixed(2)} to ${distinctCyls[distinctCyls.length - 1].toFixed(2)}`
+            : "",
+          additionRange: distinctAdds.length
+            ? `${distinctAdds[0].toFixed(2)} to ${distinctAdds[distinctAdds.length - 1].toFixed(2)}`
             : "",
           buyingPrice: sample.buyingPrice ?? sample.price ?? 0,
           sellingPrice: sample.sellingPrice ?? sample.price ?? 0,
@@ -484,7 +773,7 @@ export const updateLensMatrix = async (req, res) => {
               category: sample?.category || existingProducts[0]?.category || "LENS",
               historyType: "UPDATE",
               action,
-              priceType: action === "UPDATE_PRICE" ? "Buying, Selling & MRP" : "",
+              priceType: resolvedPriceType,
               totalLenses: remainingProducts.length,
               totalStockQty: totalStock,
               sphRange: historyEntry.sphRange,
@@ -542,6 +831,16 @@ export const updateLensMatrix = async (req, res) => {
 };
 
 
+const formatRange = (min, max) => {
+  const pMin = parsePower(min);
+  const pMax = parsePower(max);
+  if (pMin === null && pMax === null) return "Plano (0.00)";
+  if (pMin !== null && pMax !== null) {
+    return pMin === pMax ? `${pMin.toFixed(2)}` : `${pMin.toFixed(2)} to ${pMax.toFixed(2)}`;
+  }
+  return (pMin ?? pMax)?.toFixed(2) || "Plano (0.00)";
+};
+
 export const getLensHistory = async (req, res) => {
   try {
     const tenantId = req.user.tenantId;
@@ -581,6 +880,7 @@ export const getLensHistory = async (req, res) => {
           totalStockQty: item.totalStockQty != null ? item.totalStockQty : 0,
           sphRange: item.sphRange || "",
           cylRange: item.cylRange || "",
+          additionRange: item.additionRange || "",
           buyingPrice: item.buyingPrice ?? 0,
           sellingPrice: item.sellingPrice ?? 0,
           mrp: item.mrp ?? 0,
@@ -661,8 +961,8 @@ export const getLensHistory = async (req, res) => {
             priceType: log.priceType || "",
             totalLenses: log.totalLenses || prod.totalLenses,
             totalStockQty: log.totalStockQty != null ? log.totalStockQty : prod.totalStockQty,
-            sphRange: log.sphRange || `${prod.minSph} to ${prod.maxSph}`,
-            cylRange: log.cylRange || `${prod.minCyl} to ${prod.maxCyl}`,
+            sphRange: log.sphRange || formatRange(prod.minSph, prod.maxSph),
+            cylRange: log.cylRange || formatRange(prod.minCyl, prod.maxCyl),
             buyingPrice: log.buyingPrice ?? prod.sampleBuyingPrice ?? prod.samplePrice ?? 0,
             sellingPrice: log.sellingPrice ?? prod.sampleSellingPrice ?? prod.samplePrice ?? 0,
             mrp: log.mrp ?? prod.sampleMrp ?? 0,
@@ -688,8 +988,8 @@ export const getLensHistory = async (req, res) => {
             priceType: "",
             totalLenses: prod.totalLenses,
             totalStockQty: prod.totalStockQty,
-            sphRange: `${prod.minSph} to ${prod.maxSph}`,
-            cylRange: `${prod.minCyl} to ${prod.maxCyl}`,
+            sphRange: formatRange(prod.minSph, prod.maxSph),
+            cylRange: formatRange(prod.minCyl, prod.maxCyl),
             buyingPrice: prod.sampleBuyingPrice ?? prod.samplePrice ?? 0,
             sellingPrice: prod.sampleSellingPrice ?? prod.samplePrice ?? 0,
             mrp: prod.sampleMrp ?? 0,

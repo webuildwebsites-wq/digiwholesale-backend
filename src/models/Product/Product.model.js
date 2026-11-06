@@ -29,6 +29,16 @@ export const lensGenerationHistorySchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    additionRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    axisRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     buyingPrice: {
       type: Number,
       default: 0,
@@ -63,7 +73,16 @@ export const lensUpdateHistorySchema = new mongoose.Schema(
   {
     action: {
       type: String,
-      enum: ["GENERATED", "UPDATE_PRICE", "UPDATE_QTY", "DELETE", "UPDATE"],
+      enum: [
+        "GENERATED",
+        "UPDATE_PRICE",
+        "UPDATE_SELLING_PRICE",
+        "UPDATE_BUYING_PRICE",
+        "UPDATE_MRP",
+        "UPDATE_QTY",
+        "DELETE",
+        "UPDATE",
+      ],
       default: "UPDATE",
     },
     priceType: {
@@ -86,6 +105,16 @@ export const lensUpdateHistorySchema = new mongoose.Schema(
       trim: true,
     },
     cylRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    additionRange: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    axisRange: {
       type: String,
       default: "",
       trim: true,

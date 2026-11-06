@@ -1325,6 +1325,22 @@ export const bulkUploadProducts = async (req, res) => {
       ).sort((a, b) => a - b);
 
       const first = docs[0];
+      const distinctAdds = Array.from(
+        new Set(
+          docs
+            .map((d) => parseFloat(String(d.addition).replace(/\+/g, "").trim()))
+            .filter((x) => !isNaN(x) && x > 0)
+        )
+      ).sort((a, b) => a - b);
+
+      const distinctAxes = Array.from(
+        new Set(
+          docs
+            .map((d) => d.axis?.toString().trim())
+            .filter((x) => Boolean(x))
+        )
+      ).sort();
+
       const initialEntry = {
         action: "GENERATED",
         priceType: "",
@@ -1337,6 +1353,10 @@ export const bulkUploadProducts = async (req, res) => {
           ? `${distinctCyls[0].toFixed(2)} to ${distinctCyls[distinctCyls.length - 1].toFixed(2)}`
           : "",
         buyingPrice: first.buyingPrice || first.price || 0,
+        additionRange: distinctAdds.length
+          ? `${distinctAdds[0].toFixed(2)} to ${distinctAdds[distinctAdds.length - 1].toFixed(2)}`
+          : "",
+        axisRange: distinctAxes.length ? distinctAxes.join(", ") : "",
         sellingPrice: first.sellingPrice || first.price || 0,
         mrp: first.mrp || 0,
         generatedAt: new Date(),
@@ -1357,6 +1377,8 @@ export const bulkUploadProducts = async (req, res) => {
             totalStockQty: docs.reduce((sum, p) => sum + (p.qty || 0), 0),
             sphRange: initialEntry.sphRange,
             cylRange: initialEntry.cylRange,
+            additionRange: initialEntry.additionRange,
+            axisRange: initialEntry.axisRange,
             buyingPrice: initialEntry.buyingPrice,
             sellingPrice: initialEntry.sellingPrice,
             mrp: initialEntry.mrp,
