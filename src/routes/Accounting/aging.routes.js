@@ -3,7 +3,7 @@ import { getAgingReport } from '../../core/controllers/Accounting/aging.controll
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
 
 const router = express.Router();
-
+    
 router.use(ProtectUser);
 
 router.get('/', getAgingReport);

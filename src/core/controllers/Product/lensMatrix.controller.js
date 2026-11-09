@@ -88,7 +88,7 @@ export const getLensMatrixData = async (req, res) => {
       productName: { $regex: `^${cleanName}$`, $options: "i" },
       isDeleted: { $ne: true },
     })
-      .select("productCode productName category brand sph cyl addition qty price buyingPrice sellingPrice mrp createdAt updatedAt")
+      .select("productCode productName category brand sph cyl addition axis qty price buyingPrice sellingPrice mrp createdAt updatedAt")
       .lean();
 
     if (!products || products.length === 0) {
@@ -101,6 +101,7 @@ export const getLensMatrixData = async (req, res) => {
     const rawSphs = new Set();
     const rawCyls = new Set();
     const rawAdds = new Set();
+    const rawAxes = new Set();
     let totalStockQty = 0;
 
     products.forEach((p) => {
@@ -109,6 +110,7 @@ export const getLensMatrixData = async (req, res) => {
       let s = parsePower(p.sph);
       let c = parsePower(p.cyl);
       let a = parsePower(p.addition);
+      const axClean = p.axis ? String(p.axis).replace(/[°\s]/g, "").trim() : "";
 
       // Handle Plano / zero-power / sunglasses / non-powered products
       if (s === null && c === null && (a === null || a === 0)) {
@@ -122,6 +124,7 @@ export const getLensMatrixData = async (req, res) => {
       if (s !== null) rawSphs.add(s);
       if (c !== null) rawCyls.add(c);
       if (a !== null && a > 0) rawAdds.add(a);
+      if (axClean) rawAxes.add(axClean);
     });
 
     if (rawSphs.size === 0) rawSphs.add(0);
@@ -130,12 +133,14 @@ export const getLensMatrixData = async (req, res) => {
     const sortedSphs = Array.from(rawSphs).sort((a, b) => a - b);
     const sortedCyls = Array.from(rawCyls).sort((a, b) => a - b);
     const sortedAdds = Array.from(rawAdds).sort((a, b) => a - b);
+    const sortedAxes = Array.from(rawAxes).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
 
     const matrixMap = {};
     products.forEach((p) => {
       let s = parsePower(p.sph);
       let c = parsePower(p.cyl);
       let a = parsePower(p.addition);
+      const axClean = p.axis ? String(p.axis).replace(/[°\s]/g, "").trim() : "";
 
       if (s === null && c === null && (a === null || a === 0)) {
         s = 0;
@@ -151,6 +156,7 @@ export const getLensMatrixData = async (req, res) => {
         sph: s !== null ? s.toFixed(2) : "0.00",
         cyl: c !== null ? c.toFixed(2) : "0.00",
         addition: a !== null && a > 0 ? a.toFixed(2) : "",
+        axis: axClean,
         qty: p.qty ?? 0,
         price: p.price ?? 0,
         buyingPrice: p.buyingPrice ?? p.price ?? 0,
@@ -165,6 +171,16 @@ export const getLensMatrixData = async (req, res) => {
       if (s !== null && a !== null && a > 0) {
         const addKey = `${s.toFixed(2)}_ADD_${a.toFixed(2)}`;
         matrixMap[addKey] = itemData;
+
+        if (c !== null) {
+          const powerAddKey = `${s.toFixed(2)}_${c.toFixed(2)}_ADD_${a.toFixed(2)}`;
+          matrixMap[powerAddKey] = itemData;
+
+          if (axClean) {
+            const powerAddAxisKey = `${s.toFixed(2)}_${c.toFixed(2)}_ADD_${a.toFixed(2)}_${axClean}`;
+            matrixMap[powerAddAxisKey] = itemData;
+          }
+        }
       }
     });
 
@@ -178,6 +194,7 @@ export const getLensMatrixData = async (req, res) => {
       sphValues: sortedSphs.map((s) => s.toFixed(2)),
       cylValues: sortedCyls.map((c) => c.toFixed(2)),
       additionValues: sortedAdds.map((a) => a.toFixed(2)),
+      axisValues: sortedAxes,
       matrix: matrixMap,
       products,
     });
@@ -240,6 +257,11 @@ export const updateLensMatrix = async (req, res) => {
       return p.toFixed(2);
     };
 
+    const cleanAxis = (ax) => {
+      if (ax === null || ax === undefined || ax === "") return "";
+      return String(ax).replace(/[°\s]/g, "").trim();
+    };
+
     existingProducts.forEach((p) => {
       if (p.productCode) {
         productByCode.set(p.productCode.trim().toUpperCase(), p);
@@ -249,6 +271,7 @@ export const updateLensMatrix = async (req, res) => {
       let s = parsePower(p.sph);
       let c = parsePower(p.cyl);
       const addClean = cleanAdd(p.addition);
+      const axClean = cleanAxis(p.axis);
 
       // Handle Plano / zero power / non-powered products
       if (s === null && c === null && !addClean) {
@@ -280,7 +303,6 @@ export const updateLensMatrix = async (req, res) => {
             const powerAddKey = `${sKey}_${cKey}_${addClean}`;
             productByPowerAndAdd.set(powerAddKey, p);
 
-            const axClean = String(p.axis || "").trim();
             if (axClean) {
               const powerAddAxisKey = `${powerAddKey}_${axClean}`;
               productByPowerAddAxis.set(powerAddAxisKey, p);
@@ -300,6 +322,7 @@ export const updateLensMatrix = async (req, res) => {
       let s = parsePower(item.sph);
       let c = parsePower(item.cyl);
       const addClean = cleanAdd(item.addition);
+      const axClean = cleanAxis(item.axis);
 
       if (s === null && c === null && !addClean) {
         s = 0;
@@ -313,7 +336,6 @@ export const updateLensMatrix = async (req, res) => {
         const sKey = s.toFixed(2);
         if (addClean) {
           if (c !== null) {
-            const axClean = String(item.axis || "").trim();
             if (axClean) {
               const powerAddAxisKey = `${sKey}_${c.toFixed(2)}_${addClean}_${axClean}`;
               if (productByPowerAddAxis.has(powerAddAxisKey)) {
@@ -651,7 +673,7 @@ export const updateLensMatrix = async (req, res) => {
             addition: aVal ? aVal : (tpl.addition || ""),
             sph: sVal !== null ? sVal.toFixed(2) : (tpl.sph || "0.00"),
             cyl: cVal !== null ? cVal.toFixed(2) : (tpl.cyl || "0.00"),
-            axis: item.axis ? String(item.axis).trim() : (tpl.axis || ""),
+            axis: item.axis ? cleanAxis(item.axis) : cleanAxis(tpl.axis),
             index: tpl.index || "",
             coating: tpl.coating || "",
             disposability: tpl.disposability || "",
@@ -710,7 +732,7 @@ export const updateLensMatrix = async (req, res) => {
         productName: { $regex: `^${cleanName}$`, $options: "i" },
         isDeleted: { $ne: true },
       })
-        .select("sph cyl qty price buyingPrice sellingPrice mrp lensHistory")
+        .select("sph cyl addition axis qty price buyingPrice sellingPrice mrp lensHistory")
         .session(session)
         .lean();
 
@@ -724,6 +746,9 @@ export const updateLensMatrix = async (req, res) => {
         const distinctAdds = Array.from(
           new Set(remainingProducts.map((p) => parsePower(p.addition)).filter((x) => x !== null))
         ).sort((a, b) => a - b);
+        const distinctAxes = Array.from(
+          new Set(remainingProducts.map((p) => cleanAxis(p.axis)).filter(Boolean))
+        ).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
         const totalStock = remainingProducts.reduce((sum, p) => sum + (p.qty || 0), 0);
         const sample =
           remainingProducts.find((p) => p.sellingPrice || p.buyingPrice || p.mrp) || remainingProducts[0];
@@ -753,6 +778,9 @@ export const updateLensMatrix = async (req, res) => {
           additionRange: distinctAdds.length
             ? `${distinctAdds[0].toFixed(2)} to ${distinctAdds[distinctAdds.length - 1].toFixed(2)}`
             : "",
+          axisRange: distinctAxes.length
+            ? (distinctAxes.length === 1 ? `${distinctAxes[0]}°` : `${distinctAxes[0]}° to ${distinctAxes[distinctAxes.length - 1]}°`)
+            : "",
           buyingPrice: sample.buyingPrice ?? sample.price ?? 0,
           sellingPrice: sample.sellingPrice ?? sample.price ?? 0,
           mrp: sample.mrp ?? 0,
@@ -778,6 +806,8 @@ export const updateLensMatrix = async (req, res) => {
               totalStockQty: totalStock,
               sphRange: historyEntry.sphRange,
               cylRange: historyEntry.cylRange,
+              additionRange: historyEntry.additionRange,
+              axisRange: historyEntry.axisRange,
               buyingPrice: historyEntry.buyingPrice,
               sellingPrice: historyEntry.sellingPrice,
               mrp: historyEntry.mrp,
