@@ -9,6 +9,8 @@ const parsePower = (val) => {
   return isNaN(num) ? null : num;
 };
 
+const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 
 export const searchLensProducts = async (req, res) => {
   try {
@@ -17,6 +19,7 @@ export const searchLensProducts = async (req, res) => {
 
     const matchStage = {
       tenantId,
+      isDeleted: { $ne: true },
       productName: { $nin: [null, ""] },
       $or: [
         { sph: { $exists: true, $nin: [null, ""] } },
@@ -25,7 +28,7 @@ export const searchLensProducts = async (req, res) => {
     };
 
     if (q) {
-      matchStage.productName = { $regex: q, $options: "i" };
+      matchStage.productName = { $regex: escapeRegex(q), $options: "i" };
     }
 
     const results = await DigiProduct.aggregate([
@@ -36,6 +39,7 @@ export const searchLensProducts = async (req, res) => {
           productName: { $first: "$productName" },
           category: { $first: "$category" },
           brand: { $first: "$brand" },
+          type: { $first: "$type" },
           totalVariants: { $sum: 1 },
           totalQty: { $sum: "$qty" },
           minPrice: { $min: "$price" },
@@ -48,6 +52,7 @@ export const searchLensProducts = async (req, res) => {
           maxMrp: { $max: "$mrp" },
           sphs: { $addToSet: "$sph" },
           cyls: { $addToSet: "$cyl" },
+          additions: { $addToSet: "$addition" },
           createdAt: { $min: "$createdAt" },
           updatedAt: { $max: "$updatedAt" },
         },
@@ -85,10 +90,10 @@ export const getLensMatrixData = async (req, res) => {
 
     const products = await DigiProduct.find({
       tenantId,
-      productName: { $regex: `^${cleanName}$`, $options: "i" },
+      productName: { $regex: `^\\s*${escapeRegex(cleanName)}\\s*$`, $options: "i" },
       isDeleted: { $ne: true },
     })
-      .select("productCode productName category brand sph cyl addition axis qty price buyingPrice sellingPrice mrp createdAt updatedAt")
+      .select("productCode productName category brand type sph cyl addition axis qty price buyingPrice sellingPrice mrp createdAt updatedAt")
       .lean();
 
     if (!products || products.length === 0) {
@@ -189,6 +194,7 @@ export const getLensMatrixData = async (req, res) => {
       productName: products[0].productName,
       category: products[0].category,
       brand: products[0].brand,
+      type: products.find((p) => p.type)?.type || "",
       totalCount: products.length,
       totalStockQty,
       sphValues: sortedSphs.map((s) => s.toFixed(2)),
@@ -233,7 +239,7 @@ export const updateLensMatrix = async (req, res) => {
 
     const existingProducts = await DigiProduct.find({
       tenantId,
-      productName: { $regex: `^${cleanName}$`, $options: "i" },
+      productName: { $regex: `^\\s*${escapeRegex(cleanName)}\\s*$`, $options: "i" },
       isDeleted: { $ne: true },
     }).session(session);
 
