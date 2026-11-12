@@ -268,6 +268,11 @@ export const updateLensMatrix = async (req, res) => {
       return String(ax).replace(/[°\s]/g, "").trim();
     };
 
+    const pushToMap = (map, key, val) => {
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(val);
+    };
+
     existingProducts.forEach((p) => {
       if (p.productCode) {
         productByCode.set(p.productCode.trim().toUpperCase(), p);
@@ -290,29 +295,20 @@ export const updateLensMatrix = async (req, res) => {
 
       if (s !== null) {
         const sKey = s.toFixed(2);
-        if (!productsBySph.has(sKey)) productsBySph.set(sKey, []);
-        productsBySph.get(sKey).push(p);
+        pushToMap(productsBySph, sKey, p);
 
         if (addClean) {
-          const sphAddKey = `${sKey}_${addClean}`;
-          if (!productBySphAndAdd.has(sphAddKey)) productBySphAndAdd.set(sphAddKey, []);
-          productBySphAndAdd.get(sphAddKey).push(p);
+          pushToMap(productBySphAndAdd, `${sKey}_${addClean}`, p);
         }
 
         if (c !== null) {
           const cKey = c.toFixed(2);
-          const powerKey = `${sKey}_${cKey}`;
-          if (!productsByPower.has(powerKey)) productsByPower.set(powerKey, []);
-          productsByPower.get(powerKey).push(p);
+          pushToMap(productsByPower, `${sKey}_${cKey}`, p);
 
           if (addClean) {
             const powerAddKey = `${sKey}_${cKey}_${addClean}`;
-            productByPowerAndAdd.set(powerAddKey, p);
-
-            if (axClean) {
-              const powerAddAxisKey = `${powerAddKey}_${axClean}`;
-              productByPowerAddAxis.set(powerAddAxisKey, p);
-            }
+            pushToMap(productByPowerAndAdd, powerAddKey, p);
+            pushToMap(productByPowerAddAxis, `${powerAddKey}_${axClean}`, p);
           }
         }
       }
@@ -325,10 +321,17 @@ export const updateLensMatrix = async (req, res) => {
       if (item._id && productById.has(String(item._id))) {
         return [productById.get(String(item._id))];
       }
-      let s = parsePower(item.sph);
+      const rawSph = parsePower(item.sph);
+      const hasExplicitCyl = item.cyl !== undefined && item.cyl !== null && String(item.cyl).trim() !== "";
+      let s = rawSph;
       let c = parsePower(item.cyl);
       const addClean = cleanAdd(item.addition);
       const axClean = cleanAxis(item.axis);
+
+      // Only fall back to single-variant doc when uploaded row has NO power parameters at all
+      if (rawSph === null && !hasExplicitCyl && !addClean) {
+        return existingProducts.length === 1 ? [existingProducts[0]] : [];
+      }
 
       if (s === null && c === null && !addClean) {
         s = 0;
@@ -341,36 +344,30 @@ export const updateLensMatrix = async (req, res) => {
       if (s !== null) {
         const sKey = s.toFixed(2);
         if (addClean) {
-          if (c !== null) {
-            if (axClean) {
-              const powerAddAxisKey = `${sKey}_${c.toFixed(2)}_${addClean}_${axClean}`;
-              if (productByPowerAddAxis.has(powerAddAxisKey)) {
-                return [productByPowerAddAxis.get(powerAddAxisKey)];
-              }
+          if (c !== null && hasExplicitCyl) {
+            const cKey = c.toFixed(2);
+            const exactAxisKey = `${sKey}_${cKey}_${addClean}_${axClean}`;
+            if (productByPowerAddAxis.has(exactAxisKey)) {
+              return productByPowerAddAxis.get(exactAxisKey);
             }
-            const powerAddKey = `${sKey}_${c.toFixed(2)}_${addClean}`;
-            if (productByPowerAndAdd.has(powerAddKey)) {
-              return [productByPowerAndAdd.get(powerAddKey)];
+            if (!axClean && productByPowerAndAdd.has(`${sKey}_${cKey}_${addClean}`)) {
+              return productByPowerAndAdd.get(`${sKey}_${cKey}_${addClean}`);
             }
+            return [];
           }
-          const sphAddKey = `${sKey}_${addClean}`;
-          if (productBySphAndAdd.has(sphAddKey)) {
-            return productBySphAndAdd.get(sphAddKey);
+          if (!hasExplicitCyl && !axClean && productBySphAndAdd.has(`${sKey}_${addClean}`)) {
+            return productBySphAndAdd.get(`${sKey}_${addClean}`);
           }
+          return [];
         }
 
-        if (c !== null && productsByPower.has(`${sKey}_${c.toFixed(2)}`)) {
-          return productsByPower.get(`${sKey}_${c.toFixed(2)}`);
+        if (c !== null && hasExplicitCyl) {
+          return productsByPower.get(`${sKey}_${c.toFixed(2)}`) || [];
         }
 
-        if (productsBySph.has(sKey)) {
+        if (!hasExplicitCyl && productsBySph.has(sKey)) {
           return productsBySph.get(sKey);
         }
-      }
-
-      // If single-variant product and no powers specified
-      if (existingProducts.length === 1) {
-        return [existingProducts[0]];
       }
 
       return [];
@@ -676,7 +673,7 @@ export const updateLensMatrix = async (req, res) => {
             shape: tpl.shape || "",
             material: tpl.material || "",
             dimensions: tpl.dimensions || "",
-            addition: aVal ? aVal : (tpl.addition || ""),
+            addition: aVal ? aVal : (String(tpl.type || "").toUpperCase() === "SINGLE_VISION" ? "" : (tpl.addition || "")),
             sph: sVal !== null ? sVal.toFixed(2) : (tpl.sph || "0.00"),
             cyl: cVal !== null ? cVal.toFixed(2) : (tpl.cyl || "0.00"),
             axis: item.axis ? cleanAxis(item.axis) : cleanAxis(tpl.axis),
@@ -703,11 +700,11 @@ export const updateLensMatrix = async (req, res) => {
         }
       }
 
-      if (bulkOps.length > 0) {
-        await DigiProduct.bulkWrite(bulkOps, { session });
+      for (let i = 0; i < bulkOps.length; i += 1000) {
+        await DigiProduct.bulkWrite(bulkOps.slice(i, i + 1000), { session });
       }
-      if (newDocsToInsert.length > 0) {
-        await DigiProduct.insertMany(newDocsToInsert, { session });
+      for (let i = 0; i < newDocsToInsert.length; i += 1000) {
+        await DigiProduct.insertMany(newDocsToInsert.slice(i, i + 1000), { session });
       }
 
       const totalProcessed = updatedCount + createdCount;
@@ -735,7 +732,7 @@ export const updateLensMatrix = async (req, res) => {
 
       const remainingProducts = await DigiProduct.find({
         tenantId,
-        productName: { $regex: `^${cleanName}$`, $options: "i" },
+        productName: { $regex: `^\\s*${escapeRegex(cleanName)}\\s*$`, $options: "i" },
         isDeleted: { $ne: true },
       })
         .select("sph cyl addition axis qty price buyingPrice sellingPrice mrp lensHistory")
