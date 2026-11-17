@@ -1,4 +1,5 @@
 import DigiProduct from "../../../models/Product/Product.model.js";
+import LensHistory from "../../../models/Product/LensHistory.model.js";
 import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
@@ -143,9 +144,9 @@ export const createProduct = async (req, res) => {
       coating: p.coating?.trim() || "",
       disposability: p.disposability?.trim() || "",
       expiry: p.expiry || "",
-      price: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
+      price: Number(p.sellingPrice != null && Number(p.sellingPrice) > 0 ? p.sellingPrice : (p.price != null ? p.price : (p.buyingPrice ?? 0))),
       buyingPrice: Number(p.buyingPrice != null ? p.buyingPrice : (p.price ?? 0)),
-      sellingPrice: Number(p.sellingPrice != null ? p.sellingPrice : (p.price ?? 0)),
+      sellingPrice: Number(p.sellingPrice != null && Number(p.sellingPrice) > 0 ? p.sellingPrice : (p.price ?? 0)),
       gst: Number(p.gst) || 0,
       hsnSac: p.hsnSac?.trim() || "",
       mrp: Number(p.mrp ?? 0),
@@ -263,6 +264,18 @@ export const suggestionProduct = async (req, res) => {
   }
 };
 
+export const normalizeProductPrices = (product) => {
+  if (!product) return product;
+  const doc = product.toObject ? product.toObject() : { ...product };
+  const effectiveSelling = doc.sellingPrice != null && Number(doc.sellingPrice) > 0
+    ? Number(doc.sellingPrice)
+    : Number(doc.price || 0);
+  const effectiveBuying = Number(doc.buyingPrice != null ? doc.buyingPrice : (doc.price || 0));
+  doc.price = effectiveSelling;
+  doc.sellingPrice = effectiveSelling;
+  doc.buyingPrice = effectiveBuying;
+  return doc;
+};
 
 export const getProducts = async (req, res) => {
   try {
@@ -287,7 +300,7 @@ export const getProducts = async (req, res) => {
       totalPages: Math.ceil(total / limit),
       totalProducts: total,
       hasMore,
-      products,
+      products: products.map(normalizeProductPrices),
     });
   } catch (error) {
     res.status(500).json({
@@ -316,7 +329,7 @@ export const getProductsByCategory = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data,
+      data: data.map(normalizeProductPrices),
     });
   } catch (error) {
     console.error("Get by category error:", error);
@@ -344,7 +357,7 @@ export const getProductById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      product,
+      product: normalizeProductPrices(product),
     });
   } catch (error) {
     res.status(400).json({
@@ -400,11 +413,17 @@ export const updateProduct = async (req, res) => {
     product.disposability = p.disposability?.trim() || "";
     product.expiry = p.expiry || null;
     if (p.buyingPrice != null && p.buyingPrice !== "") product.buyingPrice = Number(p.buyingPrice);
-    if (p.sellingPrice != null && p.sellingPrice !== "") product.sellingPrice = Number(p.sellingPrice);
-    if (p.price != null && p.price !== "") {
+    if (p.sellingPrice != null && p.sellingPrice !== "") {
+      product.sellingPrice = Number(p.sellingPrice);
+      product.price = Number(p.sellingPrice);
+    } else if (p.price != null && p.price !== "") {
       product.price = Number(p.price);
-      if (product.buyingPrice == null) product.buyingPrice = product.price;
+      if (!product.sellingPrice) product.sellingPrice = product.price;
     }
+    if (product.sellingPrice != null && Number(product.sellingPrice) > 0) {
+      product.price = Number(product.sellingPrice);
+    }
+    if (product.buyingPrice == null) product.buyingPrice = product.price || 0;
     product.gst = p.gst != null ? Number(p.gst) : 0;
     product.hsnSac = p.hsnSac?.trim() || "";
     if (p.mrp != null && p.mrp !== "") product.mrp = Number(p.mrp);
@@ -427,6 +446,24 @@ export const updateProduct = async (req, res) => {
     }
 
     await product.save();
+
+    // Keep ProductBatch records in sync with updated product prices
+    const batchUpdates = {};
+    if (product.sellingPrice != null && Number(product.sellingPrice) > 0) {
+      batchUpdates.sellingPrice = Number(product.sellingPrice);
+    }
+    if (product.buyingPrice != null && Number(product.buyingPrice) > 0) {
+      batchUpdates.buyingPrice = Number(product.buyingPrice);
+    }
+    if (product.mrp != null && Number(product.mrp) > 0) {
+      batchUpdates.mrp = Number(product.mrp);
+    }
+    if (Object.keys(batchUpdates).length > 0) {
+      await ProductBatch.updateMany(
+        { productId: product._id, tenantId: req.user.tenantId },
+        { $set: batchUpdates }
+      );
+    }
 
     res.status(200).json({
       success: true,
@@ -623,9 +660,13 @@ export const addInventory = async (req, res) => {
 
       if (buyingP != null) {
         product.buyingPrice = buyingP;
-        product.price = buyingP;
       }
-      if (sellingP != null) product.sellingPrice = sellingP;
+      if (sellingP != null && Number(sellingP) > 0) {
+        product.sellingPrice = Number(sellingP);
+        product.price = Number(sellingP);
+      } else if (product.sellingPrice != null && Number(product.sellingPrice) > 0) {
+        product.price = Number(product.sellingPrice);
+      }
       if (mrpP != null && mrpP > 0) product.mrp = mrpP;
       if (item.expiry) product.expiry = item.expiry;
       if (item.disposability?.trim()) product.disposability = item.disposability.trim();
@@ -1192,7 +1233,8 @@ export const bulkUploadProducts = async (req, res) => {
   try {
     session.startTransaction();
 
-    const { _id: userId } = req.user;
+    const userId = req.user?._id || req.user?.id;
+    const tenantId = req.user?.tenantId;
 
     let products = JSON.parse(req.body.products || "[]");
 
@@ -1283,6 +1325,22 @@ export const bulkUploadProducts = async (req, res) => {
       ).sort((a, b) => a - b);
 
       const first = docs[0];
+      const distinctAdds = Array.from(
+        new Set(
+          docs
+            .map((d) => parseFloat(String(d.addition).replace(/\+/g, "").trim()))
+            .filter((x) => !isNaN(x) && x > 0)
+        )
+      ).sort((a, b) => a - b);
+
+      const distinctAxes = Array.from(
+        new Set(
+          docs
+            .map((d) => d.axis?.toString().trim())
+            .filter((x) => Boolean(x))
+        )
+      ).sort();
+
       const initialEntry = {
         action: "GENERATED",
         priceType: "",
@@ -1295,14 +1353,49 @@ export const bulkUploadProducts = async (req, res) => {
           ? `${distinctCyls[0].toFixed(2)} to ${distinctCyls[distinctCyls.length - 1].toFixed(2)}`
           : "",
         buyingPrice: first.buyingPrice || first.price || 0,
+        additionRange: distinctAdds.length
+          ? `${distinctAdds[0].toFixed(2)} to ${distinctAdds[distinctAdds.length - 1].toFixed(2)}`
+          : "",
+        axisRange: distinctAxes.length ? distinctAxes.join(", ") : "",
         sellingPrice: first.sellingPrice || first.price || 0,
         mrp: first.mrp || 0,
+        generatedAt: new Date(),
         updatedAt: new Date(),
       };
 
+      await LensHistory.create(
+        [
+          {
+            tenantId,
+            productName: first.productName,
+            category: first.category,
+            brand: first.brand || "",
+            historyType: "GENERATION",
+            action: "GENERATED",
+            priceType: "",
+            totalLenses: saved.length,
+            totalStockQty: docs.reduce((sum, p) => sum + (p.qty || 0), 0),
+            sphRange: initialEntry.sphRange,
+            cylRange: initialEntry.cylRange,
+            additionRange: initialEntry.additionRange,
+            axisRange: initialEntry.axisRange,
+            buyingPrice: initialEntry.buyingPrice,
+            sellingPrice: initialEntry.sellingPrice,
+            mrp: initialEntry.mrp,
+            createdBy: req.user?._id || req.user?.id || null,
+          },
+        ],
+        { session }
+      );
+
       await DigiProduct.updateOne(
         { _id: saved[0]._id },
-        { $set: { lensHistory: [initialEntry] } },
+        {
+          $set: {
+            lensGenerationHistory: [initialEntry],
+            lensHistory: [initialEntry],
+          },
+        },
         { session }
       );
 
@@ -1310,7 +1403,13 @@ export const bulkUploadProducts = async (req, res) => {
         const otherIds = saved.slice(1).map((s) => s._id);
         await DigiProduct.updateMany(
           { _id: { $in: otherIds } },
-          { $unset: { lensHistory: 1 } },
+          {
+            $unset: {
+              lensHistory: 1,
+              lensGenerationHistory: 1,
+              lensUpdateHistory: 1,
+            },
+          },
           { session }
         );
       }

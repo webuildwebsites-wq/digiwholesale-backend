@@ -2,7 +2,7 @@ import express from 'express';
 import { customerForgotPassword, customerLogin, customerResetPassword, customerBasicRegistration, updateCustomerProfile, resetCustomerCredit, sendCustomerForCorrection, resubmitCorrectedCustomer, updateCustomerShipToDetails, updateCustomerContact } from '../../core/controllers/Auth/Customers/CustomerAuth.js';
 import { financeApproveCustomer, salesHeadApproveCustomer, acceptTermsAndConditions, getPendingCustomersByStage, financeResubmitToSalesHead } from '../../core/controllers/Auth/Customers/CustomerApprovalWorkflow.js';
 import { getAllCustomers, getCustomerById, getCustomerProfile, getDraftCustomers, getCorrectionRequiredCustomers, getPendingTermsCustomers } from '../../core/controllers/Auth/Customers/customer.get.controller.js';
-import { requireSalesFinanceOrSuperAdmin, attachDepartmentInfo } from '../../middlewares/Auth/AdminMiddleware/departmentMiddleware.js';
+import { requireSalesFinanceOrSuperAdmin, attachDepartmentInfo, requireCanEditCustomer } from '../../middlewares/Auth/AdminMiddleware/departmentMiddleware.js';
 import { protectCustomer } from '../../middlewares/Auth/CustomerMiddleware/customerMiddleware.js';
 import { verifyCustomerEmail } from '../../core/controllers/Auth/Customers/VarifyAccount.js';
 import { ProtectUser } from '../../middlewares/Auth/AdminMiddleware/adminMiddleware.js';
@@ -27,7 +27,7 @@ customerRouter.put('/:customerId/send-for-correction', ProtectUser, attachDepart
 customerRouter.put('/:customerId/resubmit-correction', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), resubmitCorrectedCustomer);
 
 customerRouter.patch('/update-contact/:customerId', ProtectUser, checkPermission('UPDATE_CUSTOMER'), updateCustomerContact);
-customerRouter.put('/update-profile/:customerId', ProtectUser, checkPermission('UPDATE_CUSTOMER'), updateCustomerProfile);
+customerRouter.put('/update-profile/:customerId', ProtectUser, attachDepartmentInfo, requireCanEditCustomer, updateCustomerProfile);
 customerRouter.put('/update-ship-to-details/:customerId', ProtectUser, attachDepartmentInfo, checkPermission('UPDATE_CUSTOMER'), updateCustomerShipToDetails);
 
 customerRouter.put('/reset-credit/:customerId', ProtectUser, attachDepartmentInfo, resetCustomerCredit);
@@ -44,7 +44,7 @@ customerRouter.get('/customer/pending-terms', ProtectUser, attachDepartmentInfo,
 customerRouter.get('/get-all-customers', ProtectUser, checkPageAccess('CUSTOMER_LIST'), getAllCustomers);
 customerRouter.get('/customers-profile', protectCustomer, getCustomerProfile);
 customerRouter.get('/get-customer/:customerId', ProtectUser, getCustomerById);
-customerRouter.get('/get-draft-customer/:customerId',ProtectUser, getDraftCustomers);
+customerRouter.get('/get-draft-customer/:customerId', ProtectUser, getDraftCustomers);
 
 customerRouter.get('/get-all-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('CUSTOMER_LIST'), getAllDraftCustomers);
 customerRouter.get('/get-my-draft-customers', ProtectUser, attachDepartmentInfo, requireSalesFinanceOrSuperAdmin, checkPageAccess('CUSTOMER_LIST'), getMyDraftCustomers);

@@ -108,7 +108,6 @@ const externalOrderSchema = new mongoose.Schema(
     status: {
       type:    String,
       enum:    [
-        "Draft",
         "Submitted",
         "Processing",
         "QC",

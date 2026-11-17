@@ -113,9 +113,68 @@ function sanitizeFitting(fitting) {
 export async function getOrderService(orderId, tenantId) {
   const filter = { _id: orderId };
   if (tenantId) filter.tenantId = tenantId;
-  const order = await BulkOrder.findOne(filter);
-  if (!order) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
-  return order;
+  const bulkOrder = await BulkOrder.findOne(filter).lean();
+  if (!bulkOrder) throw { statusCode: 404, code: "NOT_FOUND", message: "Order not found" };
+
+  const shippingCharges = Number(bulkOrder.shippingCharges || 0);
+  const otherCharges    = Number(bulkOrder.otherCharges    || 0);
+  const advanceAmount   = Number(bulkOrder.advanceAmount   || 0);
+  const totalOrdersCount = (bulkOrder.orders || []).length || 1;
+
+  const itemsSubtotal = Number(
+    (bulkOrder.orders || []).reduce((sum, order) => {
+      const orderTotal = (order.items || []).reduce((s, item) => {
+        const price      = Number(item.price || 0);
+        const qty        = Number(item.qty || 0);
+        const gstPercent = Number(item.gst || 0);
+        const discount   = Number(item.discountAmount || 0);
+        const base       = price * qty - discount;
+        return s + base + (base * gstPercent) / 100;
+      }, 0);
+      return sum + orderTotal;
+    }, 0).toFixed(2)
+  );
+
+  const grandTotal = Number((itemsSubtotal + shippingCharges + otherCharges).toFixed(2));
+  const nowPayable = Number(Math.max(0, grandTotal - advanceAmount).toFixed(2));
+
+  return {
+    ...bulkOrder,
+    totalOrderPrice: grandTotal,
+    orders: (bulkOrder.orders || []).map((order) => {
+      const orderItemsTotal = Number(
+        (order.items || []).reduce((sum, item) => {
+          const price      = Number(item.price || 0);
+          const qty        = Number(item.qty   || 0);
+          const gstPercent = Number(item.gst   || 0);
+          const discount   = Number(item.discountAmount || 0);
+          const base       = price * qty - discount;
+          return sum + base + (base * gstPercent) / 100;
+        }, 0).toFixed(2)
+      );
+
+      const orderShipping = Number(order.shippingCharges || 0) || (shippingCharges / totalOrdersCount);
+      const orderOther    = Number(order.otherCharges || 0)    || (otherCharges / totalOrdersCount);
+
+      return {
+        ...order,
+        itemsTotal: orderItemsTotal,
+        shippingCharges: orderShipping,
+        otherCharges: orderOther,
+        totalOrderPrice: Number((orderItemsTotal + orderShipping + orderOther).toFixed(2)),
+      };
+    }),
+    summary: {
+      subtotal: itemsSubtotal,
+      grossTotal: grandTotal,
+      grandTotal,
+      advanceAmount,
+      shippingCharges,
+      otherCharges,
+      nowPayable,
+      balanceDue: nowPayable,
+    },
+  };
 }
 
 export async function deleteOrderService(orderId, tenantId) {
@@ -200,9 +259,9 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     const custId   = bulkOrder.customer?.customerId?.toString();
     const custData = custId ? customerMap.get(custId) : null;
 
-    const grandTotal = Number(
+    const itemsSubtotal = Number(
       bulkOrder.orders.reduce((sum, order) => {
-        const orderTotal = order.items.reduce((s, item) => {
+        const orderTotal = (order.items || []).reduce((s, item) => {
           const price      = Number(item.price || 0);
           const qty        = Number(item.qty || 0);
           const gstPercent = Number(item.gst || 0);
@@ -217,7 +276,9 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
     const advanceAmount   = Number(bulkOrder.advanceAmount   || 0);
     const shippingCharges = Number(bulkOrder.shippingCharges || 0);
     const otherCharges    = Number(bulkOrder.otherCharges    || 0);
-    const nowPayable      = Number((grandTotal + shippingCharges + otherCharges - advanceAmount).toFixed(2));
+    const grandTotal      = Number((itemsSubtotal + shippingCharges + otherCharges).toFixed(2));
+    const nowPayable      = Number(Math.max(0, grandTotal - advanceAmount).toFixed(2));
+    const totalOrdersCount = bulkOrder.orders?.length || 1;
 
     return {
       ...bulkOrder,
@@ -226,10 +287,9 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
         billingMode:  custData?.billingMode  || null,
         billingCycle: custData?.billingCycle || null,
       },
-      orders: bulkOrder.orders.map((order) => ({
-        ...order,
-        totalOrderPrice: Number(
-          order.items.reduce((sum, item) => {
+      orders: bulkOrder.orders.map((order) => {
+        const orderItemsTotal = Number(
+          (order.items || []).reduce((sum, item) => {
             const price      = Number(item.price || 0);
             const qty        = Number(item.qty   || 0);
             const gstPercent = Number(item.gst   || 0);
@@ -237,14 +297,29 @@ export async function listOrdersService({ customerId, status, page = 1, limit = 
             const base       = price * qty - discount;
             return sum + base + (base * gstPercent) / 100;
           }, 0).toFixed(2)
-        ),
-      })),
+        );
+
+        const orderShipping = Number(order.shippingCharges || 0) || (shippingCharges / totalOrdersCount);
+        const orderOther    = Number(order.otherCharges || 0)    || (otherCharges / totalOrdersCount);
+        const totalOrderPrice = Number((orderItemsTotal + orderShipping + orderOther).toFixed(2));
+
+        return {
+          ...order,
+          itemsTotal: orderItemsTotal,
+          shippingCharges: orderShipping,
+          otherCharges: orderOther,
+          totalOrderPrice,
+        };
+      }),
       summary: {
+        subtotal: itemsSubtotal,
+        grossTotal: grandTotal,
         grandTotal,
         advanceAmount,
         shippingCharges,
         otherCharges,
         nowPayable,
+        balanceDue: nowPayable,
       },
     };
   });
@@ -538,9 +613,40 @@ export async function getProductCoatingsService({ brand, category, tenantId } = 
 export async function getProductNamesService({ brand, category, search = "", limit = 100, page = 1, tenantId } = {}) {
   const filter = { productName: { $nin: [null, ""] } };
   if (tenantId) filter.tenantId = tenantId;
-  if (brand?.trim()) filter.brand = { $regex: `^${brand.trim()}$`, $options: "i" };
-  if (category?.trim()) filter.category = { $regex: `^${category.trim()}$`, $options: "i" };
-  if (search.trim()) filter.productName = { $regex: search.trim(), $options: "i" };
+  if (brand?.trim()) filter.brand = { $regex: `^${brand.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
+  if (category?.trim()) filter.category = { $regex: `^${category.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
+
+  const trimmedSearch = search?.trim();
+  if (trimmedSearch) {
+    const escaped = trimmedSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const searchRegex = { $regex: escaped, $options: "i" };
+
+    const tokens = trimmedSearch.split(/\s+/).filter(Boolean);
+    if (tokens.length > 1) {
+      filter.$and = [
+        ...(filter.$and || []),
+        ...tokens.map((token) => {
+          const tokenEscaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const tokenRegex = { $regex: tokenEscaped, $options: "i" };
+          return {
+            $or: [
+              { productCode: tokenRegex },
+              { productName: tokenRegex },
+              { category: tokenRegex },
+              { brand: tokenRegex },
+            ],
+          };
+        }),
+      ];
+    } else {
+      filter.$or = [
+        { productCode: searchRegex },
+        { productName: searchRegex },
+        { category: searchRegex },
+        { brand: searchRegex },
+      ];
+    }
+  }
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const total = await DigiProduct.countDocuments(filter);
@@ -641,21 +747,31 @@ export async function suggestionsOrdersService({ search, limit = 10, tenantId })
     .limit(parseInt(limit))
     .lean();
 
-  const ordersWithTotalPrice = orders.map((bulkOrder) => ({
-    ...bulkOrder,
-    orders: bulkOrder.orders.map((order) => ({
-      ...order,
-      totalOrderPrice: Number(
-        order.items
-          .reduce((sum, item) => {
-            const price = Number(item.price || 0);
-            const gstPercent = Number(item.gst || 0);
-            return sum + price + (price * gstPercent) / 100;
-          }, 0)
-          .toFixed(2)
-      ),
-    })),
-  }));
+  const ordersWithTotalPrice = orders.map((bulkOrder) => {
+    const shippingCharges = Number(bulkOrder.shippingCharges || 0);
+    const otherCharges    = Number(bulkOrder.otherCharges    || 0);
+    const totalOrdersCount = bulkOrder.orders?.length || 1;
+
+    return {
+      ...bulkOrder,
+      orders: bulkOrder.orders.map((order) => {
+        const itemsTotal = (order.items || []).reduce((sum, item) => {
+          const price = Number(item.price || 0);
+          const gstPercent = Number(item.gst || 0);
+          const discount = Number(item.discountAmount || 0);
+          const base = price * Number(item.qty || 1) - discount;
+          return sum + base + (base * gstPercent) / 100;
+        }, 0);
+        const orderShipping = Number(order.shippingCharges || 0) || (shippingCharges / totalOrdersCount);
+        const orderOther    = Number(order.otherCharges || 0)    || (otherCharges / totalOrdersCount);
+
+        return {
+          ...order,
+          totalOrderPrice: Number((itemsTotal + orderShipping + orderOther).toFixed(2)),
+        };
+      }),
+    };
+  });
 
   return ordersWithTotalPrice;
 }
@@ -698,23 +814,33 @@ export async function getRxOrdersService({ page = 1, limit = 20, search, fromDat
     .limit(parseInt(limit))
     .lean();
 
-  const orders = records.map((bulkOrder) => ({
-    ...bulkOrder,
-    orders: bulkOrder.orders.map((order) => ({
-      ...order,
-      rxItems: order.items.filter((item) => item.orderType === "RX"),
-      totalOrderPrice: Number(
-        order.items
-          .filter((item) => item.orderType === "RX")
-          .reduce((sum, item) => {
-            const price = Number(item.price || 0);
-            const gstPercent = Number(item.gst || 0);
-            return sum + price + (price * gstPercent) / 100;
-          }, 0)
-          .toFixed(2)
-      ),
-    })),
-  }));
+  const orders = records.map((bulkOrder) => {
+    const shippingCharges = Number(bulkOrder.shippingCharges || 0);
+    const otherCharges    = Number(bulkOrder.otherCharges    || 0);
+    const totalOrdersCount = bulkOrder.orders?.length || 1;
+
+    return {
+      ...bulkOrder,
+      orders: bulkOrder.orders.map((order) => {
+        const rxItems = (order.items || []).filter((item) => item.orderType === "RX");
+        const itemsTotal = rxItems.reduce((sum, item) => {
+          const price = Number(item.price || 0);
+          const gstPercent = Number(item.gst || 0);
+          const discount = Number(item.discountAmount || 0);
+          const base = price * Number(item.qty || 1) - discount;
+          return sum + base + (base * gstPercent) / 100;
+        }, 0);
+        const orderShipping = Number(order.shippingCharges || 0) || (shippingCharges / totalOrdersCount);
+        const orderOther    = Number(order.otherCharges || 0)    || (otherCharges / totalOrdersCount);
+
+        return {
+          ...order,
+          rxItems,
+          totalOrderPrice: Number((itemsTotal + orderShipping + orderOther).toFixed(2)),
+        };
+      }),
+    };
+  });
 
   return {
     orders,
@@ -763,23 +889,33 @@ export async function getDraftOrdersService({ page = 1, limit = 20, search, cust
     .limit(parseInt(limit))
     .lean();
 
-  const orders = records.map((bulkOrder) => ({
-    ...bulkOrder,
-    orders: bulkOrder.orders
-      .filter(o => o.status === "Draft")
-      .map(order => ({
-        ...order,
-        totalOrderPrice: Number(
-          order.items
-            .reduce((sum, item) => {
-              const price = Number(item.price || 0);
-              const gstPercent = Number(item.gst || 0);
-              return sum + price + (price * gstPercent) / 100;
-            }, 0)
-            .toFixed(2)
-        ),
-      })),
-  }));
+  const orders = records.map((bulkOrder) => {
+    const shippingCharges = Number(bulkOrder.shippingCharges || 0);
+    const otherCharges    = Number(bulkOrder.otherCharges    || 0);
+    const totalOrdersCount = bulkOrder.orders?.length || 1;
+
+    return {
+      ...bulkOrder,
+      orders: bulkOrder.orders
+        .filter(o => o.status === "Draft")
+        .map(order => {
+          const itemsTotal = (order.items || []).reduce((sum, item) => {
+            const price = Number(item.price || 0);
+            const gstPercent = Number(item.gst || 0);
+            const discount = Number(item.discountAmount || 0);
+            const base = price * Number(item.qty || 1) - discount;
+            return sum + base + (base * gstPercent) / 100;
+          }, 0);
+          const orderShipping = Number(order.shippingCharges || 0) || (shippingCharges / totalOrdersCount);
+          const orderOther    = Number(order.otherCharges || 0)    || (otherCharges / totalOrdersCount);
+
+          return {
+            ...order,
+            totalOrderPrice: Number((itemsTotal + orderShipping + orderOther).toFixed(2)),
+          };
+        }),
+    };
+  });
 
   return {
     orders,

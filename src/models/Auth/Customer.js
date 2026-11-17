@@ -72,9 +72,7 @@ const customerSchema = new mongoose.Schema(
     },
     businessEmail: {
       type: String,
-      required: true,
-      unique: true,
-      sparse: true,
+      required: false,
       trim: true,
       lowercase: true,
       match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid businessEmail']
@@ -195,27 +193,19 @@ const customerSchema = new mongoose.Schema(
     },
     panCard: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
     aadharCard: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
     panCardImg: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
     aadharCardImg: {
       type: String,
-      required: function () {
-        return this.isGSTRegistered === false;
-      },
+      required: false,
     },
 
 
@@ -328,6 +318,10 @@ const customerSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    hasBlankCheques: {
+      type: Boolean,
+      default: false
+    },
     chequeDetails: {
       type: [{
         chequeNumber: {
@@ -345,9 +339,9 @@ const customerSchema = new mongoose.Schema(
       validate: {
         validator: function (value) {
           if (!value || value.length === 0) return true;
-          return value.length === 3;
+          return value.length <= 3;
         },
-        message: 'chequeDetails must have exactly 3 entries if provided'
+        message: 'chequeDetails can have up to 3 entries if provided'
       }
     },
     chequeRemark: {
@@ -532,5 +526,7 @@ customerSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 customerSchema.index({ expireAt: 1 }, { expireAfterSeconds: 0, partialFilterExpression: { expireAt: { $ne: null } } });
+// Compound unique index: same email can be registered under different wholesalers (tenants)
+customerSchema.index({ businessEmail: 1, tenantId: 1 }, { unique: true, sparse: true });
 const Customer = mongoose.model('Customer', customerSchema);
 export default Customer;

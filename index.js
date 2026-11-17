@@ -45,8 +45,10 @@ import paymentRouter from './src/routes/Accounting/payment.routes.js';
 import ledgerRouter from './src/routes/Accounting/ledger.routes.js';
 import accountRouter from './src/routes/Accounting/account.routes.js';
 import agingRouter from './src/routes/Accounting/aging.routes.js';
+import gstReportRouter from './src/routes/Accounting/gstReport.routes.js';
 import batchRouter       from './src/routes/Product/batch.routes.js';
 import externalRouter   from './src/routes/external.routes.js';
+import notificationRouter from './src/routes/Notification/notification.routes.js';
 
 if (!process.env.PASSWORD_SECRET) {
   console.error('FATAL: PASSWORD_SECRET environment variable is not set. Server cannot start.');
@@ -58,16 +60,21 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5001",
+  "http://localhost:5004",
   "http://localhost:5174",
   "http://localhost:5175",
   "http://139.59.65.108",
   "http://139.59.65.108:3005",
+  "https://digiopticsretailapi.digibysr.in/api",
+  "https://digiopticsretailapi.digibysr.in",
+  "https://digiretail.digibysr.in",
   "https://digioptics-wholesale.netlify.app",
   "https://digiopticswholesaledibysr.netlify.app",
   "https://digiwholesale-frontend.digibysr.in",
   "http://testing-digiwholesale-backend.digibysr.in",
   "http://testing-digiwholesale-frontend.digibysr.in",
   "https://digiwholesale-backend.digibysr.in",
+  "https://digibysr.in",
   "http://digiwholesale-frontend.digibysr.in"
 ];
 
@@ -189,15 +196,19 @@ try {
   app.use("/api/v1/ledgers", ledgerRouter);
   app.use("/api/v1/accounts", accountRouter);
   app.use("/api/v1/reports/aging", agingRouter);
+  app.use("/api/v1/reports/gst", gstReportRouter);
   app.use("/api/v1/batches", batchRouter);
+  app.use("/api/v1/notifications", notificationRouter);
 
   // EXTERNAL / CROSS-PLATFORM ROUTES (Digi-Retailer ↔ Digi-Wholesaler)
   app.use("/api/ext", externalRouter);
 
+  app.use("/api/notifications", notificationRouter);
   app.use("/api/payments", paymentRouter);
   app.use("/api/ledgers", ledgerRouter);
   app.use("/api/accounts", accountRouter);
   app.use("/api/reports/aging", agingRouter);
+  app.use("/api/reports/gst", gstReportRouter);
 
 } catch (error) {
   console.error("Error occurred:", error);

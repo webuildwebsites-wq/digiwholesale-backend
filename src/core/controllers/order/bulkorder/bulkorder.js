@@ -8,6 +8,7 @@ import ProductBatch from "../../../../models/Product/ProductBatch.model.js";
 import Vendor from "../../../../models/Vendor.model.js";
 import VendorPurchase from "../../../../models/Purchase/VendorPurchase.model.js";
 import Employee from "../../../../models/Auth/Employee.js";
+import Payment from "../../../../models/Accounting/Payment.model.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../../Utils/response/responseHandler.js";
 import { sendEmail } from "../../../config/Email/emailService.js";
 import VendorRxOrderTemplate from "../../../../Utils/Mail/VendorRxOrderTemplate.js";
@@ -15,8 +16,9 @@ import { handleOrderBillingNotification } from "../../../services/billing/billin
 import { sendWhatsAppMessage, customerOrderCreditDueWhatsApp } from "../../../../Utils/whatsapp/whatsappService.js";
 import { generateLowStockExcel } from "../../../../Utils/excel/generateLowStockExcel.js";
 import { generatePurchaseOrderExcel } from "../../../../Utils/excel/generatePurchaseOrderExcel.js";
-import { generateAndStoreChallan, generateAndStoreInvoice, invalidatePDFs } from "../../../services/pdfStorageService.js";
+import { invalidatePDFs } from "../../../services/pdfStorageService.js";
 import { applyPurchaseToVendorLedger } from "../../Purchase/purchase.controller.js";
+import { bucket } from "../../../config/bucket/gcs.js";
 
 const sendLowStockAlerts = async ({ orders, productMap, customerName, orderNumber }) => {
     try {
@@ -688,12 +690,12 @@ export const applyOrderToCustomerCreditAndLedger = async ({ bulkOrder, customerI
             voucherId: bulkOrder._id,
             referenceNumber: orderRef,
             debit: grandTotal,
-            credit: advancePaid + absorbedFromAdvance,
+            credit: advancePaid,
             runningBalance: finalBalance,
             narration: `Sales Invoice for Order #${orderRef}. Total: ₹${grandTotal.toLocaleString()}, Advance Paid: ₹${advancePaid.toLocaleString()}${absorbedFromAdvance > 0 ? (', Absorbed from Advance: ₹' + absorbedFromAdvance.toLocaleString()) : ''}, Added to Credit Used: ₹${newCreditUsedToAdd.toLocaleString()}`,
             branchId: ledger.branchId || null,
             tenantId,
-            createdBy: userId
+            createdBy: (userId && mongoose.Types.ObjectId.isValid(userId)) ? userId : null
         }]);
 
         console.log(`[Order Credit Sync Complete] Order #${orderRef}: GrandTotal=₹${grandTotal}, AdvancePaid=₹${advancePaid}, AbsorbedAdv=₹${absorbedFromAdvance}, AddedToCredit=₹${newCreditUsedToAdd}, NewCreditUsed=₹${finalCreditUsed}, AdvanceBalance=₹${remainingAdvance}`);
@@ -923,22 +925,94 @@ export const createBulkOrder = async (req, res) => {
                                 ? Number(batchDoc.sellingPrice)
                                 : Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0))));
 
-                    if (!item.price || item.price === product?.price || item.price === product?.sellingPrice) {
-                        item.price = batchSellingPrice;
+                    const effectiveProductSelling = product?.sellingPrice != null && Number(product.sellingPrice) > 0
+                        ? Number(product.sellingPrice)
+                        : Number(product?.price || 0);
+                    const effectiveProductBuying = Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0));
+
+                    const minAllowedSelling = batchSellingPrice || effectiveProductSelling || 0;
+                    if (item.price == null || Number(item.price) <= 0) {
+                        item.price = minAllowedSelling;
+                    } else {
+                        item.price = Number(item.price);
+                        if (minAllowedSelling > 0 && item.price < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
                     }
-                    if (!item.sellingPrice || item.sellingPrice === product?.price || item.sellingPrice === product?.sellingPrice) {
-                        item.sellingPrice = item.price || batchSellingPrice;
+
+                    if (item.sellingPrice == null || Number(item.sellingPrice) <= 0) {
+                        item.sellingPrice = item.price;
+                    } else {
+                        item.sellingPrice = Number(item.sellingPrice);
+                        if (minAllowedSelling > 0 && item.sellingPrice < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
                     }
-                    if (!item.buyingPrice || item.buyingPrice === product?.price || item.buyingPrice === product?.buyingPrice) {
-                        item.buyingPrice = batchBuyingPrice;
+
+                    if (item.buyingPrice == null || Number(item.buyingPrice) <= 0) {
+                        item.buyingPrice = effectiveProductBuying || batchBuyingPrice || 0;
+                    } else {
+                        item.buyingPrice = Number(item.buyingPrice);
                     }
-                    if (!item.mrp && batchDoc.mrp) {
-                        item.mrp = Number(batchDoc.mrp);
+
+                    if (item.mrp == null || Number(item.mrp) <= 0) {
+                        item.mrp = Number(product?.mrp || batchDoc.mrp || 0);
+                    } else {
+                        item.mrp = Number(item.mrp);
                     }
                 } else {
-                    item.price = item.price ?? product?.sellingPrice ?? product?.price ?? 0;
-                    item.sellingPrice = item.sellingPrice ?? item.price;
-                    item.buyingPrice = item.buyingPrice ?? product?.buyingPrice ?? product?.price ?? 0;
+                    const effectiveProductSelling = product?.sellingPrice != null && Number(product.sellingPrice) > 0
+                        ? Number(product.sellingPrice)
+                        : Number(product?.price || 0);
+                    const effectiveProductBuying = Number(product?.buyingPrice != null ? product.buyingPrice : (product?.price || 0));
+
+                    const minAllowedSelling = effectiveProductSelling || 0;
+                    if (item.price == null || Number(item.price) <= 0) {
+                        item.price = minAllowedSelling;
+                    } else {
+                        item.price = Number(item.price);
+                        if (minAllowedSelling > 0 && item.price < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
+                    }
+                    if (item.sellingPrice == null || Number(item.sellingPrice) <= 0) {
+                        item.sellingPrice = item.price;
+                    } else {
+                        item.sellingPrice = Number(item.sellingPrice);
+                        if (minAllowedSelling > 0 && item.sellingPrice < minAllowedSelling) {
+                            return sendErrorResponse(
+                                res,
+                                400,
+                                "PRICE_DECREASE_NOT_ALLOWED",
+                                `Selling price for "${product?.productName || item.itemName || 'Item'}" cannot be decreased below original base price (₹${minAllowedSelling})`
+                            );
+                        }
+                    }
+                    if (item.buyingPrice == null || Number(item.buyingPrice) <= 0) {
+                        item.buyingPrice = effectiveProductBuying;
+                    } else {
+                        item.buyingPrice = Number(item.buyingPrice);
+                    }
+                    if (item.mrp == null || Number(item.mrp) <= 0) {
+                        item.mrp = Number(product?.mrp || 0);
+                    } else {
+                        item.mrp = Number(item.mrp);
+                    }
                 }
 
                 item.mrp      = item.mrp    ?? product?.mrp   ?? 0;
@@ -1138,13 +1212,6 @@ export const createBulkOrder = async (req, res) => {
                 customerName: customer.ownerName || customer.shopName,
                 orderNumber:  bulkOrder.orders[0]?.orderNumber || bulkOrder._id.toString(),
             }).catch(err => console.error("Low stock alert error:", err.message));
-
-            generateAndStoreChallan(bulkOrder._id.toString(), req.user.tenantId).catch(err =>
-                console.error("Pre-generate challan error:", err.message)
-            );
-            generateAndStoreInvoice(bulkOrder._id.toString(), req.user.tenantId).catch(err =>
-                console.error("Pre-generate invoice error:", err.message)
-            );
         }
 
         return sendSuccessResponse(res, 201, {
@@ -1157,83 +1224,11 @@ export const createBulkOrder = async (req, res) => {
 };
 
 export const getBulkOrderChallan = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(orderId)) {
-            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
-        }
-
-        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("challanUrl orders customer").lean();
-        if (!bulkOrder) {
-            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
-        }
-
-        const fileName = `challan-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
-
-        if (bulkOrder.challanUrl) {
-            try {
-                const { default: axios } = await import("axios");
-                const response = await axios.get(bulkOrder.challanUrl, { responseType: "arraybuffer", timeout: 4000 });
-                const buffer   = Buffer.from(response.data);
-                res.setHeader("Content-Type", "application/pdf");
-                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-                res.setHeader("Content-Length", buffer.length);
-                return res.end(buffer);
-            } catch (fetchErr) {
-                console.warn("[PDF] Failed to fetch stored challan from GCS, regenerating on the fly:", fetchErr.message);
-            }
-        }
-
-        const { url, buffer } = await generateAndStoreChallan(orderId, req.user.tenantId);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Length", buffer.length);
-        return res.end(buffer);
-    } catch (error) {
-        console.error("Get Bulk Order Challan Error:", error);
-        return sendErrorResponse(res, 500, "CHALLAN_ERROR", error.message || "Something went wrong");
-    }
+    return sendErrorResponse(res, 410, "DEPRECATED", "Challan PDF generation is now handled directly on the frontend browser print engine.");
 };
 
 export const getBulkOrderInvoice = async (req, res) => {
-    try {
-        const { orderId } = req.params;
-
-        if (!mongoose.Types.ObjectId.isValid(orderId)) {
-            return sendErrorResponse(res, 400, "INVALID_ORDER_ID", "Invalid orderId");
-        }
-
-        const bulkOrder = await BulkOrder.findOne({ _id: orderId, tenantId: req.user.tenantId }).select("invoiceUrl orders customer").lean();
-        if (!bulkOrder) {
-            return sendErrorResponse(res, 404, "NOT_FOUND", "Bulk order not found");
-        }
-
-        const fileName = `invoice-${bulkOrder.orders[0]?.orderNumber || orderId}.pdf`;
-
-        if (bulkOrder.invoiceUrl) {
-            try {
-                const { default: axios } = await import("axios");
-                const response = await axios.get(bulkOrder.invoiceUrl, { responseType: "arraybuffer", timeout: 4000 });
-                const buffer   = Buffer.from(response.data);
-                res.setHeader("Content-Type", "application/pdf");
-                res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-                res.setHeader("Content-Length", buffer.length);
-                return res.end(buffer);
-            } catch (fetchErr) {
-                console.warn("[PDF] Failed to fetch stored invoice from GCS, regenerating on the fly:", fetchErr.message);
-            }
-        }
-
-        const { url, buffer } = await generateAndStoreInvoice(orderId, req.user.tenantId);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Length", buffer.length);
-        return res.end(buffer);
-    } catch (error) {
-        console.error("Get Bulk Order Invoice Error:", error);
-        return sendErrorResponse(res, 500, "INVOICE_ERROR", error.message || "Something went wrong");
-    }
+    return sendErrorResponse(res, 410, "DEPRECATED", "Invoice PDF generation is now handled directly on the frontend browser print engine.");
 };
 
 export const updateOrderStatus = async (req, res) => {

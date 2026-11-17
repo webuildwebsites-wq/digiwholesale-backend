@@ -2,8 +2,32 @@ import Tenant from "../../../models/Tenant/Tenant.model.js";
 import Employee from "../../../models/Auth/Employee.js";
 import { sendSuccessResponse, sendErrorResponse } from "../../../Utils/response/responseHandler.js";
 import { generateEmployeeCode } from "../../../Utils/Auth/customerAuthUtils.js";
+import { sendEmail } from "../../config/Email/emailService.js";
+import TenantRegistrationTemplate from "../../../Utils/Mail/TenantRegistrationTemplate.js";
+import { sendWhatsAppMessage, tenantRegistrationWhatsApp } from "../../../Utils/whatsapp/whatsappService.js";
 import dotenv from "dotenv";
 dotenv.config();
+
+/**
+ * Normalizes tenant object so demoMode and demoExpiry are ALWAYS explicitly present at both root and featureFlags level.
+ */
+export const formatTenantResponse = (tenant) => {
+    if (!tenant) return tenant;
+    const t = typeof tenant.toObject === "function" ? tenant.toObject() : { ...tenant };
+    const isDemoOn = Boolean(t.demoMode || t.featureFlags?.demoMode);
+    const demoExp = t.demoExpiry || t.featureFlags?.demoExpiry || null;
+    return {
+        ...t,
+        demoMode: isDemoOn,
+        demoExpiry: demoExp,
+        featureFlags: {
+            ...(t.featureFlags || {}),
+            ecomFramesSunglasses: Boolean(t.featureFlags?.ecomFramesSunglasses),
+            demoMode: isDemoOn,
+            demoExpiry: demoExp,
+        }
+    };
+};
 
 const generateTenantId = (storeName) => {
     const slug = storeName
@@ -27,14 +51,14 @@ export const registerTenant = async (req, res) => {
             utilityProvider, promotionProvider,
         } = req.body;
 
-        if (!storeName || !address || !storeTiming || commissionPercentage === undefined || !expiryDate) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "storeName, address, storeTiming, commissionPercentage, expiryDate are required");
+        if (!storeName || !address || !storeTiming || !expiryDate) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "storeName, address, storeTiming, expiryDate are required");
         }
         if (!ownerName || !email || !mobile || !password) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "ownerName, email, mobile, password are required");
         }
 
-        const commission = Number(commissionPercentage);
+        const commission = commissionPercentage !== undefined ? Number(commissionPercentage) : 0;
         if (isNaN(commission) || commission < 0 || commission > 100) {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "commissionPercentage must be between 0 and 100");
         }
@@ -53,8 +77,8 @@ export const registerTenant = async (req, res) => {
             return sendErrorResponse(res, 400, "VALIDATION_ERROR", "selectedPages array is required for CUSTOM planType");
         }
 
-        if (!gstCertificate && !panCard && !aadhaarCard) {
-            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "At least one document URL (gstCertificate, panCard, or aadhaarCard) must be provided");
+        if (!gstCertificate && !(panCard && aadhaarCard)) {
+            return sendErrorResponse(res, 400, "VALIDATION_ERROR", "Please provide either GST Certificate OR both PAN Card & Aadhaar Card");
         }
 
         const existingTenant = await Tenant.findOne({ "owner.email": email.toLowerCase() });
@@ -85,6 +109,28 @@ export const registerTenant = async (req, res) => {
             finalPages       = selectedPages;
             finalPermissions = Array.isArray(autoPermissions) ? autoPermissions : [];
         }
+
+        const inv = req.body.invoiceDetails || {};
+        const invoiceDetails = {
+            invoiceNo:          (req.body.invoiceNo || inv.invoiceNo || "").trim(),
+            invoiceDate:        req.body.invoiceDate || inv.invoiceDate || new Date(),
+            clientGSTIN:        (req.body.clientGSTIN || inv.clientGSTIN || "").trim().toUpperCase(),
+            clientStateName:    (req.body.clientStateName || inv.clientStateName || "").trim(),
+            clientStateCode:    (req.body.clientStateCode || inv.clientStateCode || "").trim(),
+            clientPAN:          (req.body.clientPAN || inv.clientPAN || "").trim().toUpperCase(),
+            hsnSac:             (req.body.hsnSac || inv.hsnSac || "998313").trim(),
+            subscriptionAmount: Number(req.body.subscriptionAmount ?? inv.subscriptionAmount) || 0,
+            serverCostAmount:   Number(req.body.serverCostAmount ?? inv.serverCostAmount) || 0,
+            cgstRate:           req.body.cgstRate != null ? Number(req.body.cgstRate) : (inv.cgstRate != null ? Number(inv.cgstRate) : 9),
+            sgstRate:           req.body.sgstRate != null ? Number(req.body.sgstRate) : (inv.sgstRate != null ? Number(inv.sgstRate) : 9),
+            igstRate:           req.body.igstRate != null ? Number(req.body.igstRate) : (inv.igstRate != null ? Number(inv.igstRate) : 18),
+            applyIGST:          Boolean(req.body.applyIGST !== undefined ? req.body.applyIGST : inv.applyIGST),
+            bankName:           (req.body.bankName || inv.bankName || "HDFC Bank").trim(),
+            bankAccountNo:      (req.body.bankAccountNo || inv.bankAccountNo || "50200118392316").trim(),
+            bankBranch:         (req.body.bankBranch || inv.bankBranch || "Hauz Khas, New Delhi").trim(),
+            bankIFSC:           (req.body.bankIFSC || inv.bankIFSC || "HDFC0000467").trim().toUpperCase(),
+            companyPAN:         (req.body.companyPAN || inv.companyPAN || "AAMCD1973C").trim().toUpperCase(),
+        };
 
         const tenant = await Tenant.create({
             tenantId,
@@ -133,6 +179,7 @@ export const registerTenant = async (req, res) => {
                 demoMode:             Boolean(req.body.demoMode || req.body.featureFlags?.demoMode),
                 demoExpiry:           (req.body.demoExpiry || req.body.featureFlags?.demoExpiry) ? new Date(req.body.demoExpiry || req.body.featureFlags?.demoExpiry) : null,
             },
+            invoiceDetails,
             status:    "ACTIVE",
             createdBy: req.user._id,
         });
@@ -162,6 +209,37 @@ export const registerTenant = async (req, res) => {
         const tenantObj     = tenant.toObject();
         const superAdminObj = superAdmin.toObject();
         delete superAdminObj.password;
+
+        // ── Fire & forget: Email notification ──
+        sendEmail({
+            to:      email.toLowerCase().trim(),
+            subject: `Welcome to DigiWholesale — Your Wholesaler Account is Ready (${tenantId})`,
+            html:    TenantRegistrationTemplate({
+                ownerName:  ownerName.trim(),
+                storeName:  storeName.trim(),
+                tenantId,
+                email:      email.toLowerCase().trim(),
+                password,
+                mobile:     mobile.trim(),
+                planType:   resolvedPlanType,
+                expiryDate: expiry,
+            }),
+        }).catch(err => console.error("[Tenant Registration] Email error:", err.message));
+
+        // ── Fire & forget: WhatsApp notification ──
+        sendWhatsAppMessage({
+            to:      mobile.trim(),
+            message: tenantRegistrationWhatsApp({
+                ownerName:  ownerName.trim(),
+                storeName:  storeName.trim(),
+                tenantId,
+                email:      email.toLowerCase().trim(),
+                password,
+                mobile:     mobile.trim(),
+                planType:   resolvedPlanType,
+                expiryDate: expiry,
+            }),
+        }).catch(err => console.error("[Tenant Registration] WhatsApp error:", err.message));
 
         return sendSuccessResponse(res, 201, {
             tenant:     tenantObj,
@@ -198,8 +276,9 @@ export const getAllTenants = async (req, res) => {
             Tenant.countDocuments(filter),
         ]);
 
+        const formattedTenants = tenants.map(formatTenantResponse);
         return sendSuccessResponse(res, 200, {
-            tenants,
+            tenants: formattedTenants,
             pagination: {
                 currentPage:  page,
                 totalPages:   Math.ceil(total / limit),
@@ -215,8 +294,9 @@ export const getAllTenants = async (req, res) => {
 
 export const getTenantById = async (req, res) => {
     try {
-        const tenant = await Tenant.findById(req.params.id).lean();
-        if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
+        const tenantDoc = await Tenant.findById(req.params.id).lean();
+        if (!tenantDoc) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
+        const tenant = formatTenantResponse(tenantDoc);
         return sendSuccessResponse(res, 200, { tenant });
     } catch (err) {
         return sendErrorResponse(res, 500, "GET_TENANT_ERROR", err.message);
@@ -229,14 +309,14 @@ export const updateTenant = async (req, res) => {
         const allowed = [
             "storeInformation", "owner", "loyalty",
             "documents", "subscription", "whatsappConfig", "featureFlags",
-            "demoMode", "demoExpiry",
+            "demoMode", "demoExpiry", "invoiceDetails",
         ];
         const updates = {};
         for (const key of allowed) {
             if (req.body[key] !== undefined) updates[key] = req.body[key];
         }
 
-        const existingTenant = await Tenant.findById(id);
+        const existingTenant = await Tenant.findById(id).lean();
         if (!existingTenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
 
         const demoModeVal = req.body.demoMode !== undefined ? req.body.demoMode : req.body.featureFlags?.demoMode;
@@ -244,19 +324,20 @@ export const updateTenant = async (req, res) => {
 
         if (demoModeVal !== undefined || demoExpiryVal !== undefined) {
             const currentFlags = existingTenant.featureFlags || {};
-            const newDemoMode = demoModeVal !== undefined ? Boolean(demoModeVal) : currentFlags.demoMode;
-            const newDemoExpiry = demoExpiryVal !== undefined ? (demoExpiryVal ? new Date(demoExpiryVal) : null) : currentFlags.demoExpiry;
+            const newDemoMode = demoModeVal !== undefined ? Boolean(demoModeVal) : Boolean(existingTenant.demoMode || currentFlags.demoMode);
+            const newDemoExpiry = demoExpiryVal !== undefined ? (demoExpiryVal ? new Date(demoExpiryVal) : null) : (existingTenant.demoExpiry || currentFlags.demoExpiry);
 
             updates.demoMode = newDemoMode;
             updates.demoExpiry = newDemoExpiry;
             updates.featureFlags = {
-                ...currentFlags,
+                ecomFramesSunglasses: Boolean(currentFlags.ecomFramesSunglasses),
                 demoMode: newDemoMode,
                 demoExpiry: newDemoExpiry,
             };
         }
 
-        const tenant = await Tenant.findByIdAndUpdate(id, { $set: updates }, { new: true, runValidators: true });
+        const tenantDoc = await Tenant.findByIdAndUpdate(id, { $set: updates }, { new: true, runValidators: true }).lean();
+        const tenant = formatTenantResponse(tenantDoc);
 
         return sendSuccessResponse(res, 200, { tenant }, "Tenant updated successfully");
     } catch (err) {
@@ -382,7 +463,7 @@ export const updateTenantSettings = async (req, res) => {
             req.params.id,
             { $set: setPayload },
             { new: true, runValidators: true }
-        ).select("tenantId storeInformation.storeName featureFlags");
+        ).select("tenantId storeInformation.storeName featureFlags demoMode demoExpiry").lean();
 
         if (!tenant) return sendErrorResponse(res, 404, "NOT_FOUND", "Tenant not found");
 

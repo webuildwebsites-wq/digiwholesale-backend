@@ -27,6 +27,7 @@ orderRouter.patch("/bulk-orders/:orderId/status",    checkPermission("UPDATE_ORD
 orderRouter.patch("/bulk-orders/:orderId/tracking",  checkPermission("UPDATE_ORDER"), updateOrderTracking);
 
 orderRouter.get("/get-all-orders", checkPageAccess("ALL_ORDERS"), listOrders);
+orderRouter.get("/all-orders", checkPageAccess("ALL_ORDERS"), listOrders);
 orderRouter.get("/draft-orders", checkPageAccess("DRAFTS"), getDraftOrders);
 orderRouter.get("/rx-orders", checkPageAccess("ALL_ORDERS"), getRxOrders);
 orderRouter.get("/suggestions", checkPageAccess("ALL_ORDERS"), suggestionsOrders);

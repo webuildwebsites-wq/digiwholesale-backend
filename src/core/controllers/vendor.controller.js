@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Vendor from "../../models/Vendor.model.js";
+import VendorLedger from "../../models/Accounting/VendorLedger.model.js";
 import { sendEmail } from "../config/Email/emailService.js";
 import VendorRegistrationTemplate from "../../Utils/Mail/VendorRegistrationTemplate.js";
 import { sendWhatsAppMessage, vendorRegistrationWhatsApp } from "../../Utils/whatsapp/whatsappService.js";
@@ -8,7 +9,7 @@ export const createVendor = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { name, firm, mobile, email, address, gstNumber, paymentTerms, notes } = req.body;
+    const { name, firm, mobile, email, address, gstNumber, paymentTerms, creditLimit, notes } = req.body;
 
     if (!name || !firm || !mobile || !email) {
       throw new Error("Vendor name, firm, email and mobile are required");
@@ -23,14 +24,42 @@ export const createVendor = async (req, res) => {
 
     if (existingVendor) throw new Error("Vendor with same firm name and mobile already exists");
 
+    const parsedCreditLimit = Number(creditLimit || 0);
+    const parsedPaymentTerms = parseInt(String(paymentTerms || 0).replace(/\D/g, ""), 10) || 0;
+
     const vendor = new Vendor({
       name: vendorName, firm: firmName, mobile, email, address, gstNumber, paymentTerms, notes,
+      creditLimit: parsedCreditLimit,
       tenantId: req.user.tenantId,
     });
 
     await vendor.save({ session });
     await session.commitTransaction();
     session.endSession();
+
+    // Initialize or sync VendorLedger for this vendor
+    try {
+      await VendorLedger.findOneAndUpdate(
+        { vendorId: vendor._id },
+        {
+          $setOnInsert: {
+            ledgerCode: `VEND-LED-${vendor._id.toString().slice(-6).toUpperCase()}`,
+            openingBalance: 0,
+            currentOutstanding: 0,
+            tenantId: req.user.tenantId,
+            createdBy: req.user?.id || req.user?._id,
+          },
+          $set: {
+            creditLimit: parsedCreditLimit,
+            paymentTerms: parsedPaymentTerms,
+            gstin: gstNumber || undefined,
+          },
+        },
+        { upsert: true, new: true }
+      );
+    } catch (lErr) {
+      console.error("VendorLedger sync on create error:", lErr.message);
+    }
 
     sendEmail({
       to:      email,
@@ -108,9 +137,36 @@ export const updateVendor = async (req, res) => {
     const vendor = await Vendor.findOne({ _id, tenantId: req.user.tenantId });
     if (!vendor) return res.status(404).json({ success: false, message: "Vendor not found" });
 
-    const fields = ["name", "firm", "mobile", "email", "address", "gstNumber", "paymentTerms", "notes"];
-    fields.forEach((field) => { if (req.body[field] !== undefined) vendor[field] = req.body[field]; });
+    const fields = ["name", "firm", "mobile", "email", "address", "gstNumber", "paymentTerms", "creditLimit", "notes"];
+    fields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        vendor[field] = field === "creditLimit" ? Number(req.body[field] || 0) : req.body[field];
+      }
+    });
     await vendor.save();
+
+    // Sync to VendorLedger
+    try {
+      const ledgerUpdate = {};
+      if (req.body.creditLimit !== undefined) {
+        ledgerUpdate.creditLimit = Number(req.body.creditLimit || 0);
+      }
+      if (req.body.paymentTerms !== undefined) {
+        ledgerUpdate.paymentTerms =
+          parseInt(String(req.body.paymentTerms || 0).replace(/\D/g, ""), 10) || 0;
+      }
+      if (req.body.gstNumber !== undefined) {
+        ledgerUpdate.gstin = req.body.gstNumber;
+      }
+      if (Object.keys(ledgerUpdate).length > 0) {
+        await VendorLedger.findOneAndUpdate(
+          { vendorId: vendor._id },
+          { $set: ledgerUpdate }
+        );
+      }
+    } catch (syncErr) {
+      console.error("VendorLedger sync on update error:", syncErr.message);
+    }
 
     res.status(200).json({ success: true, message: "Vendor updated successfully", vendor });
   } catch (error) {

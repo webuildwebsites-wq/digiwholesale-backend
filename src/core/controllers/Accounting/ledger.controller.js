@@ -5,13 +5,21 @@ import LedgerTransaction from "../../../models/Accounting/LedgerTransaction.mode
 import Payment from "../../../models/Accounting/Payment.model.js";
 import Customer from "../../../models/Auth/Customer.js";
 import Vendor from "../../../models/Vendor.model.js";
+import BulkOrder from "../../../models/order/BulkOrder.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
+import Employee from "../../../models/Auth/Employee.js";
+import Tenant from "../../../models/Tenant/Tenant.model.js";
+import BankAccount from "../../../models/Accounting/BankAccount.model.js";
+import { sendEmail } from "../../config/Email/emailService.js";
+import { sendWhatsAppMessage, wholesalerBankDetailsWhatsApp } from "../../../Utils/whatsapp/whatsappService.js";
 import {
   sendSuccessResponse,
   sendErrorResponse,
 } from "../../../Utils/response/responseHandler.js";
+import { bucket } from "../../config/bucket/gcs.js";
+import { autoExpireStaleCheques } from "../../services/chequeExpiryService.js";
 
-const parseCreditDays = (cd) => {
+export const parseCreditDays = (cd) => {
   if (!cd) return 0;
   if (typeof cd === "number") return cd;
   if (typeof cd === "string") {
@@ -26,9 +34,100 @@ const parseCreditDays = (cd) => {
   return 0;
 };
 
-/**
- * 1. Customer Ledger Statement (Khata View)
- */
+export const calculateBulkOrderTotals = (bulkOrder) => {
+  let taxableAmount = 0;
+  let gstAmount = 0;
+  let itemsCount = 0;
+
+  if (Array.isArray(bulkOrder.orders)) {
+    bulkOrder.orders.forEach((order) => {
+      if (Array.isArray(order.items)) {
+        order.items.forEach((item) => {
+          const price = Number(item.price || 0);
+          const qty = Number(item.qty || 0);
+          const gstPercent = Number(item.gst || 0);
+          const discount = Number(item.discountAmount || 0);
+          const base = price * qty - discount;
+          taxableAmount += base;
+          gstAmount += (base * gstPercent) / 100;
+          itemsCount += qty;
+        });
+      }
+    });
+  }
+
+  const shippingCharges = Number(bulkOrder.shippingCharges || 0);
+  const otherCharges = Number(bulkOrder.otherCharges || 0);
+  const grandTotal = Number((taxableAmount + gstAmount + shippingCharges + otherCharges).toFixed(2));
+  const paidAmount = Number((bulkOrder.advanceAmount || 0).toFixed(2));
+  const balanceDue = Math.max(0, Number((grandTotal - paidAmount).toFixed(2)));
+
+  let paymentStatus = "UNPAID";
+  if (paidAmount >= grandTotal && grandTotal > 0) {
+    paymentStatus = "PAID";
+  } else if (paidAmount > 0) {
+    paymentStatus = "PARTIAL";
+  }
+
+  const partPaymentPercentage = grandTotal > 0 ? Math.min(100, Math.round((paidAmount / grandTotal) * 100)) : 0;
+
+  return {
+    itemsCount,
+    taxableAmount: Number(taxableAmount.toFixed(2)),
+    gstAmount: Number(gstAmount.toFixed(2)),
+    shippingCharges,
+    otherCharges,
+    grandTotal,
+    paidAmount,
+    balanceDue,
+    paymentStatus,
+    partPaymentPercentage,
+  };
+};
+
+
+export const getActualTransactionCredit = (txn) => {
+  let cred = Number(txn.credit || 0);
+  if (txn.voucherType === "Sales Invoice" && txn.narration) {
+    const match = txn.narration.match(/Absorbed from Advance:\s*₹?([0-9,.]+)/i);
+    if (match) {
+      const absorbed = parseFloat(match[1].replace(/,/g, ""));
+      if (absorbed > 0 && cred >= absorbed) {
+        cred = Math.max(0, cred - absorbed);
+      }
+    }
+  }
+  return cred;
+};
+
+
+export const calculateCreditStatus = (creditLimit, creditUsed) => {
+  const limit = Number(creditLimit || 0);
+  const used = Number(creditUsed || 0);
+  const percentage = limit > 0 ? Number(((used / limit) * 100).toFixed(1)) : 0;
+  const availableCredit = Math.max(0, Number((limit - used).toFixed(2)));
+  const exceededAmount = used > limit ? Number((used - limit).toFixed(2)) : 0;
+
+  let creditStatus = "HEALTHY";
+  if (limit > 0 && used >= limit) {
+    creditStatus = "EXCEEDED";
+  } else if (limit > 0 && used >= 0.8 * limit) {
+    creditStatus = "WARNING_20_PERCENT";
+  }
+
+  return {
+    creditLimit: limit,
+    creditUsed: used,
+    availableCredit,
+    creditPercentage: percentage,
+    creditStatus,
+    exceededAmount,
+    is20PercentAlert: creditStatus === "WARNING_20_PERCENT",
+    isExceededAlert: creditStatus === "EXCEEDED",
+  };
+};
+
+
 export const getCustomerLedgerStatement = async (req, res) => {
   try {
     const { customerId } = req.params;
@@ -117,7 +216,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
     const activeCreditLimit = inheritedCreditLimit;
     const activeCreditUsed = inheritedCreditUsed;
     const activeAdvance = inheritedAdvance;
-    const availableCredit = Math.max(0, activeCreditLimit - activeCreditUsed);
+    const creditAlerts = calculateCreditStatus(activeCreditLimit, activeCreditUsed);
 
     const ledgerObj = ledger.toObject ? ledger.toObject() : ledger;
 
@@ -140,7 +239,7 @@ export const getCustomerLedgerStatement = async (req, res) => {
 
     const isPaginationRequested = Boolean(page && limit);
     let transactionsQuery = LedgerTransaction.find(query)
-      .sort({ transactionDate: -1, createdAt: -1 })
+      .sort({ transactionDate: 1, createdAt: 1 })
       .populate("createdBy", "name username");
 
     if (isPaginationRequested) {
@@ -150,17 +249,422 @@ export const getCustomerLedgerStatement = async (req, res) => {
         .limit(parseInt(limit, 10));
     }
 
-    const transactions = await transactionsQuery.lean();
-    const totalTransactions = await LedgerTransaction.countDocuments(query);
+    let rawTransactions = await transactionsQuery.lean();
+    let allTxnsForSummary = [];
+
+    const activeTenantId = customer.tenantId || req.tenantId || req.user?.tenantId;
+    let tenantInfo = null;
+    if (activeTenantId) {
+      tenantInfo = await Tenant.findOne({ tenantId: activeTenantId }).lean();
+    }
+    const rawWholesalerGstin =
+      tenantInfo?.storeInformation?.gstin ||
+      tenantInfo?.gstNumber ||
+      tenantInfo?.gstin ||
+      "";
+    const cleanWholesalerGstin = (rawWholesalerGstin && !String(rawWholesalerGstin).startsWith("http") && !String(rawWholesalerGstin).includes("/"))
+      ? String(rawWholesalerGstin).trim()
+      : "Unregistered";
+
+    const wholesalerProfile = {
+      tenantId: tenantInfo?.tenantId || activeTenantId || "DEFAULT",
+      companyName: tenantInfo?.storeInformation?.storeName || tenantInfo?.companyName || tenantInfo?.name || "Digi-Optics Wholesaler",
+      email: tenantInfo?.storeInformation?.email || tenantInfo?.email || "",
+      phone: tenantInfo?.storeInformation?.phone || tenantInfo?.owner?.mobile || tenantInfo?.phone || tenantInfo?.mobile || "",
+      gstin: cleanWholesalerGstin,
+      address: tenantInfo?.storeInformation?.address || tenantInfo?.address || "",
+      logo: tenantInfo?.storeInformation?.storeLogo || tenantInfo?.logo || "",
+      bankDetails: tenantInfo?.bankDetails || null,
+    };
+
+    const bulkOrders = await BulkOrder.find({ "customer.customerId": customer._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const baseQuery = {
+      $or: [
+        { ledgerId: ledgerObj._id },
+        { partyId: customerId, entityType: "Customer" },
+      ],
+    };
+    const allExistingTxns = await LedgerTransaction.find(baseQuery).select('voucherId referenceNumber').lean();
+    const existingTxnVoucherKeys = new Set(
+      allExistingTxns.flatMap((t) => [
+        t.voucherId ? String(t.voucherId) : '',
+        t.referenceNumber || '',
+      ]).filter(Boolean)
+    );
+
+    for (const bo of bulkOrders) {
+      const firstOrder = bo.orders?.[0] || {};
+      if (firstOrder.status === 'Draft' || bo.isDraft) continue;
+
+      const orderRef = firstOrder.orderNumber || bo._id.toString();
+      const hasTxn = existingTxnVoucherKeys.has(String(bo._id)) || existingTxnVoucherKeys.has(orderRef);
+
+      if (!hasTxn) {
+        const totals = calculateBulkOrderTotals(bo);
+        const advancePaid = Number(bo.advanceAmount || 0);
+        try {
+          const [newTxn] = await LedgerTransaction.create([{
+            entityType: 'Customer',
+            ledgerId: ledgerObj._id,
+            partyId: customer._id,
+            transactionDate: bo.createdAt || new Date(),
+            voucherType: 'Sales Invoice',
+            voucherId: bo._id,
+            referenceNumber: orderRef,
+            debit: totals.grandTotal,
+            credit: advancePaid,
+            runningBalance: totals.balanceDue,
+            narration: `Sales Invoice for Order #${orderRef}. Total: ₹${totals.grandTotal.toLocaleString()}, Advance Paid: ₹${advancePaid.toLocaleString()}`,
+            branchId: ledgerObj.branchId || null,
+            tenantId: activeTenantId,
+            createdBy: null,
+          }]);
+          if (newTxn) {
+            existingTxnVoucherKeys.add(String(bo._id));
+            existingTxnVoucherKeys.add(orderRef);
+
+            // Only push to rawTransactions if within current date filter range
+            let inRange = true;
+            const tDate = new Date(newTxn.transactionDate);
+            if (startDate && tDate < new Date(startDate)) inRange = false;
+            if (endDate) {
+              const endD = new Date(endDate);
+              endD.setHours(23, 59, 59, 999);
+              if (tDate > endD) inRange = false;
+            }
+            if (inRange) {
+              rawTransactions.push(newTxn.toObject ? newTxn.toObject() : newTxn);
+            }
+          }
+        } catch (syncErr) {
+          console.warn("[Ledger] Auto-sync missing transaction error for order:", bo._id, syncErr.message);
+        }
+      }
+    }
+
+    const seenVoucherKeys = new Set();
+    rawTransactions = rawTransactions.filter(t => {
+      const vKey = t.voucherId ? String(t.voucherId) : null;
+      const rKey = t.referenceNumber ? String(t.referenceNumber) : null;
+      if (vKey && seenVoucherKeys.has(vKey)) return false;
+      if (rKey && seenVoucherKeys.has(rKey)) return false;
+      if (vKey) seenVoucherKeys.add(vKey);
+      if (rKey) seenVoucherKeys.add(rKey);
+      if (!vKey && !rKey) {
+        const idKey = String(t._id);
+        if (seenVoucherKeys.has(idKey)) return false;
+        seenVoucherKeys.add(idKey);
+      }
+      return true;
+    });
 
     let totalDebit = 0;
     let totalCredit = 0;
-
-    const allTxnsForSummary = await LedgerTransaction.find(query).lean();
+    allTxnsForSummary = await LedgerTransaction.find(query).lean();
     allTxnsForSummary.forEach((txn) => {
       totalDebit += Number(txn.debit || 0);
-      totalCredit += Number(txn.credit || 0);
+      totalCredit += getActualTransactionCredit(txn);
     });
+    const totalTransactions = allTxnsForSummary.length;
+
+    // 2. Fetch all payments for this customer to map installments / part payments
+    const customerPayments = await Payment.find({ partyId: customer._id })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // 3. Resolve salesperson / employee names for transactions
+    const creatorIds = [
+      ...rawTransactions.map((t) => t.createdBy).filter(Boolean),
+    ];
+    const employees = await Employee.find({ _id: { $in: creatorIds } }).lean();
+    const employeeMap = new Map();
+    employees.forEach((emp) => {
+      employeeMap.set(emp._id.toString(), emp.employeeName || emp.username || "Staff");
+    });
+
+    const ordersMap = new Map();
+    const customerOrdersList = bulkOrders.map((bo) => {
+      const totals = calculateBulkOrderTotals(bo);
+      const firstOrder = bo.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || bo._id.toString().slice(-6).toUpperCase();
+
+      // Find all payments allocated to this specific bulk order
+      const matchedPayments = customerPayments.filter((p) =>
+        (p.allocations || []).some(
+          (a) =>
+            String(a.invoiceId) === String(bo._id) ||
+            a.invoiceNumber === orderNumber,
+        ),
+      );
+
+      let allocatedSum = 0;
+      let pdcWaitingSum = 0;
+      const orderPayments = [];
+      matchedPayments.forEach((p) => {
+        const alloc = (p.allocations || []).find(
+          (a) =>
+            String(a.invoiceId) === String(bo._id) ||
+            a.invoiceNumber === orderNumber,
+        );
+        const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
+
+        const isCheque = p.paymentMode === "CHEQUE";
+        const isPDC = Boolean(p.paymentDetails?.isPostDated);
+        const isCredited = Boolean(p.paymentDetails?.isCredited);
+        const chequeStatus = p.paymentDetails?.chequeStatus || p.status;
+        const chqDate = p.paymentDetails?.chequeDate ? new Date(p.paymentDetails.chequeDate) : null;
+        let expDate = p.paymentDetails?.chequeExpiryDate ? new Date(p.paymentDetails.chequeExpiryDate) : null;
+        if (!expDate && chqDate) {
+          expDate = new Date(chqDate);
+          expDate.setMonth(expDate.getMonth() + 3);
+        }
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const isExpired = p.status === "EXPIRED" || chequeStatus === "EXPIRED" || Boolean(expDate && !isCredited && new Date() > expDate);
+        const isBounced = chequeStatus === "BOUNCED" || p.status === "BOUNCED";
+        const isMatured = !isPDC || (chqDate && chqDate <= todayEnd);
+        const daysUntilExpiry = expDate ? Math.max(0, Math.ceil((expDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+        const isExpiringSoon = !isExpired && daysUntilExpiry <= 15;
+        const isPDCWaiting = isCheque && !isExpired && !isBounced && (isPDC ? !isCredited : (chequeStatus === "PENDING" || chequeStatus === "DEPOSITED" || p.status === "RECEIVED"));
+
+        if (!isPDCWaiting && !isBounced && !isExpired) {
+          allocatedSum += amt;
+        } else if (isPDCWaiting) {
+          pdcWaitingSum += amt;
+        }
+
+        orderPayments.push({
+          paymentId: p._id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate || p.createdAt,
+          paymentMode: p.paymentMode || "BANK_TRANSFER",
+          referenceNumber: p.paymentDetails?.referenceNumber || p.paymentDetails?.utrNumber || p.paymentNumber,
+          utrNumber: p.paymentDetails?.utrNumber || "",
+          bankName: p.paymentDetails?.bankName || "",
+          chequeNumber: p.paymentDetails?.chequeNumber || "",
+          chequeDate: p.paymentDetails?.chequeDate || null,
+          chequeExpiryDate: expDate,
+          clearanceDate: p.paymentDetails?.clearanceDate || null,
+          bounceDate: p.paymentDetails?.bounceDate || null,
+          bounceReason: p.paymentDetails?.bounceReason || "",
+          retryCount: p.paymentDetails?.retryCount || 0,
+          lastRetryDate: p.paymentDetails?.lastRetryDate || null,
+          bankAccountName: p.paymentDetails?.bankAccountName || "",
+          bankAccountNumber: p.paymentDetails?.bankAccountNumber || "",
+          amount: amt,
+          remarks: p.paymentDetails?.remarks || (isExpired ? "Cheque Expired (Stale >3 Months)" : isBounced ? `Cheque Bounced (${p.paymentDetails?.bounceReason || 'Dishonoured'})` : isPDCWaiting ? "Post-Dated Cheque (Waiting Clearance)" : "Part Payment"),
+          status: isExpired ? "EXPIRED" : isBounced ? "BOUNCED" : isPDCWaiting ? "IN_CLEARING" : (p.status || "CLEARED"),
+          chequeStatus: isExpired ? "EXPIRED" : p.paymentDetails?.chequeStatus || (isBounced ? "BOUNCED" : isPDCWaiting ? "PENDING" : "CLEARED"),
+          isPostDated: Boolean(p.paymentDetails?.isPostDated),
+          isCredited: Boolean(p.paymentDetails?.isCredited),
+          isPDCWaiting,
+          isExpired,
+          canRetry: isBounced && !isExpired,
+          isMatured,
+          isExpiringSoon,
+          daysUntilExpiry,
+        });
+      });
+
+      // Include initial booking advance payment if advance was recorded
+      const initialAdvance = Math.max(
+        0,
+        Number((Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)),
+      );
+      if (initialAdvance > 0) {
+        orderPayments.unshift({
+          paymentId: `ADV-${orderNumber}`,
+          paymentNumber: `ADV-${orderNumber}`,
+          paymentDate: bo.createdAt,
+          paymentMode: "ADVANCE_ADJUSTMENT",
+          referenceNumber: `ADV-${orderNumber}`,
+          amount: initialAdvance,
+          remarks: "Booking Advance Payment",
+          status: "CLEARED",
+        });
+      }
+
+      // Check if matching LedgerTransaction recorded any advance absorbed from previous customer balance
+      const matchingTxn = rawTransactions.find(
+        (t) =>
+          (t.voucherId && String(t.voucherId) === String(bo._id)) ||
+          (t.referenceNumber && t.referenceNumber === orderNumber),
+      );
+      const ledgerCredit = matchingTxn ? Number(matchingTxn.credit || 0) : 0;
+      const absorbedAdvance = Math.max(
+        0,
+        Number((ledgerCredit - Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)),
+      );
+      if (absorbedAdvance > 0) {
+        orderPayments.push({
+          paymentId: `ADV-ADJ-${orderNumber}`,
+          paymentNumber: `ADV-ADJ-${orderNumber}`,
+          paymentDate: bo.createdAt,
+          paymentMode: "ADVANCE_ADJUSTMENT",
+          referenceNumber: `ADV-ADJ-${orderNumber}`,
+          amount: absorbedAdvance,
+          remarks: "Adjusted from Customer Advance Balance",
+          status: "CLEARED",
+        });
+      }
+
+      const totalOrderPaid = Math.min(totals.grandTotal, Number((initialAdvance + allocatedSum + absorbedAdvance).toFixed(2)));
+      const effectiveBalanceDue = Math.max(0, Number((totals.grandTotal - totalOrderPaid).toFixed(2)));
+      const effectivePaymentStatus =
+        effectiveBalanceDue <= 0 && totals.grandTotal > 0
+          ? "PAID"
+          : totalOrderPaid > 0
+            ? "PARTIAL"
+            : "UNPAID";
+      const effectivePct =
+        totals.grandTotal > 0
+          ? Math.min(100, Math.round((totalOrderPaid / totals.grandTotal) * 100))
+          : 0;
+
+      const orderEntry = {
+        _id: bo._id,
+        orderId: bo._id,
+        orderNumber,
+        createdAt: bo.createdAt,
+        orderDate: bo.createdAt,
+        orderStatus: firstOrder.status || "Submitted",
+        statusHistory: firstOrder.statusHistory || [],
+        trackingId: firstOrder.trackingId || null,
+        itemsCount: totals.itemsCount,
+        taxableAmount: totals.taxableAmount,
+        gstAmount: totals.gstAmount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
+        grandTotal: totals.grandTotal,
+        totalOrderPrice: totals.grandTotal,
+        paidAmount: totalOrderPaid,
+        advanceAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        pdcWaitingAmount: Number(pdcWaitingSum.toFixed(2)),
+        paymentStatus: effectivePaymentStatus,
+        partPaymentPercentage: effectivePct,
+        isGSTRegistered: Boolean(customer.isGSTRegistered),
+        gstNumber: customer.gstNumber || customer.gstin || customer.GSTNo || "",
+        items: firstOrder.items || [],
+        customerName: customer.shopName || customer.ownerName || "Customer",
+        vendorName: wholesalerProfile.companyName,
+        orderPayments,
+        challanUrl: bo.challanUrl || null,
+        invoiceUrl: bo.invoiceUrl || null,
+        hasChallan: Boolean(bo.challanUrl),
+        hasInvoice: Boolean(bo.invoiceUrl),
+        salesPersonName: firstOrder.statusHistory?.[0]?.changedByName || "Sales Staff",
+      };
+      ordersMap.set(bo._id.toString(), orderEntry);
+      ordersMap.set(orderNumber, orderEntry);
+      return orderEntry;
+    });
+
+    const allocatedPaymentMap = new Map();
+    customerPayments.forEach((p) => {
+      if (Array.isArray(p.allocations) && p.allocations.length > 0) {
+        p.allocations.forEach((alloc) => {
+          if (alloc.invoiceId || alloc.invoiceNumber) {
+            const info = {
+              orderId: alloc.invoiceId,
+              orderNumber: alloc.invoiceNumber,
+              allocatedAmount: alloc.allocatedAmount,
+            };
+            if (p.paymentNumber) allocatedPaymentMap.set(p.paymentNumber, info);
+            if (p._id) allocatedPaymentMap.set(p._id.toString(), info);
+            if (p.paymentDetails?.referenceNumber) {
+              allocatedPaymentMap.set(p.paymentDetails.referenceNumber, info);
+            }
+          }
+        });
+      }
+    });
+
+    // 4. Enrich transactions with order details, part payments, and salesperson info
+    const transactions = rawTransactions.map((t) => {
+      let matchedOrder = null;
+      if (t.voucherId && ordersMap.has(t.voucherId.toString())) {
+        matchedOrder = ordersMap.get(t.voucherId.toString());
+      } else if (t.referenceNumber && ordersMap.has(t.referenceNumber)) {
+        matchedOrder = ordersMap.get(t.referenceNumber);
+      }
+
+      const paymentAllocInfo =
+        allocatedPaymentMap.get(t.referenceNumber) ||
+        (t.voucherId && allocatedPaymentMap.get(t.voucherId.toString())) ||
+        null;
+      const isOrderAllocatedPayment = Boolean(paymentAllocInfo);
+
+      const createdByName =
+        employeeMap.get(t.createdBy?.toString()) ||
+        matchedOrder?.salesPersonName ||
+        "Sales Staff";
+
+      return {
+        ...t,
+        isOrderAllocatedPayment,
+        allocatedOrderNumber: paymentAllocInfo?.orderNumber || null,
+        allocatedOrderId: paymentAllocInfo?.orderId || null,
+        orderId: matchedOrder ? (matchedOrder.orderId || matchedOrder._id) : (paymentAllocInfo?.orderId || t.voucherId || null),
+        orderNumber: matchedOrder ? matchedOrder.orderNumber : (paymentAllocInfo?.orderNumber || t.referenceNumber || null),
+        customerName: customer.shopName || customer.ownerName || "Customer",
+        vendorName: wholesalerProfile.companyName,
+        items: matchedOrder ? (matchedOrder.items || []) : [],
+        challanUrl: matchedOrder ? matchedOrder.challanUrl : null,
+        invoiceUrl: matchedOrder ? matchedOrder.invoiceUrl : null,
+        hasChallan: matchedOrder ? Boolean(matchedOrder.challanUrl) : false,
+        hasInvoice: matchedOrder ? Boolean(matchedOrder.invoiceUrl) : false,
+        createdByName,
+        orderDate: matchedOrder ? matchedOrder.orderDate : t.transactionDate,
+        orderPayments: matchedOrder ? matchedOrder.orderPayments : [],
+        orderStatus: matchedOrder ? matchedOrder.orderStatus : null,
+        orderGrandTotal: matchedOrder ? matchedOrder.grandTotal : null,
+        orderPaidAmount: matchedOrder ? matchedOrder.paidAmount : null,
+        orderBalanceDue: matchedOrder ? matchedOrder.balanceDue : null,
+        pdcWaitingAmount: matchedOrder ? matchedOrder.pdcWaitingAmount : 0,
+        partPaymentStatus: matchedOrder ? matchedOrder.paymentStatus : null,
+        partPaymentPercentage: matchedOrder ? matchedOrder.partPaymentPercentage : null,
+        isGSTInvoice: Boolean(customer.isGSTRegistered),
+        taxableAmount: matchedOrder ? matchedOrder.taxableAmount : null,
+        gstAmount: matchedOrder ? matchedOrder.gstAmount : null,
+        shippingCharges: matchedOrder ? (matchedOrder.shippingCharges || 0) : 0,
+        otherCharges: matchedOrder ? (matchedOrder.otherCharges || 0) : 0,
+      };
+    });
+
+    // 3. Build monthly breakdown aggregations for Monthly View
+    const monthlyMap = new Map();
+    (allTxnsForSummary || []).forEach((t) => {
+      const d = new Date(t.transactionDate || t.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const monthLabel = d.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, {
+          month: key,
+          monthLabel,
+          totalDebit: 0,
+          totalCredit: 0,
+          transactionsCount: 0,
+        });
+      }
+      const entry = monthlyMap.get(key);
+      entry.totalDebit += Number(t.debit || 0);
+      entry.totalCredit += getActualTransactionCredit(t);
+      entry.transactionsCount += 1;
+    });
+
+    const monthlyBreakdown = Array.from(monthlyMap.values())
+      .map((m) => ({
+        ...m,
+        netMovement: m.totalDebit - m.totalCredit,
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month));
 
     const rawAddr = customer.address || customer.billToAddress;
     const formattedAddr =
@@ -190,15 +694,25 @@ export const getCustomerLedgerStatement = async (req, res) => {
           customer.mobileNo1 || customer.mobile || customer.mobileNo2 || "—",
         email: customer.businessEmail || customer.emailId,
         address: formattedAddr,
-        gstin: customer.gstNumber || customer.gstin || customer.GSTNo,
+        gstin: customer.gstNumber || customer.gstin || customer.GSTNo || "Unregistered",
+        isGSTRegistered: Boolean(customer.isGSTRegistered),
+        gstType: customer.gstType?.name || customer.gstType || (customer.isGSTRegistered ? "Regular" : "Non-GST"),
+        panCard: customer.panCard || "",
+        aadharCard: customer.aadharCard || "",
       },
+      wholesaler: wholesalerProfile,
       ledgerMaster: {
         ledgerCode: ledgerObj.ledgerCode,
         creditLimit: activeCreditLimit,
         creditDays: ledgerObj.creditDays || inheritedCreditDays,
         creditUsed: activeCreditUsed,
         advanceAmount: activeAdvance,
-        availableCredit,
+        availableCredit: creditAlerts.availableCredit,
+        creditPercentage: creditAlerts.creditPercentage,
+        creditStatus: creditAlerts.creditStatus,
+        exceededAmount: creditAlerts.exceededAmount,
+        is20PercentAlert: creditAlerts.is20PercentAlert,
+        isExceededAlert: creditAlerts.isExceededAlert,
         interestRate: ledgerObj.interestRate || 0,
         openingBalance: ledgerObj.openingBalance || 0,
         openingBalanceType: ledgerObj.openingBalanceType || "Debit",
@@ -226,6 +740,8 @@ export const getCustomerLedgerStatement = async (req, res) => {
       {
         summary: statementSummary,
         transactions,
+        orders: customerOrdersList,
+        monthlyBreakdown,
         pagination: isPaginationRequested
           ? {
               total: totalTransactions,
@@ -243,9 +759,49 @@ export const getCustomerLedgerStatement = async (req, res) => {
   }
 };
 
-/**
- * 2. Vendor Ledger Statement
- */
+
+// ─── Helper: calculate vendor purchase order totals ────────────────────────
+export const calculateVendorPurchaseTotals = (vp) => {
+  let taxableAmount = 0;
+  let gstAmount = 0;
+  let itemsCount = 0;
+
+  if (Array.isArray(vp.orders)) {
+    vp.orders.forEach((order) => {
+      if (Array.isArray(order.items)) {
+        order.items.forEach((item) => {
+          const price = Number(item.price || item.buyingPrice || 0);
+          const qty = Number(item.qty || 0);
+          const gstPercent = Number(item.gst || 0);
+          const discount = Number(item.discountAmount || 0);
+          const base = price * qty - discount;
+          taxableAmount += base;
+          gstAmount += (base * gstPercent) / 100;
+          itemsCount += qty;
+        });
+      }
+    });
+  }
+
+  const shippingCharges = Number(vp.shippingCharges || 0);
+  const otherCharges = Number(vp.otherCharges || 0);
+  const grandTotal = Number((taxableAmount + gstAmount + shippingCharges + otherCharges).toFixed(2));
+
+  // Check if there's a stored grandTotal from the purchase order itself
+  const firstOrder = vp.orders?.[0] || {};
+  const storedTotal = Number(firstOrder.totalOrderPrice || 0);
+  const effectiveTotal = storedTotal > 0 ? storedTotal : grandTotal;
+
+  return {
+    itemsCount,
+    taxableAmount: Number(taxableAmount.toFixed(2)),
+    gstAmount: Number(gstAmount.toFixed(2)),
+    shippingCharges,
+    otherCharges,
+    grandTotal: effectiveTotal,
+  };
+};
+
 export const getVendorLedgerStatement = async (req, res) => {
   try {
     const { vendorId } = req.params;
@@ -299,6 +855,7 @@ export const getVendorLedgerStatement = async (req, res) => {
       if (needsSave) await ledger.save();
     }
 
+    // 1. Compute running outstanding from ALL transactions (no date filter)
     const allTxnsBalance = await LedgerTransaction.find({
       $or: [
         { ledgerId: ledger._id },
@@ -314,7 +871,6 @@ export const getVendorLedgerStatement = async (req, res) => {
       computedOutstanding -= Number(t.debit || 0);
     }
 
-    // Sync to DB if different
     if (ledger.currentOutstanding !== computedOutstanding) {
       await VendorLedger.findByIdAndUpdate(ledger._id, {
         currentOutstanding: computedOutstanding,
@@ -325,46 +881,296 @@ export const getVendorLedgerStatement = async (req, res) => {
     const ledgerObj = ledger.toObject ? ledger.toObject() : ledger;
     ledgerObj.currentOutstanding = computedOutstanding;
 
-    const query = {
+    // 2. Build date-filtered query
+    const baseQuery = {
       $or: [
         { ledgerId: ledgerObj._id },
         { partyId: vendorId, entityType: "Vendor" },
       ],
     };
-
+    const filteredQuery = { ...baseQuery };
     if (startDate || endDate) {
-      query.transactionDate = {};
-      if (startDate) query.transactionDate.$gte = new Date(startDate);
+      filteredQuery.transactionDate = {};
+      if (startDate) filteredQuery.transactionDate.$gte = new Date(startDate);
       if (endDate) {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
-        query.transactionDate.$lte = end;
+        filteredQuery.transactionDate.$lte = end;
       }
     }
 
+    // 3. Fetch all vendor purchases for this vendor
+    const vendorPurchases = await VendorPurchase.find({ "vendor.vendorId": new mongoose.Types.ObjectId(vendorId) })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // 4. Auto-sync missing VendorPurchase records into LedgerTransaction
+    const allExistingTxns = await LedgerTransaction.find(baseQuery).select('voucherId referenceNumber').lean();
+    const existingTxnKeys = new Set(
+      allExistingTxns.flatMap((t) => [
+        t.voucherId ? String(t.voucherId) : '',
+        t.referenceNumber || '',
+      ]).filter(Boolean)
+    );
+
+    for (const vp of vendorPurchases) {
+      const firstOrder = vp.orders?.[0] || {};
+      if (firstOrder.status === 'Draft') continue;
+      const orderRef = firstOrder.orderNumber || vp._id.toString();
+      const hasTxn = existingTxnKeys.has(String(vp._id)) || existingTxnKeys.has(orderRef);
+
+      if (!hasTxn) {
+        const totals = calculateVendorPurchaseTotals(vp);
+        try {
+          const [newTxn] = await LedgerTransaction.create([{
+            entityType: 'Vendor',
+            ledgerId: ledgerObj._id,
+            partyId: new mongoose.Types.ObjectId(vendorId),
+            transactionDate: vp.createdAt || new Date(),
+            voucherType: 'Purchase Invoice',
+            voucherId: vp._id,
+            referenceNumber: orderRef,
+            debit: 0,
+            credit: totals.grandTotal,
+            runningBalance: totals.grandTotal,
+            narration: `Purchase Order #${orderRef}. Total: ₹${totals.grandTotal.toLocaleString()}. Vendor: ${vendor.name || vendor.firm}.`,
+            branchId: null,
+            tenantId: req.user?.tenantId || vendor.tenantId || null,
+            createdBy: req.user?.id || req.user?._id || null,
+          }]);
+          if (newTxn) {
+            existingTxnKeys.add(String(vp._id));
+            existingTxnKeys.add(orderRef);
+          }
+        } catch (syncErr) {
+          console.warn('[VendorLedger] Auto-sync missing purchase error:', vp._id, syncErr.message);
+        }
+      }
+    }
+
+    // 5. Fetch date-filtered transactions
     const isPaginationRequested = Boolean(page && limit);
-    let transactionsQuery = LedgerTransaction.find(query)
-      .sort({ transactionDate: -1, createdAt: -1 })
-      .populate("createdBy", "name username");
+    let transactionsQuery = LedgerTransaction.find(filteredQuery)
+      .sort({ transactionDate: 1, createdAt: 1 })
+      .populate('createdBy', 'name username employeeName');
 
     if (isPaginationRequested) {
       const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-      transactionsQuery = transactionsQuery
-        .skip(skip)
-        .limit(parseInt(limit, 10));
+      transactionsQuery = transactionsQuery.skip(skip).limit(parseInt(limit, 10));
     }
 
-    const transactions = await transactionsQuery.lean();
-    const totalTransactions = await LedgerTransaction.countDocuments(query);
+    let rawTransactions = await transactionsQuery.lean();
 
+    // 6. Deduplicate
+    const seenKeys = new Set();
+    rawTransactions = rawTransactions.filter(t => {
+      const vKey = t.voucherId ? String(t.voucherId) : null;
+      const rKey = t.referenceNumber ? String(t.referenceNumber) : null;
+      if (vKey && seenKeys.has(vKey)) return false;
+      if (rKey && seenKeys.has(rKey)) return false;
+      if (vKey) seenKeys.add(vKey);
+      if (rKey) seenKeys.add(rKey);
+      if (!vKey && !rKey) {
+        const idKey = String(t._id);
+        if (seenKeys.has(idKey)) return false;
+        seenKeys.add(idKey);
+      }
+      return true;
+    });
+
+    // 7. Fetch ALL vendor payments (VENDOR_OUTFLOW) for payment installment tracking
+    const vendorPayments = await Payment.find({ partyId: new mongoose.Types.ObjectId(vendorId), type: 'VENDOR_OUTFLOW' })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // 8. Resolve employee names
+    const creatorIds = rawTransactions.map(t => t.createdBy).filter(Boolean);
+    const employees = await Employee.find({ _id: { $in: creatorIds } }).lean();
+    const employeeMap = new Map();
+    employees.forEach(emp => {
+      employeeMap.set(emp._id.toString(), emp.employeeName || emp.name || emp.username || 'Staff');
+    });
+
+    // 9. Build ordersMap from vendorPurchases
+    const ordersMap = new Map();
+    const vendorOrdersList = vendorPurchases.map((vp) => {
+      const totals = calculateVendorPurchaseTotals(vp);
+      const firstOrder = vp.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || vp._id.toString().slice(-6).toUpperCase();
+
+      // Find payments allocated to this purchase (by voucherId or orderNumber)
+      const matchedPayments = vendorPayments.filter((p) =>
+        (p.allocations || []).some(
+          (a) =>
+            String(a.invoiceId) === String(vp._id) ||
+            a.invoiceNumber === orderNumber,
+        )
+      );
+
+      let allocatedSum = 0;
+      const orderPayments = [];
+      matchedPayments.forEach((p) => {
+        const alloc = (p.allocations || []).find(
+          (a) =>
+            String(a.invoiceId) === String(vp._id) ||
+            a.invoiceNumber === orderNumber,
+        );
+        const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
+        allocatedSum += amt;
+        orderPayments.push({
+          paymentId: p._id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate || p.createdAt,
+          paymentMode: p.paymentMode || 'BANK_TRANSFER',
+          referenceNumber: p.paymentDetails?.utrNumber || p.paymentDetails?.referenceNumber || p.paymentNumber,
+          utrNumber: p.paymentDetails?.utrNumber || '',
+          bankName: p.paymentDetails?.bankName || '',
+          chequeNumber: p.paymentDetails?.chequeNumber || '',
+          amount: amt,
+          remarks: p.paymentDetails?.remarks || 'Vendor Payout',
+          status: p.status || 'CLEARED',
+        });
+      });
+
+      // Also check matching LedgerTransaction debit entries that reference this purchase
+      const matchingPaymentTxns = allTxnsBalance.filter(t =>
+        t.voucherType === 'Payment Voucher' && t.debit > 0
+      );
+      // These are standalone payout ledger entries — if no allocation, we can't match them to specific POs
+      // For now use only explicitly allocated payments
+
+      const totalOrderPaid = Math.min(totals.grandTotal, Number(allocatedSum.toFixed(2)));
+      const effectiveBalanceDue = Math.max(0, Number((totals.grandTotal - totalOrderPaid).toFixed(2)));
+      const effectivePaymentStatus =
+        effectiveBalanceDue <= 0 && totals.grandTotal > 0
+          ? 'PAID'
+          : totalOrderPaid > 0
+            ? 'PARTIAL'
+            : 'UNPAID';
+      const effectivePct =
+        totals.grandTotal > 0
+          ? Math.min(100, Math.round((totalOrderPaid / totals.grandTotal) * 100))
+          : 0;
+
+      const orderEntry = {
+        _id: vp._id,
+        orderId: vp._id,
+        purchaseId: vp._id,
+        orderNumber,
+        createdAt: vp.createdAt,
+        orderDate: vp.createdAt,
+        orderStatus: firstOrder.status || 'Submitted',
+        itemsCount: totals.itemsCount,
+        taxableAmount: totals.taxableAmount,
+        gstAmount: totals.gstAmount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
+        grandTotal: totals.grandTotal,
+        totalOrderPrice: totals.grandTotal,
+        paidAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        paymentStatus: effectivePaymentStatus,
+        partPaymentPercentage: effectivePct,
+        items: firstOrder.items || [],
+        vendorName: vendor.firm || vendor.name || 'Vendor',
+        orderPayments,
+        isReplacement: vp.isReplacement || false,
+      };
+
+      ordersMap.set(vp._id.toString(), orderEntry);
+      ordersMap.set(orderNumber, orderEntry);
+      return orderEntry;
+    });
+
+    // 10. Build allocated payment reference map
+    const allocatedPaymentMap = new Map();
+    vendorPayments.forEach((p) => {
+      if (Array.isArray(p.allocations) && p.allocations.length > 0) {
+        p.allocations.forEach((alloc) => {
+          if (alloc.invoiceId || alloc.invoiceNumber) {
+            const info = {
+              purchaseId: alloc.invoiceId,
+              orderNumber: alloc.invoiceNumber,
+              allocatedAmount: alloc.allocatedAmount,
+            };
+            if (p.paymentNumber) allocatedPaymentMap.set(p.paymentNumber, info);
+            if (p._id) allocatedPaymentMap.set(p._id.toString(), info);
+          }
+        });
+      }
+    });
+
+    // 11. Enrich transactions
+    const transactions = rawTransactions.map((t) => {
+      let matchedOrder = null;
+      if (t.voucherId && ordersMap.has(t.voucherId.toString())) {
+        matchedOrder = ordersMap.get(t.voucherId.toString());
+      } else if (t.referenceNumber && ordersMap.has(t.referenceNumber)) {
+        matchedOrder = ordersMap.get(t.referenceNumber);
+      }
+
+      const paymentAllocInfo =
+        allocatedPaymentMap.get(t.referenceNumber) ||
+        (t.voucherId && allocatedPaymentMap.get(t.voucherId.toString())) ||
+        null;
+
+      const isOrderAllocatedPayment = Boolean(paymentAllocInfo);
+      const createdByName =
+        (t.createdBy ? (employeeMap.get(t.createdBy.toString()) || null) : null) ||
+        'Staff';
+
+      return {
+        ...t,
+        isOrderAllocatedPayment,
+        allocatedOrderNumber: paymentAllocInfo?.orderNumber || null,
+        allocatedOrderId: paymentAllocInfo?.purchaseId || null,
+        orderId: matchedOrder ? matchedOrder.orderId : (paymentAllocInfo?.purchaseId || t.voucherId || null),
+        orderNumber: matchedOrder ? matchedOrder.orderNumber : (paymentAllocInfo?.orderNumber || t.referenceNumber || null),
+        vendorName: vendor.firm || vendor.name || 'Vendor',
+        items: matchedOrder ? (matchedOrder.items || []) : [],
+        orderStatus: matchedOrder ? matchedOrder.orderStatus : null,
+        orderGrandTotal: matchedOrder ? matchedOrder.grandTotal : null,
+        orderPaidAmount: matchedOrder ? matchedOrder.paidAmount : null,
+        orderBalanceDue: matchedOrder ? matchedOrder.balanceDue : null,
+        pdcWaitingAmount: matchedOrder ? matchedOrder.pdcWaitingAmount : 0,
+        partPaymentStatus: matchedOrder ? matchedOrder.paymentStatus : null,
+        partPaymentPercentage: matchedOrder ? matchedOrder.partPaymentPercentage : null,
+        orderPayments: matchedOrder ? matchedOrder.orderPayments : [],
+        taxableAmount: matchedOrder ? matchedOrder.taxableAmount : null,
+        gstAmount: matchedOrder ? matchedOrder.gstAmount : null,
+        shippingCharges: matchedOrder ? (matchedOrder.shippingCharges || 0) : 0,
+        otherCharges: matchedOrder ? (matchedOrder.otherCharges || 0) : 0,
+        createdByName,
+        orderDate: matchedOrder ? matchedOrder.orderDate : t.transactionDate,
+      };
+    });
+
+    // 12. Monthly breakdown (from all unfiltered transactions)
+    const monthlyMap = new Map();
+    allTxnsBalance.forEach((t) => {
+      const d = new Date(t.transactionDate || t.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, { month: key, monthLabel, totalDebit: 0, totalCredit: 0, transactionsCount: 0 });
+      }
+      const entry = monthlyMap.get(key);
+      entry.totalDebit += Number(t.debit || 0);
+      entry.totalCredit += Number(t.credit || 0);
+      entry.transactionsCount += 1;
+    });
+    const monthlyBreakdown = Array.from(monthlyMap.values())
+      .map((m) => ({ ...m, netMovement: m.totalCredit - m.totalDebit }))
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    // 13. Summary totals from ALL transactions
     let totalDebit = 0;
     let totalCredit = 0;
-
-    const allTxnsForSummary = await LedgerTransaction.find(query).lean();
-    allTxnsForSummary.forEach((txn) => {
+    allTxnsBalance.forEach((txn) => {
       totalDebit += Number(txn.debit || 0);
       totalCredit += Number(txn.credit || 0);
     });
+    const totalTransactions = allTxnsBalance.length;
 
     const statementSummary = {
       vendor: {
@@ -375,15 +1181,16 @@ export const getVendorLedgerStatement = async (req, res) => {
         email: vendor.email,
         address: vendor.address,
         gstin: vendor.gstNumber || vendor.gstin,
+        isGSTRegistered: Boolean(vendor.gstNumber || vendor.gstin),
       },
       ledgerMaster: {
         ledgerCode: ledgerObj.ledgerCode,
         paymentTerms: ledgerObj.paymentTerms || inheritedTerms,
         openingBalance: ledgerObj.openingBalance || 0,
-        openingBalanceType: ledgerObj.openingBalanceType || "Credit",
+        openingBalanceType: ledgerObj.openingBalanceType || 'Debit',
         currentOutstanding: computedOutstanding,
         overdueAmount: ledgerObj.overdueAmount || 0,
-        ledgerStatus: ledgerObj.ledgerStatus || "Active",
+        ledgerStatus: ledgerObj.ledgerStatus || 'Active',
       },
       statistics: {
         openingBalance: ledgerObj.openingBalance || 0,
@@ -399,6 +1206,8 @@ export const getVendorLedgerStatement = async (req, res) => {
       {
         summary: statementSummary,
         transactions,
+        orders: vendorOrdersList,
+        monthlyBreakdown,
         pagination: isPaginationRequested
           ? {
               total: totalTransactions,
@@ -408,25 +1217,97 @@ export const getVendorLedgerStatement = async (req, res) => {
             }
           : null,
       },
-      "Vendor statement loaded successfully.",
+      'Vendor statement loaded successfully.',
     );
   } catch (error) {
-    console.error("getVendorLedgerStatement error:", error);
-    return sendErrorResponse(
-      res,
-      500,
-      "VENDOR_STATEMENT_LOAD_FAILED",
-      error.message,
-    );
+    console.error('getVendorLedgerStatement error:', error);
+    return sendErrorResponse(res, 500, 'VENDOR_STATEMENT_LOAD_FAILED', error.message);
   }
 };
 
-/**
- * 3. Get All Customer Ledgers (Khata List - Syncs directly with Customer object)
- */
+
+export const getVendorOrdersForLedger = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return sendErrorResponse(res, 400, 'INVALID_VENDOR_ID', 'Invalid vendor ID.');
+    }
+    const vendor = await Vendor.findById(vendorId).lean();
+    if (!vendor) return sendErrorResponse(res, 404, 'VENDOR_NOT_FOUND', 'Vendor not found.');
+
+    const purchases = await VendorPurchase.find({ 'vendor.vendorId': new mongoose.Types.ObjectId(vendorId) })
+      .sort({ createdAt: -1 }).lean();
+
+    const vendorPayments = await Payment.find({ partyId: new mongoose.Types.ObjectId(vendorId), type: 'VENDOR_OUTFLOW' }).lean();
+
+    const orders = purchases.map((vp) => {
+      const totals = calculateVendorPurchaseTotals(vp);
+      const firstOrder = vp.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || vp._id.toString().slice(-6).toUpperCase();
+
+      const matchedPayments = vendorPayments.filter((p) =>
+        (p.allocations || []).some(
+          (a) => String(a.invoiceId) === String(vp._id) || a.invoiceNumber === orderNumber,
+        )
+      );
+
+      let allocatedSum = 0;
+      const orderPayments = matchedPayments.map((p) => {
+        const alloc = (p.allocations || []).find(
+          (a) => String(a.invoiceId) === String(vp._id) || a.invoiceNumber === orderNumber,
+        );
+        const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
+        allocatedSum += amt;
+        return {
+          paymentId: p._id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate || p.createdAt,
+          paymentMode: p.paymentMode || 'BANK_TRANSFER',
+          referenceNumber: p.paymentDetails?.utrNumber || p.paymentNumber,
+          amount: amt,
+          remarks: p.paymentDetails?.remarks || 'Vendor Payout',
+          status: p.status || 'CLEARED',
+        };
+      });
+
+      const balanceDue = Math.max(0, Number((totals.grandTotal - allocatedSum).toFixed(2)));
+      const paymentStatus = balanceDue <= 0 && totals.grandTotal > 0 ? 'PAID' : allocatedSum > 0 ? 'PARTIAL' : 'UNPAID';
+
+      return {
+        _id: vp._id,
+        orderId: vp._id,
+        orderNumber,
+        orderDate: vp.createdAt,
+        orderStatus: firstOrder.status || 'Submitted',
+        items: firstOrder.items || [],
+        itemsCount: totals.itemsCount,
+        taxableAmount: totals.taxableAmount,
+        gstAmount: totals.gstAmount,
+        grandTotal: totals.grandTotal,
+        paidAmount: allocatedSum,
+        balanceDue,
+        paymentStatus,
+        partPaymentPercentage: totals.grandTotal > 0 ? Math.min(100, Math.round((allocatedSum / totals.grandTotal) * 100)) : 0,
+        orderPayments,
+      };
+    });
+
+    return sendSuccessResponse(res, 200, { orders }, 'Vendor orders loaded successfully.');
+  } catch (error) {
+    console.error('getVendorOrdersForLedger error:', error);
+    return sendErrorResponse(res, 500, 'VENDOR_ORDERS_LOAD_FAILED', error.message);
+  }
+};
+
+
+export const downloadVendorLedgerStatementPDF = async (req, res) => {
+  return sendErrorResponse(res, 410, 'DEPRECATED', 'Vendor ledger statement PDF generation is now handled directly on the frontend browser print engine.');
+};
+
+
 export const getCustomerLedgersList = async (req, res) => {
   try {
-    const { search, status, branchId, page = 1, limit = 50 } = req.query;
+    const { search, status, creditFilter, gstFilter, month, branchId, page = 1, limit = 50 } = req.query;
     const tenantId = req.user?.tenantId || null;
 
     const customerQuery = {
@@ -437,6 +1318,12 @@ export const getCustomerLedgersList = async (req, res) => {
       customerQuery.tenantId = tenantId;
     }
 
+    if (gstFilter === "GST") {
+      customerQuery.isGSTRegistered = true;
+    } else if (gstFilter === "NON_GST") {
+      customerQuery.isGSTRegistered = { $ne: true };
+    }
+
     if (search) {
       customerQuery.$or = [
         { shopName: { $regex: search, $options: "i" } },
@@ -444,17 +1331,91 @@ export const getCustomerLedgersList = async (req, res) => {
         { mobileNo1: { $regex: search, $options: "i" } },
         { mobile: { $regex: search, $options: "i" } },
         { customerCode: { $regex: search, $options: "i" } },
+        { gstNumber: { $regex: search, $options: "i" } },
       ];
     }
 
     const customers = await Customer.find(customerQuery)
       .select(
-        "shopName ownerName mobileNo1 mobileNo2 mobile businessEmail address branchId tenantId creditLimit creditDays creditUsed customerBalance customerCode serialNumber GSTNo gstNumber createdAt",
+        "shopName ownerName mobileNo1 mobileNo2 mobile businessEmail address branchId tenantId creditLimit creditDays creditUsed customerBalance customerCode serialNumber GSTNo gstNumber isGSTRegistered gstType panCard aadharCard createdAt",
       )
       .sort({ createdAt: -1 })
       .lean();
 
+    // Batch query bulk orders for all customers to compute order statuses and counts
+    const customerIds = customers.map((c) => c._id);
+    const bulkOrders = await BulkOrder.find({ "customer.customerId": { $in: customerIds } })
+      .select("customer orders advanceAmount shippingCharges otherCharges createdAt")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const ordersByCustomer = new Map();
+    bulkOrders.forEach((bo) => {
+      const cId = bo.customer?.customerId?.toString();
+      if (!cId) return;
+      if (!ordersByCustomer.has(cId)) {
+        ordersByCustomer.set(cId, []);
+      }
+      ordersByCustomer.get(cId).push(bo);
+    });
+
+    // Optional monthly date range if month filter provided (YYYY-MM)
+    let monthStart = null;
+    let monthEnd = null;
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [yr, mo] = month.split("-").map(Number);
+      monthStart = new Date(yr, mo - 1, 1);
+      monthEnd = new Date(yr, mo, 0, 23, 59, 59, 999);
+    }
+
+    // Pre-fetch monthly transactions if month is selected
+    let monthlyTxnsMap = new Map();
+    if (monthStart && monthEnd) {
+      const mTxns = await LedgerTransaction.find({
+        partyId: { $in: customerIds },
+        entityType: "Customer",
+        transactionDate: { $gte: monthStart, $lte: monthEnd },
+      }).lean();
+
+      mTxns.forEach((t) => {
+        const cId = t.partyId?.toString();
+        if (!cId) return;
+        if (!monthlyTxnsMap.has(cId)) {
+          monthlyTxnsMap.set(cId, { debit: 0, credit: 0, count: 0 });
+        }
+        const entry = monthlyTxnsMap.get(cId);
+        entry.debit += Number(t.debit || 0);
+        entry.credit += Number(t.credit || 0);
+        entry.count += 1;
+      });
+    }
+
+    let totalReceivable = 0;
+    let totalAdvances = 0;
+    let totalCreditLimit = 0;
+    let activeCount = 0;
+    let exceededLimitCount = 0;
+    let warning20PercentCount = 0;
+    let healthyCreditCount = 0;
+    let gstCustomerCount = 0;
+    let nonGstCustomerCount = 0;
+
+    const collectedAgg = await Payment.aggregate([
+      {
+        $match: {
+          type: "CUSTOMER_INFLOW",
+          partyModel: "Customer",
+          partyId: { $in: customerIds },
+          status: { $nin: ["CANCELLED", "BOUNCED"] },
+          ...(monthStart && monthEnd ? { createdAt: { $gte: monthStart, $lte: monthEnd } } : {}),
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$netAmountPaid" } } },
+    ]);
+    const totalCollected = Number((collectedAgg[0]?.total || 0).toFixed(2));
+
     const ledgers = [];
+
     for (const cust of customers) {
       let l = await CustomerLedger.findOne({ customerId: cust._id })
         .populate("branchId", "name")
@@ -505,25 +1466,95 @@ export const getCustomerLedgersList = async (req, res) => {
 
       const lObj = l.toObject ? l.toObject() : l;
 
+      const activeCreditLimit = custCreditLimit;
+      const activeCreditUsed = custCreditUsed;
+      const activeAdvance = custAdvance;
+      const creditAlerts = calculateCreditStatus(activeCreditLimit, activeCreditUsed);
+
+      // Global Counters across all customers
+      totalReceivable += activeCreditUsed;
+      totalAdvances += activeAdvance;
+      totalCreditLimit += activeCreditLimit;
+      if (lObj.ledgerStatus === "Active") activeCount++;
+
+      if (creditAlerts.creditStatus === "EXCEEDED") {
+        exceededLimitCount++;
+      } else if (creditAlerts.creditStatus === "WARNING_20_PERCENT") {
+        warning20PercentCount++;
+      } else {
+        healthyCreditCount++;
+      }
+
+      const isGSTReg = Boolean(cust.isGSTRegistered);
+      if (isGSTReg) {
+        gstCustomerCount++;
+      } else {
+        nonGstCustomerCount++;
+      }
+
+      // Filter by credit alert state if specified
+      if (creditFilter && creditFilter !== "ALL") {
+        if (creditFilter === "EXCEEDED" && creditAlerts.creditStatus !== "EXCEEDED") continue;
+        if (creditFilter === "WARNING_20_PERCENT" && creditAlerts.creditStatus !== "WARNING_20_PERCENT") continue;
+        if (creditFilter === "HEALTHY" && creditAlerts.creditStatus !== "HEALTHY") continue;
+      }
+
+      // Order metrics for this customer
+      const custOrders = ordersByCustomer.get(cust._id.toString()) || [];
+      const totalOrdersCount = custOrders.length;
+      const activeOrders = custOrders.filter((bo) => {
+        const st = bo.orders?.[0]?.status;
+        return st && !["Delivered", "Cancelled", "Completed"].includes(st);
+      });
+      const activeOrdersCount = activeOrders.length;
+      const latestOrder = custOrders[0] || null;
+      const latestOrderStatus = latestOrder ? (latestOrder.orders?.[0]?.status || "Submitted") : null;
+      const latestOrderNumber = latestOrder ? (latestOrder.orders?.[0]?.orderNumber || latestOrder._id.toString().slice(-6).toUpperCase()) : null;
+      const latestOrderDate = latestOrder ? latestOrder.createdAt : null;
+
+      // Monthly metrics
+      const mStats = monthlyTxnsMap.get(cust._id.toString()) || { debit: 0, credit: 0, count: 0 };
+
       cust.mobile = cust.mobileNo1 || cust.mobile || cust.mobileNo2 || "—";
       cust.creditLimit = custCreditLimit;
       cust.creditDays = custCreditDays;
       cust.creditUsed = custCreditUsed;
       cust.customerBalance = custAdvance;
-
-      const activeCreditLimit = custCreditLimit;
-      const activeCreditUsed = custCreditUsed;
-      const activeAdvance = custAdvance;
-      const availableCredit = Math.max(0, activeCreditLimit - activeCreditUsed);
+      cust.isGSTRegistered = isGSTReg;
+      cust.gstNumber = cust.gstNumber || cust.GSTNo || "";
+      cust.gstType = cust.gstType?.name || cust.gstType || (isGSTReg ? "Regular" : "Non-GST");
 
       lObj.customerId = cust;
       lObj.creditLimit = activeCreditLimit;
       lObj.creditDays = lObj.creditDays || custCreditDays;
       lObj.creditUsed = activeCreditUsed;
       lObj.advanceAmount = activeAdvance;
-      lObj.availableCredit = availableCredit;
-      lObj.currentBalance =
-        activeCreditUsed > 0 ? activeCreditUsed : -activeAdvance;
+      lObj.availableCredit = creditAlerts.availableCredit;
+      lObj.creditPercentage = creditAlerts.creditPercentage;
+      lObj.creditStatus = creditAlerts.creditStatus;
+      lObj.exceededAmount = creditAlerts.exceededAmount;
+      lObj.is20PercentAlert = creditAlerts.is20PercentAlert;
+      lObj.isExceededAlert = creditAlerts.isExceededAlert;
+      lObj.currentBalance = activeCreditUsed > 0 ? activeCreditUsed : -activeAdvance;
+      lObj.pendingDue = activeCreditUsed;
+      lObj.isGSTRegistered = isGSTReg;
+      lObj.gstNumber = cust.gstNumber;
+
+      lObj.ordersSummary = {
+        totalOrders: totalOrdersCount,
+        activeOrders: activeOrdersCount,
+        latestOrderStatus,
+        latestOrderNumber,
+        latestOrderDate,
+      };
+
+      lObj.monthlySummary = {
+        month: month || null,
+        monthlyInvoiced: mStats.debit,
+        monthlyReceived: mStats.credit,
+        netMovement: mStats.debit - mStats.credit,
+        transactionsCount: mStats.count,
+      };
 
       if (!status || lObj.ledgerStatus === status) {
         ledgers.push(lObj);
@@ -535,6 +1566,18 @@ export const getCustomerLedgersList = async (req, res) => {
       200,
       {
         ledgers,
+        metrics: {
+          totalReceivable,
+          totalAdvances,
+          totalCreditLimit,
+          totalCollected,
+          activeCount,
+          exceededLimitCount,
+          warning20PercentCount,
+          healthyCreditCount,
+          gstCustomerCount,
+          nonGstCustomerCount,
+        },
         pagination: {
           total: ledgers.length,
           page: parseInt(page, 10),
@@ -555,12 +1598,10 @@ export const getCustomerLedgersList = async (req, res) => {
   }
 };
 
-/**
- * 4. Get All Vendor Ledgers (Syncs with Vendors)
- */
+
 export const getVendorLedgersList = async (req, res) => {
   try {
-    const { search, status, page = 1, limit = 50 } = req.query;
+    const { search, status, duFilter, page = 1, limit = 50 } = req.query;
     const tenantId = req.user?.tenantId || null;
 
     const vendorQuery = {};
@@ -581,6 +1622,33 @@ export const getVendorLedgersList = async (req, res) => {
     const vendors = await Vendor.find(vendorQuery)
       .sort({ createdAt: -1 })
       .lean();
+
+    // Batch-fetch all VendorPurchase + Payment for this tenant's vendors
+    const vendorIds = vendors.map((v) => v._id);
+
+    const [allPurchases, allPayments] = await Promise.all([
+      VendorPurchase.find({ "vendor.vendorId": { $in: vendorIds } })
+        .select("vendor orders shippingCharges otherCharges createdAt")
+        .lean(),
+      Payment.find({ partyId: { $in: vendorIds }, type: "VENDOR_OUTFLOW" })
+        .select("partyId grossAmount status allocations createdAt")
+        .lean(),
+    ]);
+
+    // Group by vendor
+    const purchasesByVendor = new Map();
+    allPurchases.forEach((p) => {
+      const vid = String(p.vendor?.vendorId);
+      if (!purchasesByVendor.has(vid)) purchasesByVendor.set(vid, []);
+      purchasesByVendor.get(vid).push(p);
+    });
+
+    const paymentsByVendor = new Map();
+    allPayments.forEach((p) => {
+      const vid = String(p.partyId);
+      if (!paymentsByVendor.has(vid)) paymentsByVendor.set(vid, []);
+      paymentsByVendor.get(vid).push(p);
+    });
 
     const ledgers = [];
     for (const v of vendors) {
@@ -630,16 +1698,123 @@ export const getVendorLedgersList = async (req, res) => {
       lObj.vendorId = v;
       lObj.paymentTerms = lObj.paymentTerms || vPaymentTerms;
 
+      // ── Compute purchase-level financials ─────────────────────────────
+      const vendorPurchases = purchasesByVendor.get(String(v._id)) || [];
+      const vendorPayments = paymentsByVendor.get(String(v._id)) || [];
+
+      // Total purchased (credit limit proxy = cumulative purchase value)
+      let totalPurchasedAmount = 0;
+      let latestPurchaseDate = null;
+      let purchasesCount = 0;
+      let openPurchasesCount = 0;
+
+      vendorPurchases.forEach((vp) => {
+        const firstOrder = vp.orders?.[0] || {};
+        if (firstOrder.status === "Draft") return;
+        purchasesCount++;
+        const storedTotal = Number(firstOrder.totalOrderPrice || 0);
+        let calcTotal = 0;
+        if (storedTotal > 0) {
+          calcTotal = storedTotal;
+        } else {
+          (firstOrder.items || []).forEach((item) => {
+            const price = Number(item.price || item.buyingPrice || 0);
+            const qty = Number(item.qty || 0);
+            const gst = Number(item.gst || 0);
+            const base = price * qty;
+            calcTotal += base + (base * gst) / 100;
+          });
+          calcTotal +=
+            Number(vp.shippingCharges || 0) + Number(vp.otherCharges || 0);
+        }
+        totalPurchasedAmount += calcTotal;
+
+        const pd = new Date(vp.createdAt);
+        if (!latestPurchaseDate || pd > latestPurchaseDate)
+          latestPurchaseDate = pd;
+
+        const isOpen = !["Received", "Closed", "Cancelled"].includes(
+          firstOrder.status,
+        );
+        if (isOpen) openPurchasesCount++;
+      });
+
+      // Total paid out to vendor
+      let totalPaidOut = 0;
+      vendorPayments.forEach((p) => {
+        if (p.status !== "CANCELLED" && p.status !== "REVERSED") {
+          totalPaidOut += Number(p.grossAmount || 0);
+        }
+      });
+
+      // Pending due = what we still owe (purchases − payments, capped ≥ 0)
+      const rawBalance = totalPurchasedAmount - totalPaidOut;
+      const pendingDue = Math.max(0, Number(rawBalance.toFixed(2)));
+      // Advance = if we've paid more than we purchased (overpaid)
+      const advanceAmount = rawBalance < 0 ? Math.abs(Number(rawBalance.toFixed(2))) : 0;
+
+      // Credit limit for vendor = user-configured limit or total purchased (as utilization reference)
+      const configuredCreditLimit = Number(lObj.creditLimit || v.creditLimit || 0);
+      // If no configured limit, use total purchased as the "ceiling" for utilization display
+      const effectiveCreditLimit = configuredCreditLimit > 0 ? configuredCreditLimit : totalPurchasedAmount;
+
+      // Credit used = total pending (what we owe)
+      const creditUsed = pendingDue;
+
+      // Credit status (payable health)
+      let payableStatus = "SETTLED";
+      if (pendingDue > 0) {
+        const utilizationPct = effectiveCreditLimit > 0
+          ? (pendingDue / effectiveCreditLimit) * 100
+          : 100;
+        payableStatus = utilizationPct >= 100
+          ? "HIGH_DUE"
+          : utilizationPct >= 80
+            ? "MEDIUM_DUE"
+            : "LOW_DUE";
+      }
+
+      lObj.creditLimit = configuredCreditLimit;
+      lObj.creditUsed = creditUsed;
+      lObj.pendingDue = pendingDue;
+      lObj.advanceAmount = advanceAmount;
+      lObj.totalPurchasedAmount = totalPurchasedAmount;
+      lObj.totalPaidOut = totalPaidOut;
+      lObj.payableStatus = payableStatus;
+      lObj.isGSTRegistered = Boolean(v.gstNumber || lObj.gstin);
+      lObj.purchasesSummary = {
+        purchasesCount,
+        openPurchasesCount,
+        latestPurchaseDate: latestPurchaseDate?.toISOString() || null,
+      };
+
+      // Apply duFilter if set
+      if (duFilter === "DUE" && pendingDue <= 0) continue;
+      if (duFilter === "ADVANCE" && advanceAmount <= 0) continue;
+      if (duFilter === "SETTLED" && (pendingDue > 0 || advanceAmount > 0)) continue;
+
       if (!status || lObj.ledgerStatus === status) {
         ledgers.push(lObj);
       }
     }
+
+    // Aggregate metrics
+    const metrics = {
+      totalPayables: ledgers.reduce((s, l) => s + (l.pendingDue > 0 ? l.pendingDue : 0), 0),
+      totalAdvancesPaid: ledgers.reduce((s, l) => s + (l.advanceAmount || 0), 0),
+      totalPurchasedAmount: ledgers.reduce((s, l) => s + (l.totalPurchasedAmount || 0), 0),
+      totalPaidOut: ledgers.reduce((s, l) => s + (l.totalPaidOut || 0), 0),
+      highDueCount: ledgers.filter((l) => l.payableStatus === "HIGH_DUE").length,
+      mediumDueCount: ledgers.filter((l) => l.payableStatus === "MEDIUM_DUE").length,
+      settledCount: ledgers.filter((l) => l.payableStatus === "SETTLED").length,
+    };
 
     return sendSuccessResponse(
       res,
       200,
       {
         ledgers,
+        metrics,
         pagination: {
           total: ledgers.length,
           page: parseInt(page, 10),
@@ -660,9 +1835,8 @@ export const getVendorLedgersList = async (req, res) => {
   }
 };
 
-/**
- * 5. Upsert Customer Ledger Master Settings
- */
+
+
 export const upsertCustomerLedger = async (req, res) => {
   try {
     const {
@@ -777,6 +1951,7 @@ export const upsertVendorLedger = async (req, res) => {
       gstin,
       pan,
       paymentTerms,
+      creditLimit,
       openingBalance,
       openingBalanceType,
       ledgerStatus,
@@ -802,6 +1977,7 @@ export const upsertVendorLedger = async (req, res) => {
         ledgerCode: `VEND-LED-${vendorId.toString().slice(-6).toUpperCase()}`,
         vendorId,
         currentOutstanding: Number(openingBalance || 0),
+        creditLimit: Number(creditLimit || 0),
         tenantId,
         createdBy: userId,
       });
@@ -812,6 +1988,7 @@ export const upsertVendorLedger = async (req, res) => {
     if (gstin) ledger.gstin = gstin;
     if (pan) ledger.pan = pan;
     if (paymentTerms !== undefined) ledger.paymentTerms = Number(paymentTerms);
+    if (creditLimit !== undefined) ledger.creditLimit = Number(creditLimit);
     if (openingBalance !== undefined)
       ledger.openingBalance = Number(openingBalance);
     if (openingBalanceType) ledger.openingBalanceType = openingBalanceType;
@@ -822,10 +1999,15 @@ export const upsertVendorLedger = async (req, res) => {
 
     await ledger.save();
 
+    const vendorUpdate = {};
     if (paymentTerms !== undefined) {
-      await Vendor.findByIdAndUpdate(vendorId, {
-        $set: { paymentTerms: `${paymentTerms} Days` },
-      });
+      vendorUpdate.paymentTerms = `${paymentTerms} Days`;
+    }
+    if (creditLimit !== undefined) {
+      vendorUpdate.creditLimit = Number(creditLimit);
+    }
+    if (Object.keys(vendorUpdate).length > 0) {
+      await Vendor.findByIdAndUpdate(vendorId, { $set: vendorUpdate });
     }
 
     return sendSuccessResponse(
@@ -842,5 +2024,474 @@ export const upsertVendorLedger = async (req, res) => {
       "UPSERT_VENDOR_LEDGER_FAILED",
       error.message,
     );
+  }
+};
+
+
+export const getCustomerOrdersForLedger = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return sendErrorResponse(
+        res,
+        400,
+        "INVALID_CUSTOMER_ID",
+        "Invalid customer ID.",
+      );
+    }
+
+    const customer = await Customer.findById(customerId)
+      .select("shopName ownerName isGSTRegistered gstNumber customerBalance creditUsed creditLimit")
+      .lean();
+
+    if (!customer) {
+      return sendErrorResponse(
+        res,
+        404,
+        "CUSTOMER_NOT_FOUND",
+        "Customer not found.",
+      );
+    }
+
+    const bulkOrders = await BulkOrder.find({ "customer.customerId": customerId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const customerPayments = await Payment.find({
+      partyId: customerId,
+      status: { $ne: "BOUNCED" },
+    }).lean();
+
+    const orders = bulkOrders.map((bo) => {
+      const totals = calculateBulkOrderTotals(bo);
+      const firstOrder = bo.orders?.[0] || {};
+      const orderNumber = firstOrder.orderNumber || bo._id.toString().slice(-6).toUpperCase();
+
+      const matchedPayments = customerPayments.filter((p) =>
+        (p.allocations || []).some(
+          (a) => String(a.invoiceId) === String(bo._id) || a.invoiceNumber === orderNumber
+        )
+      );
+
+      let allocatedSum = 0;
+      let pdcWaitingSum = 0;
+      matchedPayments.forEach((p) => {
+        const alloc = (p.allocations || []).find(
+          (a) => String(a.invoiceId) === String(bo._id) || a.invoiceNumber === orderNumber
+        );
+        const amt = Number(alloc?.allocatedAmount || p.grossAmount || 0);
+        const isCheque = p.paymentMode === "CHEQUE";
+        const isPDC = Boolean(p.paymentDetails?.isPostDated);
+        const isCredited = Boolean(p.paymentDetails?.isCredited);
+        const chequeStatus = p.paymentDetails?.chequeStatus || p.status;
+        const chqDate = p.paymentDetails?.chequeDate ? new Date(p.paymentDetails.chequeDate) : null;
+        let expDate = p.paymentDetails?.chequeExpiryDate ? new Date(p.paymentDetails.chequeExpiryDate) : null;
+        if (!expDate && chqDate) {
+          expDate = new Date(chqDate);
+          expDate.setMonth(expDate.getMonth() + 3);
+        }
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const isExpired = p.status === "EXPIRED" || chequeStatus === "EXPIRED" || Boolean(expDate && !isCredited && new Date() > expDate);
+        const isBounced = chequeStatus === "BOUNCED" || p.status === "BOUNCED";
+        const isMatured = !isPDC || (chqDate && chqDate <= todayEnd);
+        const daysUntilExpiry = expDate ? Math.max(0, Math.ceil((expDate.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+        const isExpiringSoon = !isExpired && daysUntilExpiry <= 15;
+        const isPDCWaiting = isCheque && !isExpired && !isBounced && (isPDC ? !isCredited : (chequeStatus === "PENDING" || chequeStatus === "DEPOSITED" || p.status === "RECEIVED"));
+
+        if (!isPDCWaiting && !isBounced && !isExpired) {
+          allocatedSum += amt;
+        } else if (isPDCWaiting) {
+          pdcWaitingSum += amt;
+        }
+      });
+
+      const initialAdvance = Math.max(0, Number((Number(bo.advanceAmount || 0) - allocatedSum).toFixed(2)));
+      const totalOrderPaid = Math.min(totals.grandTotal, Number((initialAdvance + allocatedSum).toFixed(2)));
+      const effectiveBalanceDue = Math.max(0, Number((totals.grandTotal - totalOrderPaid).toFixed(2)));
+      const effectivePaymentStatus =
+        effectiveBalanceDue <= 0 && totals.grandTotal > 0
+          ? "PAID"
+          : totalOrderPaid > 0
+            ? "PARTIAL"
+            : "UNPAID";
+      const effectivePct = totals.grandTotal > 0 ? Math.min(100, Math.round((totalOrderPaid / totals.grandTotal) * 100)) : 0;
+
+      return {
+        _id: bo._id,
+        orderId: bo._id,
+        orderNumber,
+        createdAt: bo.createdAt,
+        orderDate: bo.createdAt,
+        orderStatus: firstOrder.status || "Submitted",
+        statusHistory: firstOrder.statusHistory || [],
+        trackingId: firstOrder.trackingId || null,
+        itemsCount: totals.itemsCount,
+        taxableAmount: totals.taxableAmount,
+        gstAmount: totals.gstAmount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
+        grandTotal: totals.grandTotal,
+        totalOrderPrice: totals.grandTotal,
+        paidAmount: totalOrderPaid,
+        advanceAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        pdcWaitingAmount: Number(pdcWaitingSum.toFixed(2)),
+        paymentStatus: effectivePaymentStatus,
+        partPaymentPercentage: effectivePct,
+        gstAmount: totals.gstAmount,
+        shippingCharges: totals.shippingCharges,
+        otherCharges: totals.otherCharges,
+        grandTotal: totals.grandTotal,
+        totalOrderPrice: totals.grandTotal,
+        paidAmount: totalOrderPaid,
+        advanceAmount: totalOrderPaid,
+        balanceDue: effectiveBalanceDue,
+        pdcWaitingAmount: Number(pdcWaitingSum.toFixed(2)),
+        paymentStatus: effectivePaymentStatus,
+        partPaymentPercentage: effectivePct,
+        isGSTRegistered: Boolean(customer.isGSTRegistered),
+        gstNumber: customer.gstNumber || "",
+        items: firstOrder.items || [],
+      };
+    });
+
+    return sendSuccessResponse(
+      res,
+      200,
+      { orders },
+      "Customer orders loaded for part-payment tracking.",
+    );
+  } catch (error) {
+    console.error("getCustomerOrdersForLedger error:", error);
+    return sendErrorResponse(
+      res,
+      500,
+      "GET_CUSTOMER_ORDERS_FAILED",
+      error.message,
+    );
+  }
+};
+
+
+
+const uploadLedgerPDFToGCS = async (buffer, fileName) => {
+  try {
+    if (!bucket || !process.env.GOOGLE_CLOUD_BUCKET_NAME) return null;
+    return await new Promise((resolve) => {
+      const blob = bucket.file(`ledgers/${fileName}`);
+      const stream = blob.createWriteStream({ resumable: false, metadata: { contentType: "application/pdf" } });
+      stream.on("error", (err) => { console.warn("[PDF] Ledger GCS upload skipped:", err.message); resolve(null); });
+      stream.on("finish", () => { resolve(`https://storage.googleapis.com/${bucket.name}/ledgers/${fileName}`); });
+      stream.end(buffer);
+    });
+  } catch (err) {
+    console.warn("[PDF] Ledger GCS upload error:", err.message);
+    return null;
+  }
+};
+
+export const downloadCustomerLedgerStatementPDF = async (req, res) => {
+  return sendErrorResponse(res, 410, 'DEPRECATED', 'Customer ledger statement PDF generation is now handled directly on the frontend browser print engine.');
+};
+
+/**
+ * Send Wholesaler Bank Details to Customer via WhatsApp and/or Email
+ */
+export const sendCustomerBankDetails = async (req, res) => {
+  try {
+    const customerId = req.params.customerId || req.body.customerId || req.body.partyId;
+    const tenantId = req.user?.tenantId || null;
+    const { bankAccountId, channel = "both", mobile: customMobile, email: customEmail, customNote } = req.body;
+
+    if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      return sendErrorResponse(res, 400, "INVALID_CUSTOMER_ID", "Valid customer ID is required.");
+    }
+
+    const customer = await Customer.findById(customerId);
+    if (!customer) {
+      return sendErrorResponse(res, 404, "CUSTOMER_NOT_FOUND", "Customer not found.");
+    }
+
+    // 1. Resolve Bank Account
+    let bankAccount = null;
+    if (bankAccountId && mongoose.Types.ObjectId.isValid(bankAccountId)) {
+      bankAccount = await BankAccount.findOne({ _id: bankAccountId, tenantId, isActive: true });
+    }
+
+    if (!bankAccount) {
+      // Find default active bank account for this tenant
+      bankAccount = await BankAccount.findOne({ tenantId, isActive: true, isDefault: true });
+    }
+
+    if (!bankAccount) {
+      // Find any active bank account for this tenant
+      bankAccount = await BankAccount.findOne({ tenantId, isActive: true });
+    }
+
+    // Tenant info for company branding and fallback bank details
+    const tenant = tenantId ? await Tenant.findOne({ tenantId }) : null;
+    const companyName = process.env.COMPANY_NAME || tenant?.name || tenant?.storeInformation?.storeName || "DigiOptics Wholesale";
+    const companyPhone = process.env.COMPANY_PHONE || tenant?.phone || tenant?.storeInformation?.contactNumber || "+91 9650560526";
+    const companyEmail = process.env.COMPANY_EMAIL || tenant?.email || tenant?.storeInformation?.email || "support@digioptics.com";
+    const companyAddress = tenant?.storeInformation?.address || tenant?.address || "";
+
+    // If still no bank account in BankAccount collection, check tenant.settings
+    let resolvedBank = null;
+    if (bankAccount) {
+      resolvedBank = {
+        bankName: bankAccount.bankName,
+        accountHolderName: bankAccount.accountHolderName || companyName,
+        accountNumber: bankAccount.accountNumber,
+        ifscCode: bankAccount.ifscCode,
+        branchName: bankAccount.branchName || "",
+        accountType: bankAccount.accountType || "Current",
+        upiId: bankAccount.upiId || "",
+      };
+    } else if (tenant?.settings?.bankName && tenant?.settings?.bankAccountNo) {
+      resolvedBank = {
+        bankName: tenant.settings.bankName,
+        accountHolderName: tenant.settings.accountHolderName || companyName,
+        accountNumber: tenant.settings.bankAccountNo,
+        ifscCode: tenant.settings.bankIFSC || "",
+        branchName: tenant.settings.bankBranch || "",
+        accountType: "Current",
+        upiId: tenant.settings.upiId || "",
+      };
+    }
+
+    if (!resolvedBank || !resolvedBank.accountNumber) {
+      return sendErrorResponse(
+        res,
+        400,
+        "NO_BANK_ACCOUNT_CONFIGURED",
+        "No active bank account found. Please configure a bank account in Settings > Bank Accounts."
+      );
+    }
+
+    // 2. Resolve Customer Ledger & Balance
+    const ledger = await CustomerLedger.findOne({ customerId });
+    const pendingDue = Number(
+      ledger?.creditUsed !== undefined
+        ? ledger.creditUsed
+        : customer.creditUsed ||
+          (ledger?.currentBalance > 0 ? ledger.currentBalance : 0) ||
+          0
+    );
+
+    const customerName = customer.shopName || customer.ownerName || "Valued Customer";
+    const recipientMobile = (customMobile || customer.mobileNo1 || customer.mobile || customer.mobileNo2 || "").trim();
+    const recipientEmail = (customEmail || customer.businessEmail || customer.email || "").trim();
+
+    const sendWhatsApp = channel === "both" || channel === "whatsapp";
+    const sendMail = channel === "both" || channel === "email";
+
+    let whatsappSent = false;
+    let emailSent = false;
+    let waError = null;
+    let mailError = null;
+
+    // 3. Send WhatsApp
+    if (sendWhatsApp) {
+      if (!recipientMobile) {
+        waError = "Customer has no mobile number on file";
+      } else {
+        const waMessage = wholesalerBankDetailsWhatsApp({
+          customerName,
+          companyName,
+          companyPhone,
+          bankDetails: resolvedBank,
+          pendingDue,
+        });
+
+        const waRes = await sendWhatsAppMessage({
+          to: recipientMobile,
+          message: waMessage,
+        });
+        whatsappSent = Boolean(waRes?.success);
+        if (!waRes?.success) {
+          waError = waRes?.error || "Failed to deliver WhatsApp message";
+        }
+      }
+    }
+
+    // 4. Send Email
+    if (sendMail) {
+      if (!recipientEmail) {
+        mailError = "Customer has no email address on file";
+      } else {
+        const formattedDue = pendingDue > 0
+          ? `₹${pendingDue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : null;
+
+        const emailHtml = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Wholesaler Bank Details</title>
+          </head>
+          <body style="margin: 0; padding: 20px; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+            <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+              
+              <!-- Header -->
+              <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 28px 24px; text-align: center; color: #ffffff;">
+                <h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.025em;">${companyName}</h1>
+                <p style="margin: 6px 0 0; font-size: 13px; opacity: 0.9; font-weight: 500;">Official Wholesaler Bank & Payment Details</p>
+              </div>
+
+              <!-- Content Body -->
+              <div style="padding: 28px 24px;">
+                <p style="margin: 0 0 16px; font-size: 15px; color: #334155;">
+                  Dear <strong>${customerName}</strong>,
+                </p>
+                <p style="margin: 0 0 20px; font-size: 14px; color: #475569; line-height: 1.5;">
+                  Please find below our official bank account details for electronic fund transfers (NEFT / RTGS / IMPS / UPI) against your wholesale orders and ledger account.
+                </p>
+
+                ${
+                  formattedDue
+                    ? `
+                  <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px 18px; margin-bottom: 22px;">
+                    <span style="font-size: 12px; font-weight: 700; color: #92400e; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Current Outstanding Balance</span>
+                    <span style="font-size: 22px; font-weight: 800; color: #b45309;">${formattedDue}</span>
+                  </div>`
+                    : ""
+                }
+
+                <!-- Bank Card Box -->
+                <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 20px; margin-bottom: 22px;">
+                  <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-size: 15px; font-weight: 700; color: #0f172a;">${resolvedBank.bankName}</span>
+                    ${
+                      resolvedBank.accountType
+                        ? `<span style="font-size: 11px; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 12px; font-weight: 600;">${resolvedBank.accountType} A/C</span>`
+                        : ""
+                    }
+                  </div>
+
+                  <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b; width: 40%;">Account Holder:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 600;">${resolvedBank.accountHolderName}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">Account Number:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 700; font-size: 16px; letter-spacing: 0.5px; font-family: monospace;">${resolvedBank.accountNumber}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">IFSC Code:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 700; font-family: monospace;">${resolvedBank.ifscCode}</td>
+                    </tr>
+                    ${
+                      resolvedBank.branchName
+                        ? `
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">Branch:</td>
+                      <td style="padding: 6px 0; color: #0f172a; font-weight: 500;">${resolvedBank.branchName}</td>
+                    </tr>`
+                        : ""
+                    }
+                    ${
+                      resolvedBank.upiId
+                        ? `
+                    <tr>
+                      <td style="padding: 6px 0; color: #64748b;">UPI ID / VPA:</td>
+                      <td style="padding: 6px 0; color: #16a34a; font-weight: 700; font-family: monospace;">${resolvedBank.upiId}</td>
+                    </tr>`
+                        : ""
+                    }
+                  </table>
+                </div>
+
+                ${
+                  customNote
+                    ? `
+                <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px 16px; margin-bottom: 22px; border-radius: 0 6px 6px 0;">
+                  <p style="margin: 0; font-size: 13px; color: #1e40af;"><strong>Note:</strong> ${customNote}</p>
+                </div>`
+                    : ""
+                }
+
+                <div style="background: #f1f5f9; border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+                  <p style="margin: 0; font-size: 13px; color: #334155; line-height: 1.5;">
+                    💡 <strong>Payment Confirmation:</strong> After initiating the transfer, kindly share the UTR / transaction receipt via WhatsApp or email for immediate ledger reconciliation.
+                  </p>
+                </div>
+
+                <p style="margin: 24px 0 4px; font-size: 13px; color: #64748b;">
+                  For billing queries or assistance, reach us at <strong>${companyPhone}</strong> or <a href="mailto:${companyEmail}" style="color: #2563eb; text-decoration: none;">${companyEmail}</a>.
+                </p>
+              </div>
+
+              <!-- Footer -->
+              <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 24px; text-align: center; font-size: 12px; color: #94a3b8;">
+                <p style="margin: 0;">${companyName} ${companyAddress ? `• ${companyAddress}` : ""}</p>
+                <p style="margin: 4px 0 0;">This is an automated communication regarding your wholesale ledger account.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+
+        const mailRes = await sendEmail({
+          to: recipientEmail,
+          subject: `Wholesaler Bank Account Details - ${companyName}`,
+          html: emailHtml,
+        });
+
+        emailSent = Boolean(mailRes?.success);
+        if (!mailRes?.success) {
+          mailError = mailRes?.error || "Failed to deliver email";
+        }
+      }
+    }
+
+    // Determine final status
+    const atLeastOneSuccess = (sendWhatsApp && whatsappSent) || (sendMail && emailSent);
+
+    if (!atLeastOneSuccess) {
+      const errMsg = [
+        sendWhatsApp && waError ? `WhatsApp: ${waError}` : null,
+        sendMail && mailError ? `Email: ${mailError}` : null,
+      ]
+        .filter(Boolean)
+        .join("; ");
+
+      return sendErrorResponse(
+        res,
+        400,
+        "SEND_BANK_DETAILS_FAILED",
+        errMsg || "Failed to send bank details via selected channel(s)."
+      );
+    }
+
+    const channelSummary = [];
+    if (sendWhatsApp) channelSummary.push(`WhatsApp ${whatsappSent ? "Sent" : "Failed"}`);
+    if (sendMail) channelSummary.push(`Email ${emailSent ? "Sent" : "Failed"}`);
+
+    return sendSuccessResponse(
+      res,
+      200,
+      {
+        customerId,
+        customerName,
+        bankDetails: resolvedBank,
+        pendingDue,
+        recipientMobile: recipientMobile || null,
+        recipientEmail: recipientEmail || null,
+        whatsappSent,
+        emailSent,
+        waError,
+        mailError,
+      },
+      `Bank details successfully dispatched (${channelSummary.join(", ")}).`
+    );
+  } catch (error) {
+    console.error("sendCustomerBankDetails error:", error);
+    return sendErrorResponse(res, 500, "SEND_BANK_DETAILS_ERROR", error.message);
   }
 };

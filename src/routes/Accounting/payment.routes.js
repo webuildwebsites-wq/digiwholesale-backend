@@ -4,6 +4,7 @@ import {
   executeVendorPayment,
   updateChequeStatus,
   getPaymentsList,
+  getPdcChequeAlerts,
   getPaymentById,
   adjustDueFromAdvance,
   getPaymentReceipt,
@@ -33,6 +34,7 @@ router.post("/send-due-reminder", sendPaymentDueReminder);
 router.patch("/:id/cheque-status", updateChequeStatus);
 
 // Payment Listings & Details
+router.get("/pdc-alerts", getPdcChequeAlerts);
 router.get("/", getPaymentsList);
 router.get("/:id", getPaymentById);
 

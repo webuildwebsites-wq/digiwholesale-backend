@@ -123,7 +123,11 @@ const generatePDFInternal = async (html) => {
   const b    = await launchBrowser();
   const page = await b.newPage();
   try {
-    await page.setContent(html, { waitUntil: "networkidle0", timeout: 30000 });
+    try {
+      await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 10000 });
+    } catch (navErr) {
+      console.warn("[pdfService] setContent timeout warning:", navErr.message);
+    }
     const pdf = await page.pdf({
       format:            "A4",
       printBackground:   true,

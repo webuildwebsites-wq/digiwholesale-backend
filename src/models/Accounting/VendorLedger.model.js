@@ -55,6 +55,11 @@ const VendorLedgerSchema = new mongoose.Schema({
     default: 0,
     min: 0 
   },
+  creditLimit: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   openingBalance: { 
     type: Number, 
     default: 0 

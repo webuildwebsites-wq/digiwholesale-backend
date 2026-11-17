@@ -52,7 +52,8 @@ const shipToAddressSchema = new mongoose.Schema({
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "employee",
-        required: true
+        required: false,
+        default: null
     },
     updatedBy: {
         type: mongoose.Schema.Types.ObjectId,
