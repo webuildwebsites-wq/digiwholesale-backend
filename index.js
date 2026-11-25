@@ -6,7 +6,8 @@ import { fileURLToPath } from 'url';
 import rateLimit from 'express-rate-limit';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '.env') });
+process.env.DOTENV_CONFIG_QUIET = 'true';
+dotenv.config({ path: path.resolve(__dirname, '.env'), quiet: true });
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import hpp from 'hpp';
@@ -113,9 +114,30 @@ app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.set('trust proxy', 1);
 
+// Fast Redis IP blacklist verification
+app.use(async (req, res, next) => {
+  try {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded) || req.ip || req.socket?.remoteAddress;
+    if (ip && redis) {
+      const isBlocked = await redis.get(`blocked:${ip}`).catch(() => null);
+      if (isBlocked) {
+        return res.status(429).json({
+          error: true,
+          success: false,
+          message: 'Your IP has been temporarily blocked due to excessive requests. Please try again after 15 minutes.'
+        });
+      }
+    }
+  } catch (_) {
+    // Fail open if Redis is unavailable
+  }
+  next();
+});
+
 export const limiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 100,
+  max: 1000,
   message: {
     error: true,
     success: false,
