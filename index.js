@@ -115,7 +115,7 @@ app.set('trust proxy', 1);
 
 export const limiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 500,
+  max: 100,
   message: {
     error: true,
     success: false,
@@ -127,7 +127,7 @@ export const limiter = rateLimit({
     const forwarded = req.headers['x-forwarded-for'];
     const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded) || req.ip || req.socket?.remoteAddress;
     try {
-      await redis.set(`blocked:${ip}`, 'true', 'EX', 3600);
+      await redis.set(`blocked:${ip}`, 'true', 'EX', 900);
     } catch (error) {
       console.error('Error blocking IP:', error);
     }
