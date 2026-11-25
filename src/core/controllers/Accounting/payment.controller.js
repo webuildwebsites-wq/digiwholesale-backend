@@ -299,7 +299,7 @@ export const executeCustomerPayment = async (req, res) => {
         paymentDetails: {
           ...paymentDetails,
           isPostDated: false,
-          chequeStatus: paymentMode === "CHEQUE" ? "CLEARED" : "COMPLETED",
+          chequeStatus: paymentMode === "CHEQUE" ? "CLEARED" : null,
           isCredited: true,
           adjustedFromCreditUsed,
           remainingCreditUsed,

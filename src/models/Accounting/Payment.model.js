@@ -107,7 +107,7 @@ const PaymentSchema = new mongoose.Schema({
     bankAccountName: { type: String, trim: true },
     bankAccountNumber: { type: String, trim: true },
     isPostDated: { type: Boolean, default: false },
-    chequeStatus: { type: String, enum: ['PENDING', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'CANCELLED', 'EXPIRED', 'REPRESENTED'], default: 'PENDING' },
+    chequeStatus: { type: String, enum: ['PENDING', 'DEPOSITED', 'CLEARED', 'BOUNCED', 'CANCELLED', 'EXPIRED', 'REPRESENTED', 'COMPLETED', null], default: null },
     chequeExpiryDate: { type: Date },
     retryCount: { type: Number, default: 0 },
     lastRetryDate: { type: Date },
