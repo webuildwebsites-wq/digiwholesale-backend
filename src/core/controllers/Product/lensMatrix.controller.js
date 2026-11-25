@@ -864,6 +864,48 @@ export const updateLensMatrix = async (req, res) => {
 };
 
 
+const formatPower = (num) => {
+  if (num === null || num === undefined) return "";
+  return num === 0 ? "0.00" : (num > 0 ? `+${num.toFixed(2)}` : num.toFixed(2));
+};
+
+export const computePriceRanges = (products, priceField) => {
+  if (!products || products.length === 0) return [];
+  const groups = new Map();
+  products.forEach((p) => {
+    let priceVal = p[priceField];
+    if (priceVal === undefined || priceVal === null || priceVal === "") {
+      priceVal = p.price ?? 0;
+    }
+    priceVal = Number(priceVal) || 0;
+
+    if (!groups.has(priceVal)) groups.set(priceVal, []);
+    groups.get(priceVal).push(p);
+  });
+
+  const result = [];
+  const sortedPrices = Array.from(groups.keys()).sort((a, b) => a - b);
+  sortedPrices.forEach((price) => {
+    const list = groups.get(price);
+    const sphs = list.map((p) => parsePower(p.sph)).filter((x) => x !== null).sort((a, b) => a - b);
+    const cyls = list.map((p) => parsePower(p.cyl)).filter((x) => x !== null).sort((a, b) => a - b);
+    const adds = list.map((p) => parsePower(p.addition)).filter((x) => x !== null && x > 0).sort((a, b) => a - b);
+
+    const sphRange = sphs.length > 0 ? `${formatPower(sphs[0])} to ${formatPower(sphs[sphs.length - 1])}` : "";
+    const cylRange = cyls.length > 0 ? `${formatPower(cyls[0])} to ${formatPower(cyls[cyls.length - 1])}` : "";
+    const additionRange = adds.length > 0 ? `${formatPower(adds[0])} to ${formatPower(adds[adds.length - 1])}` : "";
+
+    result.push({
+      price,
+      sphRange,
+      cylRange,
+      additionRange,
+      count: list.length,
+    });
+  });
+  return result;
+};
+
 const formatRange = (min, max) => {
   const pMin = parsePower(min);
   const pMax = parsePower(max);
@@ -917,6 +959,7 @@ export const getLensHistory = async (req, res) => {
           buyingPrice: item.buyingPrice ?? 0,
           sellingPrice: item.sellingPrice ?? 0,
           mrp: item.mrp ?? 0,
+          metadata: item.metadata || null,
           timestamp: ts,
         });
       }
@@ -1029,6 +1072,39 @@ export const getLensHistory = async (req, res) => {
             timestamp: prod.firstGeneratedAt,
           });
         }
+      }
+    }
+
+    // ── 3. Enrich History Entries with Live Variant Price Ranges ──
+    const distinctProdNames = Array.from(
+      new Set(historyTimeline.map((h) => h.productName).filter(Boolean))
+    );
+    if (distinctProdNames.length > 0) {
+      const allMatchingProducts = await DigiProduct.find({
+        tenantId,
+        productName: { $in: distinctProdNames },
+        isDeleted: { $ne: true },
+      })
+        .select("productName sph cyl addition axis buyingPrice sellingPrice price mrp qty")
+        .lean();
+
+      const prodGroupMap = new Map();
+      allMatchingProducts.forEach((p) => {
+        const norm = (p.productName || "").trim().toUpperCase();
+        if (!prodGroupMap.has(norm)) prodGroupMap.set(norm, []);
+        prodGroupMap.get(norm).push(p);
+      });
+
+      for (const entry of historyTimeline) {
+        const norm = (entry.productName || "").trim().toUpperCase();
+        const prodList = prodGroupMap.get(norm) || [];
+
+        entry.sellingPriceRanges =
+          entry.metadata?.sellingPriceRanges || computePriceRanges(prodList, "sellingPrice");
+        entry.buyingPriceRanges =
+          entry.metadata?.buyingPriceRanges || computePriceRanges(prodList, "buyingPrice");
+        entry.mrpRanges =
+          entry.metadata?.mrpRanges || computePriceRanges(prodList, "mrp");
       }
     }
 
