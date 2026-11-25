@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
+import rateLimit from 'express-rate-limit';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '.env') });
@@ -49,6 +49,7 @@ import gstReportRouter from './src/routes/Accounting/gstReport.routes.js';
 import batchRouter       from './src/routes/Product/batch.routes.js';
 import externalRouter   from './src/routes/external.routes.js';
 import notificationRouter from './src/routes/Notification/notification.routes.js';
+import { redis } from './src/core/config/Redis/redisClient.js'; 
 
 if (!process.env.PASSWORD_SECRET) {
   console.error('FATAL: PASSWORD_SECRET environment variable is not set. Server cannot start.');
@@ -111,6 +112,34 @@ app.use(hpp());
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.set('trust proxy', 1);
+
+export const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 500,
+  message: {
+    error: true,
+    success: false,
+    message: 'Too many requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: async (req, res, next) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded) || req.ip || req.socket?.remoteAddress;
+    try {
+      await redis.set(`blocked:${ip}`, 'true', 'EX', 3600);
+    } catch (error) {
+      console.error('Error blocking IP:', error);
+    }
+    return res.status(429).json({
+      error: true,
+      success: false,
+      message: 'Too many requests from this IP, please try again later.'
+    });
+  }
+});
+
+app.use(limiter);
 
 try {
   app.get("/", (req, res) => {
