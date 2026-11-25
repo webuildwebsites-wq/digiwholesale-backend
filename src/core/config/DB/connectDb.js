@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
-import dotenv from 'dotenv'
-dotenv.config()
+import dotenv from 'dotenv';
+dotenv.config({ quiet: true });
 
 if (!process.env.MONGODB_URL) {
     throw new Error("Please provide MONGODB_URL in the .env file")

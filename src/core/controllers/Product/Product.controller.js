@@ -1,5 +1,6 @@
 import DigiProduct from "../../../models/Product/Product.model.js";
 import LensHistory from "../../../models/Product/LensHistory.model.js";
+import { computePriceRanges } from "./lensMatrix.controller.js";
 import ProductBatch from "../../../models/Product/ProductBatch.model.js";
 import VendorPurchase from "../../../models/Purchase/VendorPurchase.model.js";
 import PurchaseInward from "../../../models/Purchase/PurchaseInward.model.js";
@@ -1363,6 +1364,10 @@ export const bulkUploadProducts = async (req, res) => {
         updatedAt: new Date(),
       };
 
+      const sellingPriceRanges = computePriceRanges(docs, "sellingPrice");
+      const buyingPriceRanges = computePriceRanges(docs, "buyingPrice");
+      const mrpRanges = computePriceRanges(docs, "mrp");
+
       await LensHistory.create(
         [
           {
@@ -1382,6 +1387,11 @@ export const bulkUploadProducts = async (req, res) => {
             buyingPrice: initialEntry.buyingPrice,
             sellingPrice: initialEntry.sellingPrice,
             mrp: initialEntry.mrp,
+            metadata: {
+              sellingPriceRanges,
+              buyingPriceRanges,
+              mrpRanges,
+            },
             createdBy: req.user?._id || req.user?.id || null,
           },
         ],

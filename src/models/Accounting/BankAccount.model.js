@@ -95,7 +95,6 @@ bankAccountSchema.virtual('name').get(function () {
 
 bankAccountSchema.index({ accountNumber: 1, tenantId: 1 }, { unique: true });
 bankAccountSchema.index({ isActive: 1 });
-bankAccountSchema.index({ tenantId: 1 });
 
 export default mongoose.model('BankAccount', bankAccountSchema);
 
