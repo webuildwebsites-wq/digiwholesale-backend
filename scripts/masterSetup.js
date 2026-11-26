@@ -6,6 +6,7 @@ import Department from '../src/models/Auth/Department.js';
 import SystemConfig from '../src/models/Auth/SystemConfig.js';
 import { generateEmployeeCode } from '../src/Utils/Auth/customerAuthUtils.js';
 import PlatformOwner from '../src/models/Tenant/PlatformOwner.model.js';
+import Tenant from '../src/models/Tenant/Tenant.model.js';
 
 import Location from '../src/models/Location/Location.js';
 
@@ -690,88 +691,90 @@ async function runMasterSetup() {
     console.log('✅ Connected to MongoDB successfully\n');
 
     // --------------------------------------------------------------------------
-    // STEP 1: Core System Users & Identity (SuperAdmin & Platform Owner)
+    // STEP 1: Platform Owner Account (Global Root Administrator)
     // --------------------------------------------------------------------------
+    
     console.log('───────────────────────────────────────────────────────────────────────────');
-    console.log('STEP 1: SuperAdmin & Platform Owner Accounts');
+    console.log('STEP 1: Platform Owner Account (Global Root Administrator)');
     console.log('───────────────────────────────────────────────────────────────────────────');
 
-    let superAdmin = await Employee.findOne({ EmployeeType: 'SUPERADMIN' });
-    if (!superAdmin) {
-      console.log('Creating initial SuperAdmin account...');
-      const superAdminData = {
-        username: 'Ruchica G',
-        employeeName: 'Ruchica',
-        email: 'ruchica@digibysr.com',
-        password: 'director',
-        phone: '9899119993',
-        address: 'Hauz Khas new delhi india',
-        country: 'India',
-        pincode: '123456',
-        EmployeeType: 'SUPERADMIN',
-        Department: { name: 'SUPERADMIN', refId: null },
-        isActive: true,
-        pageAccess: [],
-        accessPermissions: [],
-        profile: { dateOfJoining: new Date() }
-      };
-
-      let code = generateEmployeeCode(superAdminData.employeeName);
-      while (await Employee.findOne({ employeeCode: code })) {
-        code = generateEmployeeCode(superAdminData.employeeName);
-      }
-      superAdminData.employeeCode = code;
-
-      superAdmin = new Employee(superAdminData);
-      await superAdmin.save();
-      console.log(`✅ SuperAdmin created: ${superAdmin.email} (${superAdmin.username})`);
-    } else {
-      console.log(`ℹ️  SuperAdmin already exists: ${superAdmin.email} (${superAdmin.username})`);
-    }
-
-    const platformOwnerEmail = 'owner@digibysr.com';
-    let platformOwnerEmployee = await Employee.findOne({ email: platformOwnerEmail });
+    let platformOwnerEmployee = await Employee.findOne({ EmployeeType: 'PLATFORM_OWNER' });
     if (!platformOwnerEmployee) {
-      console.log('Creating Platform Owner employee account...');
-      platformOwnerEmployee = new Employee({
-        employeeName: 'Platform Owner',
-        username: 'platformowner',
-        email: platformOwnerEmail,
-        password: 'Owner@2026',
-        phone: '0000000000',
-        address: 'Platform HQ',
-        country: 'India',
-        EmployeeType: 'PLATFORM_OWNER',
-        employeeCode: `PO${Date.now()}`,
-        tenantId: null,
-        isActive: true,
-        pageAccess: [],
-        accessPermissions: []
+      const fallbackEmail = (process.env.PLATFORM_OWNER_EMAIL || 'owner@digibysr.com').toLowerCase().trim();
+      const existingCandidate = await Employee.findOne({
+        $or: [{ email: fallbackEmail }, { username: 'platformowner' }]
       });
-      await platformOwnerEmployee.save();
-      console.log(`✅ Platform Owner Employee created: ${platformOwnerEmail}`);
+
+      if (existingCandidate) {
+        console.log(`Promoting existing employee (${existingCandidate.email}) to EmployeeType: 'PLATFORM_OWNER'...`);
+        existingCandidate.EmployeeType = 'PLATFORM_OWNER';
+        existingCandidate.tenantId = null;
+        existingCandidate.isActive = true;
+        await existingCandidate.save({ validateBeforeSave: false });
+        platformOwnerEmployee = existingCandidate;
+        console.log(`✅ Updated existing employee to PLATFORM_OWNER: ${platformOwnerEmployee.email}`);
+      } else {
+        console.log('Creating Platform Owner employee account...');
+        let employeeCode = generateEmployeeCode('Platform Owner');
+        while (await Employee.findOne({ employeeCode })) {
+          employeeCode = generateEmployeeCode('Platform Owner');
+        }
+
+        platformOwnerEmployee = new Employee({
+          employeeName: 'Platform Owner',
+          username: 'platformowner',
+          email: fallbackEmail,
+          password: process.env.PLATFORM_OWNER_PASSWORD || 'Owner@2026',
+          phone: '0000000000',
+          address: 'Platform HQ',
+          country: 'India',
+          EmployeeType: 'PLATFORM_OWNER',
+          employeeCode,
+          tenantId: null,
+          isActive: true,
+          pageAccess: [],
+          accessPermissions: []
+        });
+        await platformOwnerEmployee.save();
+        console.log(`✅ Platform Owner Employee created: ${platformOwnerEmployee.email}`);
+      }
     } else {
-      console.log(`ℹ️  Platform Owner Employee already exists: ${platformOwnerEmail}`);
+      console.log(`ℹ️  Platform Owner Employee already exists: ${platformOwnerEmployee.email} (${platformOwnerEmployee.username || platformOwnerEmployee.employeeName})`);
     }
+
+    const platformOwnerEmail = platformOwnerEmployee.email;
 
     // Also ensure PlatformOwner model collection has a matching record
-    let poModelDoc = await PlatformOwner.findOne({ email: platformOwnerEmail });
+    let poModelDoc = await PlatformOwner.findOne({ email: platformOwnerEmail }) || await PlatformOwner.findOne({});
     if (!poModelDoc) {
       poModelDoc = new PlatformOwner({
-        name: 'Platform Owner',
+        name: platformOwnerEmployee.employeeName || 'Platform Owner',
         email: platformOwnerEmail,
-        password: 'Owner@2026',
-        phone: '0000000000',
+        password: process.env.PLATFORM_OWNER_PASSWORD || 'Owner@2026',
+        phone: platformOwnerEmployee.phone || '0000000000',
         isActive: true
       });
       await poModelDoc.save();
-      console.log(`✅ PlatformOwner record created in PlatformOwners collection`);
+      console.log(`✅ PlatformOwner record created in PlatformOwners collection: ${platformOwnerEmail}`);
     } else {
-      console.log(`ℹ️  PlatformOwner record already exists in PlatformOwners collection`);
+      if (poModelDoc.email !== platformOwnerEmail) {
+        poModelDoc.email = platformOwnerEmail;
+        await poModelDoc.save();
+      }
+      console.log(`ℹ️  PlatformOwner record verified in PlatformOwners collection: ${poModelDoc.email}`);
     }
 
-    const createdBy = superAdmin._id;
-    const defaultTenantId = superAdmin.tenantId || process.env.DEFAULT_TENANT_ID || 'DEFAULT';
+    const createdBy = platformOwnerEmployee._id;
+
+    // Check if any Tenant already exists in the database
+    const existingTenant = await Tenant.findOne({ status: 'ACTIVE' }) || await Tenant.findOne({});
+    const defaultTenantId = existingTenant?.tenantId || process.env.DEFAULT_TENANT_ID || 'GLOBAL';
+    if (existingTenant) {
+      console.log(`ℹ️  Found existing tenant in database: "${existingTenant.storeInformation?.storeName || existingTenant.tenantId}" (${existingTenant.tenantId})`);
+    } else {
+      console.log(`ℹ️  No tenants found in DB. Tenant-scoped seed masters will use fallback tenantId: "${defaultTenantId}"`);
+      console.log(`    (Note: Wholesaler SuperAdmins and store tenants are provisioned dynamically upon tenant registration).`);
+    }
 
     // --------------------------------------------------------------------------
     // STEP 2: System Config (SystemConfig)
@@ -1148,8 +1151,9 @@ async function runMasterSetup() {
     console.log('='.repeat(78));
     console.log(`
 Summary of Initialized Systems:
-  • SuperAdmin Account        : ${superAdmin.email}
-  • Platform Owner Account    : ${platformOwnerEmail}
+  • Platform Owner Account    : ${platformOwnerEmail} (tenantId: null)
+  • Wholesaler SuperAdmins    : Managed dynamically via Tenant Onboarding (registerTenant)
+  • Default / Active TenantId : ${defaultTenantId}
   • System Config Groups      : EmployeeType, Lab, Region
   • Indian States & UTs       : ${indianStates.length}
   • Customer GST & Biz Types  : ${gstTypes.length} GST Types, ${businessTypes.length} Business Types
