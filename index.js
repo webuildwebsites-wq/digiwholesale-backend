@@ -116,7 +116,7 @@ app.set('trust proxy', 1);
 
 export const limiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 1000,
+  max: 100000,
   message: {
     error: true,
     success: false,
