@@ -1,19 +1,14 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 
-// Auth & Org Models
 import Employee from '../src/models/Auth/Employee.js';
 import Department from '../src/models/Auth/Department.js';
 import SystemConfig from '../src/models/Auth/SystemConfig.js';
 import { generateEmployeeCode } from '../src/Utils/Auth/customerAuthUtils.js';
-
-// Tenant & Platform Owner Models
 import PlatformOwner from '../src/models/Tenant/PlatformOwner.model.js';
 
-// Geographic & Location Models
 import Location from '../src/models/Location/Location.js';
 
-// Customer Dropdown & Master Models
 import State from '../src/models/Product/State.js';
 import GSTType from '../src/models/Product/GSTType.js';
 import BusinessType from '../src/models/Product/BusinessType.js';
@@ -27,11 +22,9 @@ import Lab from '../src/models/Product/Lab.js';
 import SpecificLab from '../src/models/Product/SpecificLab.js';
 import FittingCenter from '../src/models/Product/FittingCenter.js';
 
-// Catalog Brand & Category Models
 import Brand from '../src/models/Product/Brand.js';
 import Category from '../src/models/Product/Category.js';
 
-// Order Dropdown Models
 import ProductBrand from '../src/models/order/ProductBrand.js';
 import ProductCategory from '../src/models/order/ProductCategory.js';
 import ProductCoating from '../src/models/order/ProductCoating.js';
@@ -41,11 +34,9 @@ import ProductType from '../src/models/order/ProductType.js';
 import FrameType from '../src/models/order/FrameType.js';
 import Tint from '../src/models/order/Tint.js';
 
-// Accounting Models
 import Account from '../src/models/Accounting/Account.model.js';
 import BankAccount from '../src/models/Accounting/BankAccount.model.js';
 
-// Vendor & Settings Models
 import Vendor from '../src/models/Vendor.model.js';
 import Settings from '../src/models/SETTING/Settings.js';
 
