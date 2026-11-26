@@ -10,6 +10,8 @@
     "start": "DOTENV_CONFIG_QUIET=true nodemon index.js",
     "dev": "DOTENV_CONFIG_QUIET=true nodemon index.js",
     "setup": "node scripts/setup.js",
+    "setup:master": "node scripts/masterSetup.js",
+    "seed:master": "node scripts/masterSetup.js",
     "create-superadmin": "node scripts/createSuperAdmin.js",
     "seed-brands": "node scripts/seedBrandsCategories.js",
     "seed-dropdowns": "node scripts/seedCustomerDropdowns.js",

@@ -289,9 +289,10 @@ export const customerBasicRegistration = async (req, res) => {
       if (!businessTypeDoc) {
         return sendErrorResponse(res, 404, "INVALID_REF_ID", `BusinessType with refId ${businessTypeRefId} does not exist`);
       }
-      if (businessTypeDoc.name !== businessType) {
+      if (businessTypeDoc.name.trim().toLowerCase() !== businessType.trim().toLowerCase()) {
         return sendErrorResponse(res, 400, "NAME_MISMATCH", `Incorrect BusinessType name for refId ${businessTypeRefId}. Expected: ${businessTypeDoc.name}, Received: ${businessType}`);
       }
+      businessType = businessTypeDoc.name;
     }
 
     // Validate zone
@@ -322,9 +323,10 @@ export const customerBasicRegistration = async (req, res) => {
       if (!gstTypeDoc) {
         return sendErrorResponse(res, 404, "INVALID_REF_ID", `GSTType with refId ${gstTypeRefId} does not exist`);
       }
-      if (gstTypeDoc.name !== gstType) {
+      if (gstTypeDoc.name.trim().toLowerCase() !== gstType.trim().toLowerCase()) {
         return sendErrorResponse(res, 400, "NAME_MISMATCH", `Incorrect gstType name for refId ${gstTypeRefId}. Expected: ${gstTypeDoc.name}, Received: ${gstType}`);
       }
+      gstType = gstTypeDoc.name;
     }
 
     // Validate salesPerson
@@ -1226,42 +1228,47 @@ export const resubmitCorrectedCustomer = async (req, res) => {
     if (updateData.currentlyDealtBrands !== undefined) updateFields.currentlyDealtBrands = updateData.currentlyDealtBrands?.trim();
     if (updateData.minSalesValue !== undefined) updateFields.minSalesValue = updateData.minSalesValue;
 
-    if (updateData.BusinessType && updateData.BusinessTypeRefId) {
-      const businessType = await BusinessType.findById(updateData.BusinessTypeRefId);
+    const btName = updateData.BusinessType || updateData.businessType;
+    const btRefId = updateData.BusinessTypeRefId || updateData.businessTypeRefId;
+    if (btName && btRefId) {
+      const businessType = await BusinessType.findById(btRefId);
       if (!businessType) {
-        return sendErrorResponse(res, 404, 'INVALID_REF_ID', `BusinessType with refId ${updateData.BusinessTypeRefId} does not exist`);
+        return sendErrorResponse(res, 404, 'INVALID_REF_ID', `BusinessType with refId ${btRefId} does not exist`);
       }
-      if (businessType.name !== updateData.BusinessType) {
-        return sendErrorResponse(res, 400, 'NAME_MISMATCH', `Incorrect BusinessType name for refId ${updateData.BusinessTypeRefId}`);
+      if (businessType.name.trim().toLowerCase() !== btName.trim().toLowerCase()) {
+        return sendErrorResponse(res, 400, 'NAME_MISMATCH', `Incorrect BusinessType name for refId ${btRefId}. Expected: ${businessType.name}, Received: ${btName}`);
       }
-      updateFields.BusinessType = {
-        name: updateData.BusinessType,
-        refId: updateData.BusinessTypeRefId,
+      updateFields.businessType = {
+        name: businessType.name,
+        refId: businessType._id,
       };
+      updateFields.BusinessType = updateFields.businessType;
     }
 
     // Validate gstType
-    if (updateData.gstType && updateData.gstTypeRefId) {
-      const gstTypeDoc = await GSTType.findById(updateData.gstTypeRefId);
+    const gtName = updateData.gstType || updateData.GSTType;
+    const gtRefId = updateData.gstTypeRefId || updateData.GSTTypeRefId;
+    if (gtName && gtRefId) {
+      const gstTypeDoc = await GSTType.findById(gtRefId);
       if (!gstTypeDoc) {
         return sendErrorResponse(
           res,
           404,
           'INVALID_REF_ID',
-          `GSTType with refId ${updateData.gstTypeRefId} does not exist`
+          `GSTType with refId ${gtRefId} does not exist`
         );
       }
-      if (gstTypeDoc.name !== updateData.gstType) {
+      if (gstTypeDoc.name.trim().toLowerCase() !== gtName.trim().toLowerCase()) {
         return sendErrorResponse(
           res,
           400,
           'NAME_MISMATCH',
-          `Incorrect gstType name for refId ${updateData.gstTypeRefId}`
+          `Incorrect gstType name for refId ${gtRefId}. Expected: ${gstTypeDoc.name}, Received: ${gtName}`
         );
       }
       updateFields.gstType = {
-        name: updateData.gstType,
-        refId: updateData.gstTypeRefId,
+        name: gstTypeDoc.name,
+        refId: gstTypeDoc._id,
       };
     }
 
