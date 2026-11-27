@@ -47,10 +47,9 @@ import ledgerRouter from './src/routes/Accounting/ledger.routes.js';
 import accountRouter from './src/routes/Accounting/account.routes.js';
 import agingRouter from './src/routes/Accounting/aging.routes.js';
 import gstReportRouter from './src/routes/Accounting/gstReport.routes.js';
-import batchRouter       from './src/routes/Product/batch.routes.js';
-import externalRouter   from './src/routes/external.routes.js';
+import batchRouter from './src/routes/Product/batch.routes.js';
+import externalRouter from './src/routes/external.routes.js';
 import notificationRouter from './src/routes/Notification/notification.routes.js';
-// import { redis } from './src/core/config/Redis/redisClient.js'; 
 
 if (!process.env.PASSWORD_SECRET) {
   console.error('FATAL: PASSWORD_SECRET environment variable is not set. Server cannot start.');
@@ -114,33 +113,26 @@ app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.set('trust proxy', 1);
 
-// export const limiter = rateLimit({
-//   windowMs: 1 * 60 * 1000,
-//   max: 100000,
-//   message: {
-//     error: true,
-//     success: false,
-//     message: 'Too many requests from this IP, please try again later.'
-//   },
-//   standardHeaders: true,
-//   legacyHeaders: false,
-//   handler: async (req, res, next) => {
-//     const forwarded = req.headers['x-forwarded-for'];
-//     const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded) || req.ip || req.socket?.remoteAddress;
-//     try {
-//       await redis.set(`blocked:${ip}`, 'true', 'EX', 900);
-//     } catch (error) {
-//       console.error('Error blocking IP:', error);
-//     }
-//     return res.status(429).json({
-//       error: true,
-//       success: false,
-//       message: 'Too many requests from this IP, please try again later.'
-//     });
-//   }
-// });
+export const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 100000,
+  message: {
+    error: true,
+    success: false,
+    message: 'Too many requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    return res.status(429).json({
+      error: true,
+      success: false,
+      message: 'Too many requests from this IP, please try again later.'
+    });
+  }
+});
 
-// app.use(limiter);
+app.use(limiter);
 
 try {
   app.get("/", (req, res) => {

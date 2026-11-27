@@ -103,6 +103,10 @@ const BulkOrderItemSchema = new mongoose.Schema(
             default: "ACTIVE",
         },
 
+        powerRangeSummary: String,
+        isGroupedVariant: { type: Boolean, default: false },
+        groupedVariants: { type: Array, default: [] },
+
         tint: String,
         coating: String,
         expiry: String,
